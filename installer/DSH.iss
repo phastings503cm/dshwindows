@@ -73,6 +73,11 @@ ArchitecturesInstallIn64BitMode=arm64
 #else
 ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible
+  #if VER >= EncodeVer(7,0,0)
+; Inno Setup 7 can build the setup program itself as 64-bit. (The ARM64 installer stays 32-bit,
+; which every ARM64 Windows runs.)
+SetupArchitecture=x64
+  #endif
 #endif
 
 [Languages]
