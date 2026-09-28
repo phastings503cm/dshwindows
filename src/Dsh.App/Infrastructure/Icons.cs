@@ -78,10 +78,6 @@ public static class Icons
     public const string Play = "\uE768";
     public const string Mail = "\uE715";
 
-    /// <summary>A four-point sparkle (the assistant's mark), for Path.Data.</summary>
-    public const string SparkleGeometry =
-        "M 8,0 C 8.6,4.6 11.4,7.4 16,8 C 11.4,8.6 8.6,11.4 8,16 C 7.4,11.4 4.6,8.6 0,8 C 4.6,7.4 7.4,4.6 8,0 Z";
-
     /// <summary>Glyph for a tool call, so a transcript is scannable at a glance.</summary>
     public static string ForTool(string name) => name switch
     {

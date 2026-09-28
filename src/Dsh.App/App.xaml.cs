@@ -42,7 +42,11 @@ public partial class App : Application
             }
         }
 
-        if (selfTest is not null) Environment.SetEnvironmentVariable("DSH_HOME", selfTest.Home);
+        if (selfTest is not null)
+        {
+            Environment.SetEnvironmentVariable("DSH_HOME", selfTest.Home);
+            selfTest.Prepare();
+        }
         FontResolver.Apply(Resources);
         // Deleting a skill is recoverable, like everything else deleted from the app.
         SkillManager.RecycleBin = ShellIntegration.MoveToRecycleBin;
@@ -107,6 +111,11 @@ public partial class App : Application
     {
         var path = WriteCrashLog(e.Exception, "ui");
         e.Handled = true;
+        if (SelfTest.Current is { } test)
+        {
+            test.Fail("unhandled", e.Exception);
+            return;
+        }
         // Keep going: a failed redraw should not cost the user their chats. The log says what broke.
         try
         {

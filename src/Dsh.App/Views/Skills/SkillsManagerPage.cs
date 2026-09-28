@@ -76,6 +76,7 @@ public sealed class SkillsManagerPage : UserControl
             model.Host.RefreshDrafts();
             Reload();
         }));
+        foreach (FrameworkElement child in footer.Children) child.VerticalAlignment = VerticalAlignment.Center;
         DockPanel.SetDock(footer, Dock.Bottom);
         page.Children.Add(footer);
 

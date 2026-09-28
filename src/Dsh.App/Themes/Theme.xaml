@@ -12,6 +12,8 @@
     <CornerRadius x:Key="CardCorner">8</CornerRadius>
     <sys:Double x:Key="TranscriptMaxWidth">800</sys:Double>
     <sys:Double x:Key="MetaFontSize">11.5</sys:Double>
+    <!-- The assistant's mark: a four-point sparkle. -->
+    <Geometry x:Key="SparkleGeometry">M 8,0 C 8.6,4.6 11.4,7.4 16,8 C 11.4,8.6 8.6,11.4 8,16 C 7.4,11.4 4.6,8.6 0,8 C 4.6,7.4 7.4,4.6 8,0 Z</Geometry>
 
     <infra:BoolToVisibilityConverter x:Key="BoolToVisibility" />
     <infra:NullToVisibilityConverter x:Key="NullToVisibility" />

@@ -21,6 +21,11 @@ public sealed class CodeEditorView : UserControl
     private CodeDocument? _document;
     private SyntaxColorizer? _colorizer;
     private readonly Dictionary<CodeDocument, (int Caret, double X, double Y)> _positions = new();
+    private readonly Border _replaceBar = new() { Visibility = Visibility.Collapsed, Padding = new Thickness(8, 6, 8, 6), BorderThickness = new Thickness(0, 0, 0, 1) };
+    private readonly TextBox _find = new() { Width = 220, Padding = new Thickness(6, 3, 6, 3) };
+    private readonly TextBox _replace = new() { Width = 220, Padding = new Thickness(6, 3, 6, 3), Margin = new Thickness(6, 0, 0, 0) };
+    private readonly CheckBox _matchCase = new() { Content = "Aa", ToolTip = "Match case", Margin = new Thickness(8, 0, 0, 0), VerticalAlignment = VerticalAlignment.Center };
+    private readonly TextBlock _replaceStatus = new() { Margin = new Thickness(10, 0, 0, 0), VerticalAlignment = VerticalAlignment.Center, FontSize = 11.5 };
 
     /// <summary>Line and column moved (for the status bar).</summary>
     public event Action? CaretMoved;
@@ -49,7 +54,20 @@ public sealed class CodeEditorView : UserControl
             _config.EditorFontSize = Math.Clamp(_config.EditorFontSize + (e.Delta > 0 ? 1 : -1), 8, 32);
             e.Handled = true;
         };
-        Content = _editor;
+        var root = new DockPanel();
+        DockPanel.SetDock(_replaceBar, Dock.Top);
+        root.Children.Add(_replaceBar);
+        root.Children.Add(_editor);
+        Content = root;
+        BuildReplaceBar();
+        _editor.PreviewKeyDown += (_, e) =>
+        {
+            if (e.Key == Key.H && Keyboard.Modifiers == ModifierKeys.Control)
+            {
+                ShowReplace();
+                e.Handled = true;
+            }
+        };
 
         ApplyOptions();
         ApplyTheme();
@@ -162,6 +180,116 @@ public sealed class CodeEditorView : UserControl
         _editor.TextArea.Caret.Location = new TextLocation(line, Math.Max(1, column));
         _editor.ScrollTo(line, column);
         FocusEditor();
+    }
+
+    // MARK: - Replace (Ctrl+H); Ctrl+F is AvalonEdit's own search panel
+
+    private void BuildReplaceBar()
+    {
+        _replaceBar.SetResourceReference(Border.BackgroundProperty, "LayerFillColorAltBrush");
+        _replaceBar.SetResourceReference(Border.BorderBrushProperty, "DividerStrokeColorDefaultBrush");
+        _replaceStatus.SetResourceReference(TextBlock.ForegroundProperty, "TextFillColorSecondaryBrush");
+        Placeholder.SetText(_find, "Find");
+        Placeholder.SetText(_replace, "Replace with");
+        var one = new Button { Content = "Replace", Padding = new Thickness(10, 3, 10, 3), Margin = new Thickness(8, 0, 0, 0) };
+        one.Click += (_, _) => ReplaceNext();
+        var all = new Button { Content = "Replace All", Padding = new Thickness(10, 3, 10, 3), Margin = new Thickness(6, 0, 0, 0) };
+        all.Click += (_, _) => ReplaceAll();
+        var close = new Button { Content = Icons.Close, FontSize = 9, ToolTip = "Close (Esc)", Margin = new Thickness(6, 0, 0, 0) };
+        close.SetResourceReference(StyleProperty, "IconButton");
+        close.Click += (_, _) => HideReplace();
+        var row = new StackPanel { Orientation = Orientation.Horizontal };
+        foreach (var element in new UIElement[] { _find, _replace, _matchCase, one, all, _replaceStatus }) row.Children.Add(element);
+        var dock = new DockPanel();
+        DockPanel.SetDock(close, Dock.Right);
+        dock.Children.Add(close);
+        dock.Children.Add(row);
+        _replaceBar.Child = dock;
+        _replaceBar.PreviewKeyDown += (_, e) =>
+        {
+            if (e.Key == Key.Escape)
+            {
+                HideReplace();
+                e.Handled = true;
+            }
+            else if (e.Key == Key.Enter)
+            {
+                if (Keyboard.Modifiers.HasFlag(ModifierKeys.Control) && Keyboard.Modifiers.HasFlag(ModifierKeys.Alt)) ReplaceAll();
+                else ReplaceNext();
+                e.Handled = true;
+            }
+        };
+    }
+
+    public void ShowReplace()
+    {
+        if (_document is null) return;
+        var selected = _editor.SelectedText;
+        if (selected.Length > 0 && !selected.Contains('\n')) _find.Text = selected;
+        _replaceBar.Visibility = Visibility.Visible;
+        _replaceStatus.Text = "";
+        _find.Focus();
+        _find.SelectAll();
+    }
+
+    private void HideReplace()
+    {
+        _replaceBar.Visibility = Visibility.Collapsed;
+        FocusEditor();
+    }
+
+    private StringComparison Comparison => _matchCase.IsChecked == true ? StringComparison.Ordinal : StringComparison.OrdinalIgnoreCase;
+
+    /// <summary>Replace the current match (if the selection is one) and move to the next.</summary>
+    private void ReplaceNext()
+    {
+        if (_document is null || _find.Text.Length == 0) return;
+        var document = _document.Document;
+        if (string.Equals(_editor.SelectedText, _find.Text, Comparison))
+        {
+            var start = _editor.SelectionStart;
+            document.Replace(start, _editor.SelectionLength, _replace.Text);
+            _editor.Select(start + _replace.Text.Length, 0);
+        }
+        var text = document.Text;
+        var from = Math.Min(_editor.SelectionStart + _editor.SelectionLength, text.Length);
+        var next = text.IndexOf(_find.Text, from, Comparison);
+        if (next < 0) next = text.IndexOf(_find.Text, 0, Comparison);
+        if (next < 0)
+        {
+            _replaceStatus.Text = "No more matches";
+            return;
+        }
+        _editor.Select(next, _find.Text.Length);
+        var location = document.GetLocation(next);
+        _editor.ScrollTo(location.Line, location.Column);
+        _replaceStatus.Text = "";
+    }
+
+    /// <summary>Replace every match as one undo step.</summary>
+    private void ReplaceAll()
+    {
+        if (_document is null || _find.Text.Length == 0) return;
+        var document = _document.Document;
+        var text = document.Text;
+        var matches = new List<int>();
+        for (var index = text.IndexOf(_find.Text, 0, Comparison); index >= 0; index = text.IndexOf(_find.Text, index + _find.Text.Length, Comparison))
+            matches.Add(index);
+        if (matches.Count == 0)
+        {
+            _replaceStatus.Text = "No matches";
+            return;
+        }
+        document.BeginUpdate();
+        try
+        {
+            for (var i = matches.Count - 1; i >= 0; i--) document.Replace(matches[i], _find.Text.Length, _replace.Text);
+        }
+        finally
+        {
+            document.EndUpdate();
+        }
+        _replaceStatus.Text = $"Replaced {matches.Count}";
     }
 
     /// <summary>Two-space files stay two-space: the tab width follows the file.</summary>

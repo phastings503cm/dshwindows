@@ -18,8 +18,10 @@ public static class Dialog
     /// window is closed).</summary>
     public static int Ask(string title, string message, params Choice[] choices)
     {
-        var window = Create(title);
         var cancelIndex = Array.FindIndex(choices, c => c.IsCancel);
+        // Unattended runs (the self-test) must never wait on a modal question.
+        if (SelfTest.Current is not null) return cancelIndex;
+        var window = Create(title);
         var result = cancelIndex;
         var panel = Body(title, message);
         panel.Children.Add(Buttons(choices, index =>
@@ -42,6 +44,7 @@ public static class Dialog
     /// <summary>Ask for a line of text; null when cancelled or empty.</summary>
     public static string? Prompt(string title, string message, string initial = "", string confirm = "OK")
     {
+        if (SelfTest.Current is not null) return null;
         var window = Create(title);
         var panel = Body(title, message);
         var box = new TextBox { Text = initial, Margin = new Thickness(0, 4, 0, 0), MinWidth = 320 };

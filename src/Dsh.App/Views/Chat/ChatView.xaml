@@ -16,7 +16,7 @@
                 </Grid.ColumnDefinitions>
                 <Grid x:Name="Marker" Width="18" Height="18" VerticalAlignment="Top" HorizontalAlignment="Left" Margin="0,2,0,0"
                       ToolTip="{Binding At, Converter={StaticResource Clock}}">
-                    <Path x:Name="Sparkle" Data="{x:Static infra:Icons.SparkleGeometry}" Stretch="Uniform" Width="14" Height="14"
+                    <Path x:Name="Sparkle" Data="{StaticResource SparkleGeometry}" Stretch="Uniform" Width="14" Height="14"
                           Fill="{DynamicResource TextFillColorSecondaryBrush}" />
                     <TextBlock x:Name="MarkerGlyph" Style="{StaticResource Glyph}" FontSize="14" Visibility="Collapsed" />
                 </Grid>
@@ -230,7 +230,7 @@
                     <ColumnDefinition Width="28" />
                     <ColumnDefinition Width="*" />
                 </Grid.ColumnDefinitions>
-                <Path Data="{x:Static infra:Icons.SparkleGeometry}" Stretch="Uniform" Width="14" Height="14" VerticalAlignment="Top"
+                <Path Data="{StaticResource SparkleGeometry}" Stretch="Uniform" Width="14" Height="14" VerticalAlignment="Top"
                       HorizontalAlignment="Left" Margin="0,3,0,0" Fill="{DynamicResource AccentTextFillColorPrimaryBrush}"
                       Opacity="{Binding Pulse}" />
                 <StackPanel Grid.Column="1">
