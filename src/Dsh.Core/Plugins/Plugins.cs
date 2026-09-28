@@ -108,9 +108,11 @@ public sealed class PluginTool(string plugin, PluginToolSpec declaration) : IToo
             case JsonValue v when v.GetValueKind() is JsonValueKind.True or JsonValueKind.False:
                 return v.GetValue<bool>() ? "true" : "false";
             case JsonValue v when v.GetValueKind() == JsonValueKind.Number:
-                return v.TryGetValue<long>(out var l)
-                    ? l.ToString(CultureInfo.InvariantCulture)
-                    : v.GetValue<double>().ToString("R", CultureInfo.InvariantCulture);
+                if (v.TryGetValue<long>(out var l)) return l.ToString(CultureInfo.InvariantCulture);
+                if (v.TryGetValue<double>(out var d)) return d.ToString("R", CultureInfo.InvariantCulture);
+                // A value built in code (int, decimal, float, ...) converts to neither: its JSON text is
+                // the number as written.
+                return v.ToJsonString();
             case JsonValue v when v.GetValueKind() == JsonValueKind.Null:
                 return "";
             default:
