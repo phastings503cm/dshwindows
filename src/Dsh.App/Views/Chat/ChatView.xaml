@@ -1,0 +1,534 @@
+<UserControl x:Class="Dsh.App.Views.Chat.ChatView"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:infra="clr-namespace:Dsh.App.Infrastructure"
+             xmlns:model="clr-namespace:Dsh.App.Model"
+             xmlns:chat="clr-namespace:Dsh.App.Views.Chat"
+             xmlns:core="clr-namespace:Dsh.Core;assembly=Dsh.Core"
+             AllowDrop="True" Background="{DynamicResource SolidBackgroundFillColorBaseBrush}">
+    <UserControl.Resources>
+        <!-- A message: role marker in the gutter, then the text. -->
+        <DataTemplate DataType="{x:Type model:MessageEntryVM}">
+            <Grid Margin="0,0,0,16">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="28" />
+                    <ColumnDefinition Width="*" />
+                </Grid.ColumnDefinitions>
+                <Grid x:Name="Marker" Width="18" Height="18" VerticalAlignment="Top" HorizontalAlignment="Left" Margin="0,2,0,0"
+                      ToolTip="{Binding At, Converter={StaticResource Clock}}">
+                    <Path x:Name="Sparkle" Data="{x:Static infra:Icons.SparkleGeometry}" Stretch="Uniform" Width="14" Height="14"
+                          Fill="{DynamicResource TextFillColorSecondaryBrush}" />
+                    <TextBlock x:Name="MarkerGlyph" Style="{StaticResource Glyph}" FontSize="14" Visibility="Collapsed" />
+                </Grid>
+                <Border x:Name="Bubble" Grid.Column="1" CornerRadius="8" HorizontalAlignment="Stretch">
+                    <Grid>
+                        <chat:MarkdownPresenter x:Name="Rich" Markdown="{Binding Text}" FontSize="14" />
+                        <TextBox x:Name="Plain" Style="{StaticResource SelectableText}" Text="{Binding Text, Mode=OneWay}" FontSize="14"
+                                 Visibility="Collapsed" />
+                    </Grid>
+                </Border>
+            </Grid>
+            <DataTemplate.Triggers>
+                <DataTrigger Binding="{Binding Role}" Value="{x:Static model:MessageRole.User}">
+                    <Setter TargetName="Bubble" Property="Background" Value="{DynamicResource CardBackgroundFillColorDefaultBrush}" />
+                    <Setter TargetName="Bubble" Property="BorderBrush" Value="{DynamicResource CardStrokeColorDefaultBrush}" />
+                    <Setter TargetName="Bubble" Property="BorderThickness" Value="1" />
+                    <Setter TargetName="Bubble" Property="Padding" Value="12,8" />
+                    <Setter TargetName="Rich" Property="Visibility" Value="Collapsed" />
+                    <Setter TargetName="Plain" Property="Visibility" Value="Visible" />
+                    <Setter TargetName="Sparkle" Property="Visibility" Value="Collapsed" />
+                    <Setter TargetName="MarkerGlyph" Property="Visibility" Value="Visible" />
+                    <Setter TargetName="MarkerGlyph" Property="Text" Value="{x:Static infra:Icons.Contact}" />
+                    <Setter TargetName="MarkerGlyph" Property="Foreground" Value="{DynamicResource AccentTextFillColorPrimaryBrush}" />
+                    <Setter TargetName="Marker" Property="Margin" Value="0,9,0,0" />
+                </DataTrigger>
+                <DataTrigger Binding="{Binding Role}" Value="{x:Static model:MessageRole.Notice}">
+                    <Setter TargetName="Bubble" Property="Background" Value="{DynamicResource SystemFillColorCautionBackgroundBrush}" />
+                    <Setter TargetName="Bubble" Property="Padding" Value="12,8" />
+                    <Setter TargetName="Sparkle" Property="Visibility" Value="Collapsed" />
+                    <Setter TargetName="MarkerGlyph" Property="Visibility" Value="Visible" />
+                    <Setter TargetName="MarkerGlyph" Property="Text" Value="{x:Static infra:Icons.Info}" />
+                    <Setter TargetName="MarkerGlyph" Property="Foreground" Value="{DynamicResource SystemFillColorCautionBrush}" />
+                    <Setter TargetName="Marker" Property="Margin" Value="0,9,0,0" />
+                    <Setter TargetName="Rich" Property="FontSize" Value="13" />
+                </DataTrigger>
+                <DataTrigger Binding="{Binding Role}" Value="{x:Static model:MessageRole.Error}">
+                    <Setter TargetName="Bubble" Property="Background" Value="{DynamicResource SystemFillColorCriticalBackgroundBrush}" />
+                    <Setter TargetName="Bubble" Property="Padding" Value="12,8" />
+                    <Setter TargetName="Sparkle" Property="Visibility" Value="Collapsed" />
+                    <Setter TargetName="MarkerGlyph" Property="Visibility" Value="Visible" />
+                    <Setter TargetName="MarkerGlyph" Property="Text" Value="{x:Static infra:Icons.Warning}" />
+                    <Setter TargetName="MarkerGlyph" Property="Foreground" Value="{DynamicResource SystemFillColorCriticalBrush}" />
+                    <Setter TargetName="Marker" Property="Margin" Value="0,9,0,0" />
+                    <Setter TargetName="Rich" Property="FontSize" Value="13" />
+                </DataTrigger>
+            </DataTemplate.Triggers>
+        </DataTemplate>
+
+        <!-- A tool call: one compact line, expandable to the full result. -->
+        <DataTemplate DataType="{x:Type model:ToolEntryVM}">
+            <Border x:Name="Card" Margin="28,0,0,12" CornerRadius="8" BorderThickness="1" Padding="8,6"
+                    Background="{DynamicResource CardBackgroundFillColorDefaultBrush}" BorderBrush="{DynamicResource CardStrokeColorDefaultBrush}">
+                <Border.ContextMenu>
+                    <ContextMenu>
+                        <MenuItem Header="Copy Output" Click="CopyToolOutput_Click" />
+                        <MenuItem Header="Copy Command / Path" Click="CopyToolPreview_Click" />
+                        <MenuItem Header="Open in Editor" Click="OpenToolFile_Click" />
+                        <MenuItem Header="Reveal in Explorer" Click="RevealToolFile_Click" />
+                    </ContextMenu>
+                </Border.ContextMenu>
+                <StackPanel>
+                    <Grid Background="Transparent" Cursor="Hand" MouseLeftButtonUp="ToolHeader_Click">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="20" />
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+                        <TextBlock x:Name="Glyph" Style="{StaticResource Glyph}" FontSize="12" Text="{Binding Glyph}" HorizontalAlignment="Left"
+                                   Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
+                        <TextBlock Grid.Column="1" Text="{Binding Label}" FontSize="12" FontWeight="SemiBold" Margin="0,0,8,0"
+                                   VerticalAlignment="Center" Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
+                        <TextBlock Grid.Column="2" Text="{Binding Preview, Converter={StaticResource HeadTruncate}, ConverterParameter=90}"
+                                   Style="{StaticResource MonoText}" VerticalAlignment="Center" TextTrimming="CharacterEllipsis"
+                                   ToolTip="{Binding Preview}" />
+                        <TextBlock Grid.Column="3" Text="{Binding Summary, Converter={StaticResource OneLine}}" Style="{StaticResource MetaText}"
+                                   MaxWidth="220" TextTrimming="CharacterEllipsis" Margin="10,0,0,0" VerticalAlignment="Center"
+                                   ToolTip="{Binding Summary}" />
+                        <Grid Grid.Column="4" Margin="8,0,2,0" VerticalAlignment="Center">
+                            <infra:Spinner Width="12" Height="12" Foreground="{DynamicResource AccentTextFillColorPrimaryBrush}"
+                                           Visibility="{Binding IsRunning, Converter={StaticResource BoolToVisibility}}" />
+                            <TextBlock x:Name="Chevron" Style="{StaticResource Glyph}" FontSize="9" Text="{x:Static infra:Icons.ChevronRight}"
+                                       Foreground="{DynamicResource TextFillColorTertiaryBrush}" Visibility="Collapsed" />
+                        </Grid>
+                    </Grid>
+                    <ItemsControl ItemsSource="{Binding Images}" Margin="0,6,0,0"
+                                  Visibility="{Binding Images.Count, Converter={StaticResource PositiveToVisibility}}">
+                        <ItemsControl.ItemsPanel>
+                            <ItemsPanelTemplate>
+                                <WrapPanel />
+                            </ItemsPanelTemplate>
+                        </ItemsControl.ItemsPanel>
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate>
+                                <Border CornerRadius="6" BorderThickness="1" BorderBrush="{DynamicResource CardStrokeColorDefaultBrush}"
+                                        Margin="0,0,8,6" Cursor="Hand" MouseLeftButtonUp="ToolImage_Click" ToolTip="Click to enlarge">
+                                    <Image Source="{Binding}" Height="150" Stretch="Uniform" />
+                                </Border>
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+                    <StackPanel x:Name="Details" Visibility="Collapsed">
+                        <Separator Margin="0,6" />
+                        <TextBox Style="{StaticResource SelectableText}" Text="{Binding Output, Mode=OneWay}" FontFamily="{StaticResource MonoFont}"
+                                 FontSize="12" TextWrapping="NoWrap" MaxHeight="280" HorizontalScrollBarVisibility="Auto"
+                                 VerticalScrollBarVisibility="Auto" infra:WheelBubbling.IsEnabled="False" />
+                    </StackPanel>
+                </StackPanel>
+            </Border>
+            <DataTemplate.Triggers>
+                <DataTrigger Binding="{Binding IsOk}" Value="True">
+                    <Setter TargetName="Glyph" Property="Foreground" Value="{DynamicResource SystemFillColorSuccessBrush}" />
+                </DataTrigger>
+                <DataTrigger Binding="{Binding IsOk}" Value="False">
+                    <Setter TargetName="Glyph" Property="Foreground" Value="{DynamicResource SystemFillColorCriticalBrush}" />
+                    <Setter TargetName="Card" Property="BorderBrush" Value="{DynamicResource SystemFillColorCriticalBrush}" />
+                </DataTrigger>
+                <MultiDataTrigger>
+                    <MultiDataTrigger.Conditions>
+                        <Condition Binding="{Binding HasOutput}" Value="True" />
+                        <Condition Binding="{Binding IsFinished}" Value="True" />
+                    </MultiDataTrigger.Conditions>
+                    <Setter TargetName="Chevron" Property="Visibility" Value="Visible" />
+                </MultiDataTrigger>
+                <DataTrigger Binding="{Binding IsExpanded}" Value="True">
+                    <Setter TargetName="Details" Property="Visibility" Value="Visible" />
+                    <Setter TargetName="Chevron" Property="Text" Value="{x:Static infra:Icons.ChevronDown}" />
+                </DataTrigger>
+            </DataTemplate.Triggers>
+        </DataTemplate>
+
+        <!-- The agent's plan. -->
+        <DataTemplate DataType="{x:Type model:TodosEntryVM}">
+            <Border Margin="28,0,0,12" Style="{StaticResource Card}">
+                <StackPanel>
+                    <DockPanel Margin="0,0,0,6">
+                        <TextBlock DockPanel.Dock="Right" Text="{Binding Progress}" Style="{StaticResource MetaText}" />
+                        <TextBlock Style="{StaticResource Glyph}" FontSize="12" Text="{x:Static infra:Icons.CheckList}" Margin="0,0,8,0"
+                                   Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
+                        <TextBlock Text="Plan" FontSize="12" FontWeight="SemiBold" Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
+                    </DockPanel>
+                    <ItemsControl ItemsSource="{Binding Items}">
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate DataType="{x:Type core:TodoItem}">
+                                <DockPanel Margin="0,2">
+                                    <TextBlock x:Name="State" DockPanel.Dock="Left" Style="{StaticResource Glyph}" FontSize="12" Margin="0,2,8,0"
+                                               VerticalAlignment="Top" Text="{x:Static infra:Icons.CircleRing}"
+                                               Foreground="{DynamicResource TextFillColorTertiaryBrush}" />
+                                    <TextBlock x:Name="Text" Text="{Binding Content}" TextWrapping="Wrap" />
+                                </DockPanel>
+                                <DataTemplate.Triggers>
+                                    <DataTrigger Binding="{Binding Status}" Value="{x:Static core:TodoStatus.InProgress}">
+                                        <Setter TargetName="State" Property="Text" Value="{x:Static infra:Icons.CircleFill}" />
+                                        <Setter TargetName="State" Property="Foreground" Value="{DynamicResource AccentTextFillColorPrimaryBrush}" />
+                                        <Setter TargetName="Text" Property="FontWeight" Value="SemiBold" />
+                                    </DataTrigger>
+                                    <DataTrigger Binding="{Binding Status}" Value="{x:Static core:TodoStatus.Completed}">
+                                        <Setter TargetName="State" Property="Text" Value="{x:Static infra:Icons.Completed}" />
+                                        <Setter TargetName="State" Property="Foreground" Value="{DynamicResource SystemFillColorSuccessBrush}" />
+                                        <Setter TargetName="Text" Property="TextDecorations" Value="Strikethrough" />
+                                        <Setter TargetName="Text" Property="Foreground" Value="{DynamicResource TextFillColorSecondaryBrush}" />
+                                    </DataTrigger>
+                                </DataTemplate.Triggers>
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+                </StackPanel>
+            </Border>
+        </DataTemplate>
+
+        <!-- The conversation was compacted to fit the context window. -->
+        <DataTemplate DataType="{x:Type model:CompactionEntryVM}">
+            <Border Margin="0,0,0,14" CornerRadius="8" BorderThickness="1" Padding="10,6"
+                    BorderBrush="{DynamicResource CardStrokeColorDefaultBrush}" Background="{DynamicResource SystemFillColorCautionBackgroundBrush}">
+                <Border.ContextMenu>
+                    <ContextMenu>
+                        <MenuItem Header="Copy Summary" Click="CopyCompaction_Click" />
+                    </ContextMenu>
+                </Border.ContextMenu>
+                <StackPanel>
+                    <DockPanel Background="Transparent" Cursor="Hand" MouseLeftButtonUp="Compaction_Click">
+                        <TextBlock x:Name="Chevron" DockPanel.Dock="Right" Style="{StaticResource Glyph}" FontSize="9"
+                                   Text="{x:Static infra:Icons.ChevronRight}" Foreground="{DynamicResource TextFillColorTertiaryBrush}" />
+                        <TextBlock Style="{StaticResource Glyph}" FontSize="12" Text="{x:Static infra:Icons.Cut}" Margin="0,0,8,0"
+                                   Foreground="{DynamicResource SystemFillColorCautionBrush}" />
+                        <TextBlock Style="{StaticResource MetaText}" VerticalAlignment="Center">
+                            <Run Text="Compacted" /> <Run Text="{Binding Removed, Mode=OneWay}" />
+                            <Run Text="earlier messages to fit the context window" />
+                        </TextBlock>
+                    </DockPanel>
+                    <StackPanel x:Name="Details" Visibility="Collapsed">
+                        <Separator Margin="0,6" />
+                        <TextBox Style="{StaticResource SelectableText}" Text="{Binding Summary, Mode=OneWay}" FontFamily="{StaticResource MonoFont}"
+                                 FontSize="12" MaxHeight="300" VerticalScrollBarVisibility="Auto" infra:WheelBubbling.IsEnabled="False" />
+                    </StackPanel>
+                </StackPanel>
+            </Border>
+            <DataTemplate.Triggers>
+                <DataTrigger Binding="{Binding IsExpanded}" Value="True">
+                    <Setter TargetName="Details" Property="Visibility" Value="Visible" />
+                    <Setter TargetName="Chevron" Property="Text" Value="{x:Static infra:Icons.ChevronDown}" />
+                </DataTrigger>
+            </DataTemplate.Triggers>
+        </DataTemplate>
+
+        <!-- While the agent works: what it is doing, and a live tail of its reasoning. -->
+        <DataTemplate DataType="{x:Type chat:ThinkingFooter}">
+            <Grid Margin="0,0,0,14" Visibility="{Binding IsVisible, Converter={StaticResource BoolToVisibility}}">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="28" />
+                    <ColumnDefinition Width="*" />
+                </Grid.ColumnDefinitions>
+                <Path Data="{x:Static infra:Icons.SparkleGeometry}" Stretch="Uniform" Width="14" Height="14" VerticalAlignment="Top"
+                      HorizontalAlignment="Left" Margin="0,3,0,0" Fill="{DynamicResource AccentTextFillColorPrimaryBrush}"
+                      Opacity="{Binding Pulse}" />
+                <StackPanel Grid.Column="1">
+                    <TextBlock Text="{Binding Headline}" Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
+                    <TextBlock Text="{Binding Tail}" FontSize="11.5" Foreground="{DynamicResource TextFillColorTertiaryBrush}"
+                               TextWrapping="Wrap" MaxHeight="48" TextTrimming="CharacterEllipsis" Margin="0,3,0,0"
+                               Visibility="{Binding Tail, Converter={StaticResource NullToVisibility}}" />
+                </StackPanel>
+            </Grid>
+        </DataTemplate>
+
+        <!-- Files this session's tools touched. -->
+        <DataTemplate DataType="{x:Type chat:FilesFooter}">
+            <StackPanel Margin="28,0,0,14" Visibility="{Binding IsVisible, Converter={StaticResource BoolToVisibility}}">
+                <TextBlock Text="Files changed" FontSize="12" FontWeight="SemiBold" Foreground="{DynamicResource TextFillColorSecondaryBrush}"
+                           Margin="0,0,0,6" />
+                <ItemsControl ItemsSource="{Binding Files}">
+                    <ItemsControl.ItemsPanel>
+                        <ItemsPanelTemplate>
+                            <WrapPanel />
+                        </ItemsPanelTemplate>
+                    </ItemsControl.ItemsPanel>
+                    <ItemsControl.ItemTemplate>
+                        <DataTemplate DataType="{x:Type chat:ChangedFileChip}">
+                            <Button Style="{StaticResource SubtleButton}" Padding="0" Margin="0,0,6,6" Click="ChangedFile_Click"
+                                    ToolTip="{Binding Tooltip}">
+                                <Button.ContextMenu>
+                                    <ContextMenu>
+                                        <MenuItem Header="Open in Editor" Click="ChangedFile_Click" />
+                                        <MenuItem Header="Reveal in Explorer" Click="RevealChangedFile_Click" />
+                                        <MenuItem Header="Copy Path" Click="CopyChangedFile_Click" />
+                                        <MenuItem Header="Mention in Chat" Click="MentionChangedFile_Click" />
+                                    </ContextMenu>
+                                </Button.ContextMenu>
+                                <Border Style="{StaticResource Chip}">
+                                    <StackPanel Orientation="Horizontal">
+                                        <Ellipse Width="7" Height="7" Fill="{Binding Tint}" Margin="0,0,6,0" VerticalAlignment="Center" />
+                                        <TextBlock Text="{Binding Name}" Style="{StaticResource MonoText}" FontSize="11.5" />
+                                    </StackPanel>
+                                </Border>
+                            </Button>
+                        </DataTemplate>
+                    </ItemsControl.ItemTemplate>
+                </ItemsControl>
+            </StackPanel>
+        </DataTemplate>
+    </UserControl.Resources>
+
+    <Grid>
+        <Grid.RowDefinitions>
+            <RowDefinition Height="*" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+        </Grid.RowDefinitions>
+
+        <!-- Transcript -->
+        <ItemsControl x:Name="Transcript" Grid.Row="0" Focusable="False"
+                      VirtualizingPanel.IsVirtualizing="True" VirtualizingPanel.VirtualizationMode="Standard"
+                      VirtualizingPanel.ScrollUnit="Pixel" VirtualizingPanel.CacheLength="2,2" VirtualizingPanel.CacheLengthUnit="Page"
+                      ScrollViewer.CanContentScroll="True">
+            <ItemsControl.Template>
+                <ControlTemplate TargetType="ItemsControl">
+                    <ScrollViewer x:Name="Scroller" Focusable="False" CanContentScroll="True" HorizontalScrollBarVisibility="Disabled"
+                                  VerticalScrollBarVisibility="Auto" Padding="0,20,0,8">
+                        <ItemsPresenter />
+                    </ScrollViewer>
+                </ControlTemplate>
+            </ItemsControl.Template>
+            <ItemsControl.ItemsPanel>
+                <ItemsPanelTemplate>
+                    <VirtualizingStackPanel />
+                </ItemsPanelTemplate>
+            </ItemsControl.ItemsPanel>
+            <ItemsControl.ItemContainerStyle>
+                <Style TargetType="ContentPresenter">
+                    <Setter Property="MaxWidth" Value="{StaticResource TranscriptMaxWidth}" />
+                    <Setter Property="Margin" Value="24,0" />
+                </Style>
+            </ItemsControl.ItemContainerStyle>
+        </ItemsControl>
+
+        <!-- First-run content for an empty chat. -->
+        <ScrollViewer x:Name="Starter" Grid.Row="0" VerticalScrollBarVisibility="Auto" Visibility="Collapsed">
+            <StackPanel MaxWidth="{StaticResource TranscriptMaxWidth}" Margin="24,48,24,24">
+                <DockPanel Margin="0,0,0,16">
+                    <Image Source="pack://application:,,,/Assets/logo-256.png" Width="40" Height="40" Margin="0,0,12,0" DockPanel.Dock="Left" />
+                    <StackPanel VerticalAlignment="Center">
+                        <TextBlock x:Name="StarterTitle" FontSize="19" FontWeight="SemiBold" />
+                        <TextBlock x:Name="StarterSubtitle" Style="{StaticResource MetaText}" Margin="0,2,0,0" />
+                    </StackPanel>
+                </DockPanel>
+                <ItemsControl x:Name="Suggestions">
+                    <ItemsControl.ItemTemplate>
+                        <DataTemplate DataType="{x:Type chat:Suggestion}">
+                            <Button Style="{StaticResource SubtleButton}" HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch"
+                                    Padding="0" Margin="0,0,0,8" Click="Suggestion_Click">
+                                <Border Style="{StaticResource Card}" Padding="12,10">
+                                    <DockPanel>
+                                        <TextBlock DockPanel.Dock="Left" Style="{StaticResource Glyph}" Text="{Binding Glyph}" Margin="0,0,12,0"
+                                                   Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
+                                        <TextBlock DockPanel.Dock="Right" Style="{StaticResource Glyph}" FontSize="10" Text="{x:Static infra:Icons.Send}"
+                                                   Foreground="{DynamicResource TextFillColorTertiaryBrush}" />
+                                        <TextBlock Text="{Binding Text}" TextWrapping="Wrap" />
+                                    </DockPanel>
+                                </Border>
+                            </Button>
+                        </DataTemplate>
+                    </ItemsControl.ItemTemplate>
+                </ItemsControl>
+                <TextBlock Style="{StaticResource MetaText}" Margin="2,8,0,0" TextWrapping="Wrap"
+                           Text="Type / for commands and skills. Drop files or paste an image to attach them. Shift+Enter adds a line." />
+            </StackPanel>
+        </ScrollViewer>
+
+        <!-- Permission question -->
+        <Border x:Name="GateHost" Grid.Row="1" Visibility="Collapsed" BorderThickness="0,1,0,0"
+                BorderBrush="{DynamicResource DividerStrokeColorDefaultBrush}" Background="{DynamicResource LayerFillColorDefaultBrush}">
+            <Border MaxWidth="{StaticResource TranscriptMaxWidth}" Margin="24,10" CornerRadius="8" Padding="14,10" BorderThickness="1"
+                    Background="{DynamicResource SystemFillColorCautionBackgroundBrush}" BorderBrush="{DynamicResource SystemFillColorCautionBrush}">
+                <StackPanel>
+                    <StackPanel Orientation="Horizontal" Margin="0,0,0,6">
+                        <TextBlock Style="{StaticResource Glyph}" Text="{x:Static infra:Icons.Shield}" Margin="0,0,8,0"
+                                   Foreground="{DynamicResource SystemFillColorCautionBrush}" />
+                        <TextBlock x:Name="GateTitle" Text="The agent needs permission" FontWeight="SemiBold" />
+                    </StackPanel>
+                    <TextBox x:Name="GateDetail" Style="{StaticResource SelectableText}" FontFamily="{StaticResource MonoFont}" FontSize="12"
+                             MaxHeight="180" VerticalScrollBarVisibility="Auto" infra:WheelBubbling.IsEnabled="False" />
+                    <DockPanel Margin="0,10,0,0">
+                        <Button x:Name="AllowButton" DockPanel.Dock="Right" Content="Allow Once" Padding="14,5" Margin="8,0,0,0"
+                                Style="{DynamicResource AccentButtonStyle}" Click="Allow_Click" ToolTip="Allow (Ctrl+Enter)" />
+                        <Button DockPanel.Dock="Right" Content="Deny" Padding="14,5" Click="Deny_Click" ToolTip="Deny (Esc)" />
+                        <TextBlock x:Name="GateTool" Style="{StaticResource MetaText}" VerticalAlignment="Center" />
+                    </DockPanel>
+                </StackPanel>
+            </Border>
+        </Border>
+
+        <!-- Composer -->
+        <Border Grid.Row="2" BorderThickness="0,1,0,0" BorderBrush="{DynamicResource DividerStrokeColorDefaultBrush}">
+            <StackPanel MaxWidth="{StaticResource TranscriptMaxWidth}" Margin="24,10,24,10">
+                <!-- Spark swap progress -->
+                <Border x:Name="SparkBanner" CornerRadius="8" Padding="10,6" Margin="0,0,0,6" Visibility="Collapsed"
+                        Background="{DynamicResource SystemFillColorCautionBackgroundBrush}">
+                    <StackPanel Orientation="Horizontal">
+                        <infra:Spinner Width="12" Height="12" Margin="0,0,8,0" Foreground="{DynamicResource SystemFillColorCautionBrush}" />
+                        <TextBlock x:Name="SparkText" FontSize="12" />
+                    </StackPanel>
+                </Border>
+                <!-- Active goal -->
+                <Border x:Name="GoalBanner" CornerRadius="8" Padding="10,6" Margin="0,0,0,6" Visibility="Collapsed"
+                        Background="{DynamicResource SystemFillColorAttentionBackgroundBrush}">
+                    <DockPanel>
+                        <TextBlock DockPanel.Dock="Right" Text="Ctrl+. to stop" Style="{StaticResource MetaText}" Margin="8,0,0,0" />
+                        <TextBlock Style="{StaticResource Glyph}" FontSize="12" Text="{x:Static infra:Icons.Flag}" Margin="0,0,8,0"
+                                   Foreground="{DynamicResource AccentTextFillColorPrimaryBrush}" />
+                        <TextBlock x:Name="GoalTitle" FontSize="12" FontWeight="SemiBold" Margin="0,0,8,0" />
+                        <TextBlock x:Name="GoalText" FontSize="12" Foreground="{DynamicResource TextFillColorSecondaryBrush}"
+                                   TextTrimming="CharacterEllipsis" />
+                    </DockPanel>
+                </Border>
+                <!-- What is running right now -->
+                <StackPanel x:Name="RunningToolLine" Orientation="Horizontal" Margin="2,0,0,6" Visibility="Collapsed">
+                    <infra:Spinner Width="12" Height="12" Margin="0,0,8,0" Foreground="{DynamicResource AccentTextFillColorPrimaryBrush}" />
+                    <TextBlock x:Name="RunningToolText" Style="{StaticResource MetaText}" TextTrimming="CharacterEllipsis" MaxWidth="700" />
+                </StackPanel>
+                <!-- Queued attachments -->
+                <ItemsControl x:Name="AttachmentList" Margin="0,0,0,6" Visibility="Collapsed">
+                    <ItemsControl.ItemsPanel>
+                        <ItemsPanelTemplate>
+                            <WrapPanel />
+                        </ItemsPanelTemplate>
+                    </ItemsControl.ItemsPanel>
+                    <ItemsControl.ItemTemplate>
+                        <DataTemplate DataType="{x:Type core:MessageAttachment}">
+                            <Border Style="{StaticResource Chip}" Margin="0,0,6,4" Padding="8,2,2,2" ToolTip="{Binding Name}">
+                                <StackPanel Orientation="Horizontal">
+                                    <TextBlock Style="{StaticResource Glyph}" FontSize="11" Margin="0,0,6,0" Text="{x:Static infra:Icons.Attach}"
+                                               Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
+                                    <TextBlock Text="{Binding Name}" Style="{StaticResource MonoText}" FontSize="11.5" MaxWidth="220"
+                                               TextTrimming="CharacterEllipsis" VerticalAlignment="Center" />
+                                    <Button Style="{StaticResource IconButton}" Content="{x:Static infra:Icons.Close}" FontSize="8"
+                                            MinWidth="20" MinHeight="20" Padding="3" Margin="4,0,0,0" Click="RemoveAttachment_Click"
+                                            ToolTip="Remove attachment" />
+                                </StackPanel>
+                            </Border>
+                        </DataTemplate>
+                    </ItemsControl.ItemTemplate>
+                </ItemsControl>
+
+                <!-- Input row -->
+                <Grid>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="Auto" />
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="Auto" />
+                    </Grid.ColumnDefinitions>
+                    <Button x:Name="AttachButton" Style="{StaticResource IconButton}" Content="{x:Static infra:Icons.Add}" VerticalAlignment="Bottom"
+                            Margin="0,0,6,3" Click="Attach_Click" ToolTip="Attach an image or file" />
+                    <Border x:Name="ComposerBorder" Grid.Column="1" CornerRadius="8" BorderThickness="1"
+                            Background="{DynamicResource ControlFillColorDefaultBrush}" BorderBrush="{DynamicResource ControlStrokeColorDefaultBrush}">
+                        <TextBox x:Name="Composer" AcceptsReturn="True" AcceptsTab="False" TextWrapping="Wrap" MinHeight="38" MaxHeight="200"
+                                 VerticalScrollBarVisibility="Auto" BorderThickness="0" Background="Transparent" Padding="8,9,8,8"
+                                 FontSize="14" SpellCheck.IsEnabled="True" VerticalContentAlignment="Top"
+                                 infra:Placeholder.Text="Ask the agent to do something — / for commands"
+                                 PreviewKeyDown="Composer_PreviewKeyDown" TextChanged="Composer_TextChanged"
+                                 GotKeyboardFocus="Composer_FocusChanged" LostKeyboardFocus="Composer_FocusChanged" />
+                    </Border>
+                    <Button x:Name="SendButton" Grid.Column="2" Margin="8,0,0,3" VerticalAlignment="Bottom" MinWidth="38" MinHeight="34"
+                            Padding="8,6" Style="{DynamicResource AccentButtonStyle}" Click="Send_Click" ToolTip="Send (Enter)">
+                        <TextBlock Style="{StaticResource Glyph}" Text="{x:Static infra:Icons.Send}" FontSize="14" />
+                    </Button>
+                    <Button x:Name="StopButton" Grid.Column="2" Margin="8,0,0,3" VerticalAlignment="Bottom" MinWidth="38" MinHeight="34"
+                            Padding="8,6" Click="Stop_Click" ToolTip="Stop the agent (Ctrl+.)" Visibility="Collapsed">
+                        <TextBlock x:Name="StopGlyph" Style="{StaticResource Glyph}" Text="{x:Static infra:Icons.Stop}" FontSize="14"
+                                   Foreground="{DynamicResource SystemFillColorCriticalBrush}" />
+                    </Button>
+                </Grid>
+
+                <!-- Slash command hints -->
+                <Popup x:Name="SlashPopup" PlacementTarget="{Binding ElementName=ComposerBorder}" Placement="Top" StaysOpen="True"
+                       AllowsTransparency="True" VerticalOffset="-4" Width="{Binding ActualWidth, ElementName=ComposerBorder}">
+                    <Border CornerRadius="8" BorderThickness="1" Padding="4" Background="{DynamicResource SolidBackgroundFillColorTertiaryBrush}"
+                            BorderBrush="{DynamicResource SurfaceStrokeColorFlyoutBrush}">
+                        <ListBox x:Name="SlashList" BorderThickness="0" Background="Transparent" MaxHeight="260"
+                                 ItemContainerStyle="{StaticResource NavListItem}" PreviewMouseLeftButtonUp="SlashList_Click">
+                            <ListBox.ItemTemplate>
+                                <DataTemplate DataType="{x:Type core:SlashCommand+Info}">
+                                    <DockPanel>
+                                        <TextBlock Text="{Binding Usage}" Style="{StaticResource MonoText}" MinWidth="130" Margin="0,0,12,0" />
+                                        <TextBlock Text="{Binding Summary}" Style="{StaticResource MetaText}" TextTrimming="CharacterEllipsis"
+                                                   VerticalAlignment="Center" />
+                                    </DockPanel>
+                                </DataTemplate>
+                            </ListBox.ItemTemplate>
+                        </ListBox>
+                    </Border>
+                </Popup>
+
+                <!-- Meta row: permissions, model, thinking, skills, project … context gauge, usage -->
+                <DockPanel Margin="0,8,0,0">
+                    <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Center">
+                        <Grid x:Name="Gauge" Width="64" Height="5" Margin="8,0,8,0" VerticalAlignment="Center" Background="Transparent">
+                            <Border CornerRadius="2.5" Background="{DynamicResource ControlStrongFillColorDisabledBrush}" Opacity="0.5" />
+                            <Border x:Name="GaugeFill" CornerRadius="2.5" HorizontalAlignment="Left" Width="0"
+                                    Background="{DynamicResource TextFillColorSecondaryBrush}" />
+                        </Grid>
+                        <TextBlock x:Name="GaugeText" Style="{StaticResource MetaText}" />
+                        <TextBlock x:Name="UsageText" Style="{StaticResource MetaText}" Margin="12,0,0,0" />
+                    </StackPanel>
+                    <ScrollViewer HorizontalScrollBarVisibility="Hidden" VerticalScrollBarVisibility="Disabled" Focusable="False">
+                        <StackPanel Orientation="Horizontal">
+                            <StackPanel x:Name="PresetInfo" Orientation="Horizontal" VerticalAlignment="Center" Margin="2,0,10,0">
+                                <TextBlock x:Name="PresetGlyph" Style="{StaticResource Glyph}" FontSize="12" Margin="0,0,5,0" />
+                                <TextBlock x:Name="PresetText" Style="{StaticResource MetaText}" />
+                            </StackPanel>
+                            <Button x:Name="ModelMenuButton" Style="{StaticResource SubtleButton}" Padding="6,3" Click="ModelMenu_Click">
+                                <StackPanel Orientation="Horizontal">
+                                    <TextBlock Style="{StaticResource Glyph}" FontSize="12" Text="{x:Static infra:Icons.Robot}" Margin="0,0,5,0"
+                                               Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
+                                    <TextBlock x:Name="ModelMenuText" Style="{StaticResource MetaText}" MaxWidth="240" TextTrimming="CharacterEllipsis" />
+                                </StackPanel>
+                            </Button>
+                            <Button x:Name="ThinkingButton" Style="{StaticResource SubtleButton}" Padding="6,3" Click="Thinking_Click">
+                                <StackPanel Orientation="Horizontal">
+                                    <TextBlock Style="{StaticResource Glyph}" FontSize="12" Text="{x:Static infra:Icons.Lightbulb}" Margin="0,0,5,0"
+                                               Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
+                                    <TextBlock x:Name="ThinkingText" Style="{StaticResource MetaText}" />
+                                </StackPanel>
+                            </Button>
+                            <Button x:Name="SkillsButton" Style="{StaticResource SubtleButton}" Padding="6,3" Click="Skills_Click">
+                                <StackPanel Orientation="Horizontal">
+                                    <TextBlock x:Name="SkillsGlyph" Style="{StaticResource Glyph}" FontSize="12" Text="{x:Static infra:Icons.Education}"
+                                               Margin="0,0,5,0" Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
+                                    <TextBlock x:Name="SkillsText" Style="{StaticResource MetaText}" Text="Skills" />
+                                    <Border x:Name="DraftsBadge" CornerRadius="7" Padding="5,0" Margin="5,0,0,0" Visibility="Collapsed"
+                                            Background="{DynamicResource SystemFillColorCautionBrush}">
+                                        <TextBlock x:Name="DraftsCount" FontSize="10" FontWeight="Bold" Foreground="White" />
+                                    </Border>
+                                </StackPanel>
+                            </Button>
+                            <Popup x:Name="SkillsPopup" PlacementTarget="{Binding ElementName=SkillsButton}" Placement="Top" StaysOpen="False"
+                                   AllowsTransparency="True" VerticalOffset="-6" />
+                            <StackPanel x:Name="ProjectInfo" Orientation="Horizontal" VerticalAlignment="Center" Margin="8,0,0,0">
+                                <TextBlock Style="{StaticResource Glyph}" FontSize="12" Text="{x:Static infra:Icons.Folder}" Margin="0,0,5,0"
+                                           Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
+                                <TextBlock x:Name="ProjectText" Style="{StaticResource MetaText}" MaxWidth="160" TextTrimming="CharacterEllipsis" />
+                            </StackPanel>
+                        </StackPanel>
+                    </ScrollViewer>
+                </DockPanel>
+            </StackPanel>
+        </Border>
+
+        <!-- Drop target hint -->
+        <Border x:Name="DropHint" Grid.RowSpan="3" Visibility="Collapsed" IsHitTestVisible="False" Margin="12" CornerRadius="12"
+                BorderThickness="2" BorderBrush="{DynamicResource AccentFillColorDefaultBrush}" Background="{DynamicResource SmokeFillColorDefaultBrush}">
+            <TextBlock Text="Drop files to attach them" FontSize="18" FontWeight="SemiBold" HorizontalAlignment="Center" VerticalAlignment="Center"
+                       Foreground="{DynamicResource TextFillColorPrimaryBrush}" />
+        </Border>
+    </Grid>
+</UserControl>
