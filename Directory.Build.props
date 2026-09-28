@@ -1,0 +1,20 @@
+<Project>
+  <!-- Shared by every project in the repository. -->
+  <PropertyGroup>
+    <LangVersion>latest</LangVersion>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <!-- Major.minor is set here; CI stamps the patch number (commits on the
+         default branch) so every release gets a unique, increasing version. -->
+    <VersionPrefix>0.7.0</VersionPrefix>
+    <Product>DSH for Windows</Product>
+    <Company>DSH</Company>
+    <Copyright>Copyright © DSH contributors</Copyright>
+    <RepositoryUrl>https://github.com/phastings503cm/dshwindows</RepositoryUrl>
+    <!-- Lets the WPF app compile on Linux/macOS build machines too. -->
+    <EnableWindowsTargeting>true</EnableWindowsTargeting>
+    <Deterministic>true</Deterministic>
+    <SatelliteResourceLanguages>en</SatelliteResourceLanguages>
+    <GenerateDocumentationFile>false</GenerateDocumentationFile>
+  </PropertyGroup>
+</Project>

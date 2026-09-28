@@ -1,0 +1,27 @@
+# Build output
+bin/
+obj/
+artifacts/
+publish/
+out/
+TestResults/
+*.binlog
+
+# IDE / editor
+.vs/
+.vscode/
+.idea/
+*.user
+*.suo
+*.userprefs
+*.DotSettings.user
+
+# OS noise
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Secrets / local config
+.env
+*.key
+*.pfx

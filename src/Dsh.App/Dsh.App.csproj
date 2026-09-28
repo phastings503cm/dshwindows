@@ -1,0 +1,33 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- The Windows app. It IS the harness: it runs the agent loop in-process
+       and talks straight to an OpenAI-compatible model server. -->
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net10.0-windows</TargetFramework>
+    <UseWPF>true</UseWPF>
+    <AssemblyName>DSH</AssemblyName>
+    <RootNamespace>Dsh.App</RootNamespace>
+    <ApplicationIcon>..\..\assets\dsh.ico</ApplicationIcon>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+    <!-- WPF's Fluent theme (ThemeMode) is still flagged experimental. -->
+    <NoWarn>$(NoWarn);WPF0001</NoWarn>
+    <!-- Faster cold start; the release pipeline publishes self-contained. -->
+    <TieredPGO>true</TieredPGO>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="AvalonEdit" Version="6.3.1.120" />
+    <PackageReference Include="CommunityToolkit.Mvvm" Version="8.4.2" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Dsh.Core\Dsh.Core.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Resource Include="..\..\assets\logo-256.png" Link="Assets\logo-256.png" />
+    <Resource Include="..\..\assets\dsh.ico" Link="Assets\dsh.ico" />
+  </ItemGroup>
+
+</Project>

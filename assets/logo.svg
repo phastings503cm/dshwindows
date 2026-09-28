@@ -1,0 +1,30 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#4338ca"/>
+      <stop offset="0.55" stop-color="#2563eb"/>
+      <stop offset="1" stop-color="#06b6d4"/>
+    </linearGradient>
+    <linearGradient id="ring" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#ffffff"/>
+      <stop offset="1" stop-color="#dbeafe"/>
+    </linearGradient>
+  </defs>
+
+  <!-- macOS-style squircle background -->
+  <rect x="0" y="0" width="1024" height="1024" rx="228" ry="228" fill="url(#bg)"/>
+
+  <!-- harness loop: a ring (the "harness") -->
+  <circle cx="512" cy="470" r="215" fill="none" stroke="url(#ring)" stroke-width="96"/>
+
+  <!-- connection nodes on the ring (agents being harnessed) -->
+  <circle cx="727" cy="470" r="66" fill="#ffffff"/>
+  <circle cx="358" cy="613" r="54" fill="#a5f3fc"/>
+  <circle cx="666" cy="613" r="54" fill="#a5f3fc"/>
+
+  <!-- the "d" stem rising through the ring -->
+  <rect x="470" y="255" width="84" height="430" rx="42" fill="#ffffff"/>
+
+  <!-- base bar: the grounding / ground truth -->
+  <rect x="322" y="792" width="380" height="72" rx="36" fill="url(#ring)"/>
+</svg>
