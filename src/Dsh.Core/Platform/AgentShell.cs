@@ -214,13 +214,18 @@ public sealed record AgentShell(ShellKind Kind, string Executable, string Displa
     }
 
     /// <summary>PowerShell reads the command from -EncodedCommand (UTF-16LE base64), which sidesteps
-    /// every quoting rule. The wrapper makes the output UTF-8 and turns failures into an exit code:
-    /// a failing native command's own code, otherwise 1 when the last statement failed.</summary>
+    /// every quoting rule. The wrapper makes the output UTF-8 plain text and turns failures into an
+    /// exit code: a failing native command's own code, otherwise 1 when the last statement failed.
+    ///
+    /// -OutputFormat Text matters: with -EncodedCommand and redirected output, PowerShell otherwise
+    /// writes errors to stderr as serialized CLIXML ("#&lt; CLIXML &lt;Objs ...&gt;"), which is noise to
+    /// the model. PlainText output rendering keeps PowerShell 7's error colouring out as well.</summary>
     internal static IEnumerable<string> PowerShellArguments(string command)
     {
         var script = new StringBuilder()
             .AppendLine("$ProgressPreference = 'SilentlyContinue'")
             .AppendLine("try { [Console]::OutputEncoding = [System.Text.Encoding]::UTF8; $OutputEncoding = [System.Text.Encoding]::UTF8 } catch { }")
+            .AppendLine("if ($PSStyle) { $PSStyle.OutputRendering = 'PlainText' }")
             .AppendLine(command)
             .AppendLine("$__dshOk = $?")
             .AppendLine("if ($LASTEXITCODE -is [int] -and $LASTEXITCODE -ne 0) { exit $LASTEXITCODE }")
@@ -228,7 +233,7 @@ public sealed record AgentShell(ShellKind Kind, string Executable, string Displa
             .AppendLine("exit 0")
             .ToString();
         var encoded = Convert.ToBase64String(Encoding.Unicode.GetBytes(script));
-        string[] common = ["-NoLogo", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass"];
+        string[] common = ["-NoLogo", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-OutputFormat", "Text"];
         // The Windows command line tops out at 32,767 characters; long scripts go through a file.
         if (encoded.Length < 28_000) return [.. common, "-EncodedCommand", encoded];
         var file = Path.Combine(Path.GetTempPath(), $"dsh-cmd-{Guid.NewGuid():N}.ps1");

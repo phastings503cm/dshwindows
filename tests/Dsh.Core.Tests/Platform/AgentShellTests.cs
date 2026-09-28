@@ -7,7 +7,7 @@ namespace Dsh.Core.Tests;
 public sealed class AgentShellTests
 {
     private static readonly string[] CommonPowerShellFlags =
-        ["-NoLogo", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass"];
+        ["-NoLogo", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-OutputFormat", "Text"];
 
     private static string Decode(string encoded) => Encoding.Unicode.GetString(Convert.FromBase64String(encoded));
 
@@ -30,6 +30,18 @@ public sealed class AgentShellTests
         // The command runs first, then its status is captured.
         Assert.True(Array.IndexOf(lines, command) < Array.IndexOf(lines, "$__dshOk = $?"));
         Assert.Contains("[Console]::OutputEncoding = [System.Text.Encoding]::UTF8", script);
+        Assert.Contains("if ($PSStyle) { $PSStyle.OutputRendering = 'PlainText' }", lines);
+    }
+
+    [Fact]
+    public void ErrorsComeBackAsTextNotClixml()
+    {
+        // With -EncodedCommand and redirected streams PowerShell defaults to CLIXML on stderr.
+        var args = AgentShell.PowerShellArguments("Write-Error boom").ToArray();
+        var format = Array.IndexOf(args, "-OutputFormat");
+        Assert.True(format >= 0);
+        Assert.Equal("Text", args[format + 1]);
+        Assert.True(format < Array.IndexOf(args, "-EncodedCommand"));
     }
 
     [Fact]
