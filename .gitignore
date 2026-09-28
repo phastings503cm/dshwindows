@@ -25,3 +25,6 @@ desktop.ini
 .env
 *.key
 *.pfx
+
+# Local agent worktrees
+.claude/worktrees/
