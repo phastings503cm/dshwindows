@@ -108,7 +108,7 @@ public sealed partial class WebFetchTool : IToolExecutor
         var s = JunkBlocks().Replace(html, " ");
         s = BlockBreaks().Replace(s, "\n");
         s = Tags().Replace(s, " ");
-        s = WebUtility.HtmlDecode(s).Replace(' ', ' ');
+        s = WebUtility.HtmlDecode(s).Replace((char)0x00A0, ' ');
         s = Spaces().Replace(s, " ");
         s = BlankLines().Replace(s, "\n\n");
         return s.Trim();

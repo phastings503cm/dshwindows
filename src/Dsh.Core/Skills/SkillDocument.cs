@@ -124,7 +124,7 @@ public sealed class SkillDocument : IEquatable<SkillDocument>
     public static SkillDocument Parse(string raw)
     {
         var text = raw;
-        if (text.StartsWith('﻿')) text = text[1..];
+        if (text.StartsWith((char)0xFEFF)) text = text[1..];
         text = text.Replace("\r\n", "\n");
         var lines = text.Split('\n');
         if (lines.Length == 0 || lines[0].Trim() != "---") return new SkillDocument(text);
