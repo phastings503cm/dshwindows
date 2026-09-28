@@ -51,13 +51,17 @@ public class PseudoConsoleTests
         emulator.OnReply = reply => session.Write(reply);
 
         await Task.Delay(500);
-        session.Write("echo typed-through-conpty-\r");
+        // One command line typed in pieces, with cursor keys in between, then Enter: cmd echoes it
+        // and runs it, so the joined text shows up once the input has reached the shell.
+        session.Write("echo typed-through-conpty-");
         session.Write(Encoding.ASCII.GetBytes("42"));
         session.Write(TerminalInput.Encode(TerminalKey.Home)!);
         session.Write(TerminalInput.Encode(TerminalKey.End)!);
         session.Write("\r");
         var finished = await Task.WhenAny(seen.Task, Task.Delay(TimeSpan.FromSeconds(30)));
-        Assert.Same(seen.Task, finished);
+        string transcript;
+        lock (emulator) transcript = emulator.Transcript;
+        Assert.True(seen.Task == finished, $"The typed command never showed up. Terminal:\n{transcript}");
         session.Resize(80, 20);
         session.Write("exit\r");
     }

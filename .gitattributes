@@ -1,0 +1,8 @@
+# LF in the working tree on every OS. Multi-line string literals in the C# sources become text the
+# app writes (skill READMEs, templates, prompts), so a CRLF checkout on Windows, where releases are
+# built, would change what the app produces compared with what the tests check.
+* text=auto eol=lf
+
+*.png binary
+*.ico binary
+*.bmp binary
