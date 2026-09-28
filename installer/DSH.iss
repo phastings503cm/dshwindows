@@ -1,4 +1,4 @@
-; DSH for Windows installer (Inno Setup 6).
+; DSH for Windows installer (Inno Setup 6.3 or later, including Inno Setup 7).
 ;
 ; Built by scripts/package.ps1:
 ;   ISCC /DAppVersion=0.7.123 /DArch=x64 /DSourceDir=...\publish\win-x64\DSH /DOutputDir=...\artifacts installer\DSH.iss
@@ -6,6 +6,10 @@
 ; Installs per user by default (no administrator rights, no UAC prompt) into
 ; %LOCALAPPDATA%\Programs\DSH; choosing "install for all users" in the dialog uses Program Files.
 ; User data (%APPDATA%\DSH: settings, conversations, skills) is never touched by install or uninstall.
+
+#if VER < EncodeVer(6,3,0)
+  #error Inno Setup 6.3 or later is required (x64compatible architecture identifiers).
+#endif
 
 #ifndef AppVersion
   #define AppVersion "0.0.0"
@@ -47,8 +51,16 @@ OutputBaseFilename=DSH-{#AppVersion}-win-{#Arch}-setup
 SetupIconFile=..\assets\dsh.ico
 UninstallDisplayIcon={app}\{#AppExe}
 UninstallDisplayName={#AppName}
+#if VER >= EncodeVer(6,6,0)
+; Follows the Windows light/dark setting, like the app. The logo PNGs have transparent corners so
+; they sit cleanly on either background; several sizes keep them sharp at 100/150/200% scaling.
+WizardStyle=modern dynamic
+WizardImageFile=wizard-large.png,wizard-large-150.png,wizard-large-2x.png
+WizardSmallImageFile=wizard-small.png,wizard-small-150.png,wizard-small-2x.png
+#else
 WizardStyle=modern
 WizardSmallImageFile=wizard-small.bmp,wizard-small-2x.bmp
+#endif
 Compression=lzma2/max
 SolidCompression=yes
 CloseApplications=yes

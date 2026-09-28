@@ -27,11 +27,11 @@ jobs:
     runs-on: windows-latest
     timeout-minutes: 60
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           fetch-depth: 0
 
-      - uses: actions/setup-dotnet@v4
+      - uses: actions/setup-dotnet@v5
         with:
           dotnet-version: "10.0.x"
 
@@ -54,8 +54,11 @@ jobs:
       - name: Install Inno Setup
         shell: pwsh
         run: |
-          $known = @("${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe", "$env:ProgramFiles\Inno Setup 6\ISCC.exe") | Where-Object { Test-Path $_ }
-          if (-not $known) { choco install innosetup --no-progress -y }
+          if (-not (./scripts/find-iscc.ps1)) {
+            choco install innosetup --no-progress -y
+            if ($LASTEXITCODE -ne 0) { throw 'Installing Inno Setup failed.' }
+          }
+          Write-Host "Inno Setup compiler: $(./scripts/find-iscc.ps1)"
 
       - name: Package
         shell: pwsh
@@ -65,14 +68,20 @@ jobs:
         shell: pwsh
         run: ./scripts/self-test.ps1 -Exe artifacts/publish/win-x64/DSH/DSH.exe -Output "$env:RUNNER_TEMP/selftest"
 
-      - name: Upload screenshots
+      - name: "Installer test: silent install, launch, uninstall"
+        shell: pwsh
+        run: ./scripts/installer-test.ps1 -Installer "artifacts/DSH-${{ steps.version.outputs.version }}-win-x64-setup.exe" -Output "$env:RUNNER_TEMP/installer-test"
+
+      - name: Upload screenshots and logs
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           name: screenshots-${{ steps.version.outputs.version }}
           path: |
             ${{ runner.temp }}/selftest/*.png
             ${{ runner.temp }}/selftest/*.txt
+            ${{ runner.temp }}/installer-test/*.log
+            ${{ runner.temp }}/installer-test/selftest/*.txt
           if-no-files-found: ignore
 
       - name: Release notes

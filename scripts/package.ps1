@@ -24,7 +24,7 @@ param(
 
 $ErrorActionPreference = 'Stop'
 $root = Split-Path -Parent $PSScriptRoot
-$out = Join-Path $root $Output
+$out = if ([System.IO.Path]::IsPathRooted($Output)) { $Output } else { Join-Path $root $Output }
 New-Item -ItemType Directory -Force -Path $out | Out-Null
 
 if (-not $Version) {
@@ -38,13 +38,9 @@ Write-Host "Packaging DSH $Version for $($Arch -join ', ')"
 
 $iscc = $null
 if (-not $SkipInstaller) {
-    $command = Get-Command iscc.exe -ErrorAction SilentlyContinue
-    if ($command) { $iscc = $command.Source }
-    if (-not $iscc) {
-        $iscc = @("${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe", "$env:ProgramFiles\Inno Setup 6\ISCC.exe", "$env:LOCALAPPDATA\Programs\Inno Setup 6\ISCC.exe") |
-            Where-Object { Test-Path $_ } | Select-Object -First 1
-    }
-    if (-not $iscc) { throw 'Inno Setup 6 (ISCC.exe) was not found. Install it (choco install innosetup) or pass -SkipInstaller.' }
+    $iscc = & (Join-Path $PSScriptRoot 'find-iscc.ps1')
+    if (-not $iscc) { throw 'Inno Setup (ISCC.exe) was not found. Install Inno Setup 6.3 or later (choco install innosetup) or pass -SkipInstaller.' }
+    Write-Host "Using $iscc"
 }
 
 Add-Type -AssemblyName System.IO.Compression.FileSystem
@@ -52,11 +48,11 @@ Add-Type -AssemblyName System.IO.Compression.FileSystem
 foreach ($a in $Arch) {
     $rid = "win-$a"
     # Publish into a folder named DSH so the portable zip unpacks to DSH\DSH.exe.
-    $publish = Join-Path $out "publish\$rid\DSH"
+    $publish = [System.IO.Path]::Combine($out, 'publish', $rid, 'DSH')
     if (Test-Path $publish) { Remove-Item -Recurse -Force $publish }
 
     $readyToRun = if ($SkipReadyToRun) { 'false' } else { 'true' }
-    dotnet publish (Join-Path $root 'src\Dsh.App\Dsh.App.csproj') -c Release -r $rid --self-contained true `
+    dotnet publish ([System.IO.Path]::Combine($root, 'src', 'Dsh.App', 'Dsh.App.csproj')) -c Release -r $rid --self-contained true `
         "-p:Version=$Version" "-p:PublishReadyToRun=$readyToRun" -p:DebugType=none -p:DebugSymbols=false -o $publish
     if ($LASTEXITCODE -ne 0) { throw "dotnet publish failed for $rid" }
 
@@ -66,7 +62,7 @@ foreach ($a in $Arch) {
     Write-Host "  $zip"
 
     if (-not $SkipInstaller) {
-        & $iscc /Q "/DAppVersion=$Version" "/DArch=$a" "/DSourceDir=$publish" "/DOutputDir=$out" (Join-Path $root 'installer\DSH.iss')
+        & $iscc /Q "/DAppVersion=$Version" "/DArch=$a" "/DSourceDir=$publish" "/DOutputDir=$out" ([System.IO.Path]::Combine($root, 'installer', 'DSH.iss'))
         if ($LASTEXITCODE -ne 0) { throw "Inno Setup failed for $rid" }
         Write-Host "  $(Join-Path $out "DSH-$Version-$rid-setup.exe")"
     }

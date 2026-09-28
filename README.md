@@ -172,7 +172,8 @@ dotnet test tests/Dsh.Core.Tests
 dotnet run --project src/Dsh.App
 ```
 
-To produce the release files locally (installers need [Inno Setup 6](https://jrsoftware.org/isinfo.php)):
+To produce the release files locally (installers need [Inno Setup](https://jrsoftware.org/isinfo.php) 6.3 or later;
+6 and 7 both work):
 
 ```powershell
 ./scripts/package.ps1                          # x64 + arm64: installers, portable zips, SHA256SUMS
@@ -190,16 +191,19 @@ a throwaway data folder and a demo project, and exits non-zero on any error. CI 
 | `src/Dsh.App` | The WPF app |
 | `tests/Dsh.Core.Tests` | xUnit tests (Windows-only ones are skipped elsewhere) |
 | `installer/DSH.iss` | Inno Setup script |
-| `scripts/` | Packaging and self-test scripts used by CI |
+| `scripts/` | Packaging, self-test and installer-test scripts used by CI |
 | `.github/workflows` | `ci.yml` (pull requests and branches), `release.yml` (default branch → GitHub release) |
 
 ## Release pipeline
 
 - **`ci.yml`** runs on pull requests and pushes to any branch other than the default one: core tests
   on Linux; on Windows a Release build, the full test suite (including the ConPTY, path and
-  PowerShell tests), a publish, and the UI self-test, with its screenshots uploaded as an artifact.
+  PowerShell tests), the x64 zip and installer, the UI self-test (screenshots are uploaded as an
+  artifact), and an installer test: silent install, launch the installed app, check the Start menu
+  and folder-menu entries, uninstall, and check nothing is left behind.
 - **`release.yml`** runs on every push to the default branch, whatever it is named: tests, packages
-  x64 and ARM64 (ReadyToRun, self-contained) into installers and portable zips, smoke-tests the
-  packaged app with the self-test, and publishes a GitHub release tagged `v<major>.<minor>.<commits>`
-  with checksums and notes built from the commits since the previous release. Bump the major/minor
-  in `Directory.Build.props` (`VersionPrefix`); the patch number counts itself.
+  x64 and ARM64 (ReadyToRun, self-contained) into installers and portable zips, runs the self-test
+  and the installer test on the packaged x64 build, and publishes a GitHub release tagged
+  `v<major>.<minor>.<commits>` with checksums and notes built from the commits since the previous
+  release. Bump the major/minor in `Directory.Build.props` (`VersionPrefix`); the patch number
+  counts itself.
