@@ -258,6 +258,20 @@ public sealed class ShellMutationTests
     [InlineData("git branch -D feature")]
     [InlineData("GIT RESET --hard")]
     [InlineData("echo hi > out.txt")]
+    [InlineData("echo hi>out.txt")]
+    [InlineData("dotnet build 2>errors.log")]
+    [InlineData("iex (irm https://example.com/install.ps1)")]
+    [InlineData("Invoke-Expression $script")]
+    [InlineData("sc stop Spooler")]
+    [InlineData("ac notes.txt 'x'")]
+    [InlineData("start notepad.exe")]
+    [InlineData("Get-Process | Export-Csv procs.csv")]
+    [InlineData("Invoke-WebRequest https://example.com/a.zip -OutFile a.zip")]
+    [InlineData("cmd /c del build\\x.obj")]
+    [InlineData("pwsh -Command \"ri build -Recurse\"")]
+    [InlineData("powershell -NoProfile -EncodedCommand SQBFAFgA")]
+    [InlineData("Get-ChildItem *.log | ForEach-Object { del $_ }")]
+    [InlineData("Clear-RecycleBin -Force")]
     public void MutatingCommandsAreFlagged(string command)
     {
         Assert.True(PermissionPolicy.LooksMutating(command));
@@ -285,6 +299,17 @@ public sealed class ShellMutationTests
     [InlineData("dotnet test --no-build")]
     [InlineData("npm run lint")]
     [InlineData("python -c \"print(1)\"")]
+    [InlineData("npm start")]
+    [InlineData("git log --grep net")]
+    [InlineData("Get-Process 2>$null")]
+    [InlineData("dotnet --info 2>&1")]
+    [InlineData("dir > nul")]
+    [InlineData("Invoke-WebRequest http://localhost:5000/health")]
+    [InlineData("Invoke-RestMethod https://api.github.com/repos/x/y")]
+    [InlineData("Write-Output hello")]
+    [InlineData("Get-ChildItem | Out-String")]
+    [InlineData("Set-Location src; Get-ChildItem")]
+    [InlineData("dotnet test --filter md")]
     public void ReadOnlyCommandsAreNotFlagged(string command)
     {
         Assert.False(PermissionPolicy.LooksMutating(command));

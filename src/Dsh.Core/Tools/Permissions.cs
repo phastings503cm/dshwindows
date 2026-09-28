@@ -155,28 +155,44 @@ public sealed partial class PermissionPolicy
     /// <summary>The Unix vocabulary (bash / Git Bash), matched as plain substrings.</summary>
     private static readonly string[] UnixMutating =
     [
-        "rm ", "sudo", "> ", ">>", "mv ", "cp ", "mkdir", "chmod", "chown", "dd ", "git push", "git commit",
+        "rm ", "sudo", "mv ", "cp ", "mkdir", "chmod", "chown", "dd ", "git push", "git commit",
         "git checkout", "git reset", "brew install", "pip install", "npm install", "git branch -d",
         "git rebase", "git merge",
     ];
 
+    /// <summary>A heuristic, not a parser: anything that could change something asks. Unknown
+    /// programs are assumed to be tools that read (compilers, test runners, git log); verbs, aliases,
+    /// nested shells and redirections that write are what trigger a question.</summary>
     public static bool LooksMutating(string command)
     {
         foreach (var m in UnixMutating)
         {
             if (command.Contains(m, StringComparison.Ordinal)) return true;
         }
-        return WindowsMutating().IsMatch(command);
+        return Redirection().IsMatch(command) || WindowsMutating().IsMatch(command);
     }
 
-    /// <summary>PowerShell / cmd.exe verbs and package managers, case-insensitive, matched as words so
-    /// "cmd /c" doesn't read as "md".</summary>
+    /// <summary>Output redirected into a file: "&gt; out.txt", "&gt;&gt;log", "2&gt;err.txt". Discarding
+    /// ("2&gt;$null", "&gt; nul", "2&gt;&amp;1") is not writing.</summary>
+    [GeneratedRegex(@">{1,2}(?!&)\s*(?!\$null\b|nul\b|NUL\b|/dev/null\b)[^\s|;&)]", RegexOptions.CultureInvariant)]
+    private static partial Regex Redirection();
+
+    /// <summary>PowerShell / cmd.exe verbs, aliases and package managers, case-insensitive, matched as
+    /// words so "cmd /c" doesn't read as "md".</summary>
     [GeneratedRegex(
-        @"\b(remove-item|move-item|copy-item|rename-item|new-item|set-content|add-content|out-file|clear-content|" +
-        @"set-itemproperty|new-itemproperty|remove-itemproperty|stop-process|restart-computer|stop-computer|" +
-        @"set-executionpolicy|install-module|install-package|uninstall-module|uninstall-package|start-process|" +
-        @"expand-archive|compress-archive|set-acl|new-service|remove-service)\b" +
-        @"|(^|[\s;&|(])(del|erase|rd|rmdir|ri|move|mi|copy|cpi|xcopy|robocopy|ren|rni|ni|md|taskkill|icacls|takeown|attrib|setx|mklink|format|shutdown)(\s|$)" +
+        // Cmdlets whose verb changes state (Set-Location, Invoke-WebRequest and friends only read).
+        @"\b(remove|set|new|clear|stop|restart|uninstall|install|disable|enable|register|unregister|update|publish|reset|move|copy|" +
+        @"rename|add|invoke|start|suspend|resume|mount|dismount|format|initialize|grant|revoke|unblock|protect|unprotect|restore|" +
+        @"send|save|export|tee|expand|compress|out)-(?!location\b|strictmode\b|psdebug\b|variable\b|webrequest\b|restmethod\b|" +
+        @"string\b|host\b|null\b|default\b|gridview\b)\w+" +
+        @"|\s-outfile\b" +
+        // cmd.exe built-ins, PowerShell aliases and system tools — in command position (including
+        // after "cmd /c" or "-Command"), so "npm start" or "git log --grep net" don't count.
+        @"|(^|[;&|({]|\s/[ckCK]\s|\s-c(ommand)?\s+[""']?)\s*(del|erase|rd|rmdir|ri|rm|move|mi|mv|copy|cpi|cp|xcopy|robocopy|ren|rni|ni|md|mkdir|taskkill|kill|spps|icacls|" +
+        @"takeown|attrib|setx|mklink|format|shutdown|iex|icm|saps|start|sasv|spsv|si|sc|ac|clc|diskpart|bcdedit|schtasks|net|netsh|" +
+        @"fsutil|cipher|dism|sfc|wmic|msiexec|regsvr32|rundll32)(\.exe)?(\s|$)" +
+        // An encoded PowerShell command cannot be read, so it cannot be judged read-only.
+        @"|\b(powershell|pwsh)(\.exe)?\b.*\s-(e|ec|en|enc|encodedcommand)\s" +
         @"|\b(winget|choco|scoop)\s+(install|uninstall|upgrade|remove)\b" +
         @"|\breg(\.exe)?\s+(add|delete|import|copy|restore)\b" +
         @"|\bnpm\s+(i|install|uninstall|ci|update|publish)\b|\b(yarn|pnpm)\s+(add|remove|install|up|upgrade)\b" +

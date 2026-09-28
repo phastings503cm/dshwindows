@@ -60,6 +60,8 @@ public sealed class AgentShellTests
             var script = File.ReadAllText(file);
             Assert.Contains(command, script);
             Assert.Contains("$__dshOk = $?", script);
+            // The script removes itself first, so %TEMP% doesn't collect one per long command.
+            Assert.StartsWith("Remove-Item -LiteralPath $PSCommandPath", script);
         }
         finally
         {

@@ -232,7 +232,10 @@ public sealed record AgentShell(ShellKind Kind, string Executable, string Displa
         // The Windows command line tops out at 32,767 characters; long scripts go through a file.
         if (encoded.Length < 28_000) return [.. common, "-EncodedCommand", encoded];
         var file = Path.Combine(Path.GetTempPath(), $"dsh-cmd-{Guid.NewGuid():N}.ps1");
-        File.WriteAllText(file, script, new UTF8Encoding(encoderShouldEmitUTF8Identifier: true));
+        // PowerShell parses the whole file before running it, so the script can remove itself first
+        // and nothing is left behind in %TEMP%.
+        var selfDeleting = "Remove-Item -LiteralPath $PSCommandPath -Force -ErrorAction SilentlyContinue" + Environment.NewLine + script;
+        File.WriteAllText(file, selfDeleting, new UTF8Encoding(encoderShouldEmitUTF8Identifier: true));
         return [.. common, "-File", file];
     }
 
