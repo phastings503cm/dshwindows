@@ -233,8 +233,23 @@ public static class FileWalk
             }
             if (IsHidden(info)) continue;
             var isDir = (info.Attributes & FileAttributes.Directory) != 0;
-            var isLink = info.LinkTarget is not null || (info.Attributes & FileAttributes.ReparsePoint) != 0;
-            yield return new Entry(info.Name, info.FullName, isDir, isLink);
+            yield return new Entry(info.Name, info.FullName, isDir, IsLink(info));
+        }
+    }
+
+    /// <summary>A symlink or junction — something that points elsewhere and is never followed.
+    /// Other reparse points (OneDrive's Files On-Demand, dedup, AppExecLink aliases) are ordinary
+    /// files and folders; treating them as links would hide a whole OneDrive-synced project.</summary>
+    public static bool IsLink(FileSystemInfo info)
+    {
+        try
+        {
+            return info.LinkTarget is not null;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            // Unreadable reparse data: err on the side of not following it.
+            return (info.Attributes & FileAttributes.ReparsePoint) != 0;
         }
     }
 

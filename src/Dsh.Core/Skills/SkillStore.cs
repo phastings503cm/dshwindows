@@ -168,13 +168,14 @@ internal static class SkillFiles
         }
     }
 
-    /// <summary>Whether <paramref name="info"/> is a symlink, junction or other reparse point.
-    /// Unknown counts as a link: links are never followed.</summary>
+    /// <summary>Whether <paramref name="info"/> is a symlink or junction. Unknown counts as a link:
+    /// links are never followed. Other reparse points are ordinary files — OneDrive's Files
+    /// On-Demand marks every synced file as one.</summary>
     public static bool IsLink(FileSystemInfo info)
     {
         try
         {
-            return info.LinkTarget is not null || (info.Attributes & FileAttributes.ReparsePoint) != 0;
+            return FileWalk.IsLink(info);
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
