@@ -253,11 +253,14 @@ public sealed class NetworkScannerTests
     [Fact]
     public async Task A24OfClosedPortsIsQuick()
     {
-        // 254 hosts × the default 11 ports. Loopback refuses at once, so this measures the scanner's
-        // own overhead, which must leave room for a real LAN's timeouts within a few seconds.
+        // 254 hosts × as many ports as a default scan. Loopback refuses at once, so this measures the
+        // scanner's own overhead, which must leave room for a real LAN's timeouts within a few seconds.
+        // Free ports rather than the default ones: every 127.x address is this machine, which may well
+        // run an SSH server or a model server itself (the Windows CI runner has OpenSSH on port 22).
         var targets = Enumerable.Range(1, 254).Select(i => IPAddress.Parse($"127.0.1.{i}")).ToList();
+        var ports = NetworkScanner.DefaultPorts.Select(p => p with { Port = FreePort.Get() }).ToList();
         var watch = Stopwatch.StartNew();
-        var found = await Collect(new ScanOptions { Targets = targets, ResolveNames = false, IncludeLoopback = false });
+        var found = await Collect(new ScanOptions { Targets = targets, Ports = ports, ResolveNames = false, IncludeLoopback = false });
         watch.Stop();
         Assert.Empty(found);
         Assert.True(watch.Elapsed < TimeSpan.FromSeconds(10), $"took {watch.Elapsed}");
