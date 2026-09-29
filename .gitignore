@@ -28,3 +28,7 @@ desktop.ini
 
 # Local agent worktrees
 .claude/worktrees/
+
+# Python bytecode from the guide art scripts
+__pycache__/
+*.pyc
