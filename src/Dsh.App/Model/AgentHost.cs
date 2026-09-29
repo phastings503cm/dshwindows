@@ -324,7 +324,7 @@ public sealed partial class AgentHost : ObservableObject
 
     // MARK: - Engine
 
-    private Engine BuildEngine(SessionVM vm, OpenAiClient client, int window, ThinkingLevel? thinking, SkillState skillState)
+    private Engine BuildEngine(SessionVM vm, IProviderClient client, int window, ThinkingLevel? thinking, SkillState skillState)
     {
         var sessionId = vm.Id;
         var workspace = vm.WorkspacePath ?? PermissionPolicy.HomeDirectory;
@@ -821,7 +821,7 @@ public sealed partial class AgentHost : ObservableObject
     }
 
     /// <summary>Every model client the host makes goes through here, so tests can swap the network.</summary>
-    private OpenAiClient MakeClient(ProviderProfile profile) => new(profile, HttpHandlerForTesting);
+    private IProviderClient MakeClient(ProviderProfile profile) => ProviderClients.Create(profile, HttpHandlerForTesting);
 
     /// <summary>Tests: answer model requests from this handler instead of the network.</summary>
     public HttpMessageHandler? HttpHandlerForTesting { get; set; }

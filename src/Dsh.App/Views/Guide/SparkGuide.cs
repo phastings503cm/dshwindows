@@ -20,6 +20,28 @@ public interface IGuideHost
     void FinishGuide();
 }
 
+/// <summary>A guide the setup wizard shows in place of its normal steps: its pages, the header's
+/// progress, and the footer's buttons.</summary>
+public interface IWizardGuide : IDisposable
+{
+    /// <summary>Identifies the page on screen (the wizard scrolls to the top when it changes).</summary>
+    object PageKey { get; }
+    int SectionCount { get; }
+    int SectionIndex { get; }
+    string Title { get; }
+    string StepText { get; }
+    string NextLabel { get; }
+    bool CanAdvance { get; }
+    /// <summary>The footer's second button ("Skip for now"), when the page has one.</summary>
+    string? SecondaryLabel { get; }
+    UIElement Render();
+    void Next();
+    void Back();
+    void Secondary();
+    /// <summary>Start the current page's own work once the window shows the guide.</summary>
+    void Activate();
+}
+
 /// <summary>The DGX Spark guide: a step-by-step, picture-per-page walk from a Spark in its box (or
 /// one to reinstall) to DSH chatting with a model on it, for someone who has never used a terminal.
 /// It finds the Spark on the network, installs Spark Swapper over SSH, explains and pins the
@@ -28,7 +50,7 @@ public interface IGuideHost
 ///
 /// Pages are rebuilt from state whenever something changes (like the rest of the wizard); live
 /// controls (logs, the scanner) are kept in fields and moved into each rebuilt page.</summary>
-public sealed partial class SparkGuide : IDisposable
+public sealed partial class SparkGuide : IWizardGuide
 {
     private readonly AppModel _model;
     private readonly IGuideHost _host;
@@ -60,6 +82,7 @@ public sealed partial class SparkGuide : IDisposable
     public void Activate() => OnShown();
 
     public GuidePage Page => _state.Page;
+    object IWizardGuide.PageKey => Page;
     public GuideState State => _state;
 
     // MARK: - Sections (the progress bar)

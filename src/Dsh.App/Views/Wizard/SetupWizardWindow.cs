@@ -52,9 +52,9 @@ public sealed class SetupWizardWindow : Window, IGuideHost
     private bool _showScanner;
     private string? _scanNote;
 
-    /// <summary>The DGX Spark guide, while it is shown instead of the normal steps.</summary>
-    private SparkGuide? _guide;
-    private GuidePage? _renderedGuidePage;
+    /// <summary>A guide (DGX Spark, Amazon Bedrock) while it is shown instead of the normal steps.</summary>
+    private IWizardGuide? _guide;
+    private object? _renderedGuidePage;
 
     private readonly StackPanel _progress = new() { Orientation = Orientation.Horizontal };
     private readonly TextBlock _stepTitle = Ui.Text("", 12.5, FontWeights.SemiBold, wrap: false);
@@ -134,20 +134,26 @@ public sealed class SetupWizardWindow : Window, IGuideHost
         _guide?.Dispose();
         var saved = resume ? GuideState.Load() : null;
         if (!resume) GuideState.Clear();
-        _guide = new SparkGuide(_model, this, saved);
+        ShowGuide(new SparkGuide(_model, this, saved));
+    }
+
+    /// <summary>Show <paramref name="guide"/> in place of the normal steps.</summary>
+    private void ShowGuide(IWizardGuide guide)
+    {
+        _guide = guide;
         // The guide's pages carry pictures: give them room, within the screen.
         var area = SystemParameters.WorkArea;
         if (Width < 900) Width = Math.Min(900, area.Width);
         if (Height < 760) Height = Math.Min(760, area.Height);
         Render();
-        if (SelfTest.Current is null) _guide.Activate();
+        if (SelfTest.Current is null) guide.Activate();
     }
 
     /// <summary>For the self-test: the guide on <paramref name="page"/>, with sample state.</summary>
     internal void ShowGuideDemo(GuidePage page)
     {
-        if (_guide is null) StartGuide(resume: false);
-        _guide!.ShowDemo(page);
+        if (_guide is not SparkGuide) StartGuide(resume: false);
+        ((SparkGuide)_guide!).ShowDemo(page);
     }
 
     /// <summary>For the self-test: scroll the page to a fraction of its height.</summary>
@@ -176,7 +182,7 @@ public sealed class SetupWizardWindow : Window, IGuideHost
         // The guide saved the model route itself; don't overwrite it with this window's draft.
         _model.Config.WizardCompleted = true;
         if (_model.Host.Sessions.Count == 0) _model.NewChat();
-        GuideState.Clear();
+        if (_guide is SparkGuide) GuideState.Clear();
         DialogResult = true;
     }
 
@@ -395,9 +401,9 @@ public sealed class SetupWizardWindow : Window, IGuideHost
             RenderChrome();
             _frame.MaxWidth = 700;
             _body.Content = guide.Render();
-            if (_renderedGuidePage != guide.Page)
+            if (!Equals(_renderedGuidePage, guide.PageKey))
             {
-                _renderedGuidePage = guide.Page;
+                _renderedGuidePage = guide.PageKey;
                 _scroll.ScrollToTop();
             }
             return;
