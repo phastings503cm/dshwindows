@@ -300,8 +300,22 @@ public sealed class ProcessLiveTests : IDisposable
         var start = await Start(new { command = "echo pinging-now& ping -n 120 127.0.0.1" }, cmd);
         var id = ProcessToolTests.FirstId(start);
         await WaitForMarker(start, "pinging-now", 90);
-        await Write(new { id, keys = new[] { "ctrl-c" }, wait = 1 });
-        await WaitUntilExited(id, TimeSpan.FromSeconds(60));
+        // Wait for ping itself (its lines name the address in any language): a Ctrl+C that lands
+        // while cmd is still between "echo" and "ping" is swallowed by cmd, and ping runs on.
+        var afterMarker = start.IndexOf("\nFirst output:\n", StringComparison.Ordinal) is var at and >= 0 ? start[at..] : "";
+        if (Occurrences(afterMarker, "127.0.0.1") == 0)
+        {
+            var read = await Read(new { id, until = "127.0.0.1", timeout = 60 });
+            Assert.True(read.Contains("Matched", StringComparison.Ordinal), $"ping never started:\n{read}");
+        }
+        // Like a user, press it again if the first one went unanswered.
+        var process = _manager.Get(id)!;
+        for (var attempt = 0; attempt < 3 && process.IsRunning; attempt++)
+        {
+            await Write(new { id, keys = new[] { "ctrl-c" }, wait = 1 });
+            await process.WaitForExitAsync(TimeSpan.FromSeconds(10));
+        }
+        await WaitUntilExited(id, TimeSpan.FromSeconds(30));
     }
 
     [WindowsFact]
