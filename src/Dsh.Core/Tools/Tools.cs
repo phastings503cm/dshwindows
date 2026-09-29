@@ -32,6 +32,10 @@ public sealed record ToolContext
     /// <summary>Background subagents this chat has launched (agent with run_in_background, agent_status,
     /// agent_stop). Null for subagents.</summary>
     public BackgroundAgents? BackgroundAgents { get; init; }
+    /// <summary>The credential vault and this chat's "ask first" approvals, so a subagent can use
+    /// {{vault:NAME}} exactly like its parent.</summary>
+    public CredentialVault? Vault { get; init; }
+    public VaultGrants VaultGrants { get; init; } = new();
 }
 
 public enum FileChangeKind { Created, Modified, Deleted }

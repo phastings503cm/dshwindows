@@ -56,7 +56,7 @@ public static class SkillGenerator
         - The body is what the agent should DO: a short goal, numbered steps, exact commands and paths, expected output, and the gotchas that actually bite. Be concrete; skip anything a capable agent already knows.
         - Keep it tight: usually 30–150 lines. Put long reference material in separate files and say when to read them ("see reference/api.md when …").
         - Verification: end with how to check the work is really done.
-        - Never include secrets, tokens, passwords, or personal data. Refer to environment variables instead.
+        - Never include secrets, tokens, passwords, or personal data. When a step needs a credential, refer to it from the user's credential vault as {{vault:NAME}} (e.g. `$env:OPENAI_API_KEY = '{{vault:OPENAI_API_KEY}}'`) — the harness fills the value in when the command runs — or to an environment variable.
         - Use only tools and commands that exist; do not invent flags.
         - name: lowercase letters, digits and single hyphens, at most 64 characters.
         """;

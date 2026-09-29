@@ -59,6 +59,8 @@ public sealed class AgentTool : IToolExecutor
         var engine = new Engine(client, subRegistry, SubagentPrompt(context.Workspace, context.Policy.Preset, context.Shell),
             config, context.Workspace, context.Policy, context.RequestPermission)
         {
+            Vault = context.Vault,
+            VaultGrants = context.VaultGrants,
             // Same window the parent resolved — without this, a long subagent task runs uncompacted
             // until it hits the server's hard limit. A subagent's run is one user message followed
             // by many tool round-trips, so it opts into the assistant-boundary rule (which still

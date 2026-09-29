@@ -168,6 +168,10 @@ public sealed class Engine
     /// <summary>Background subagents launched from this chat; their results are handed to the model
     /// automatically when they finish.</summary>
     public BackgroundAgents? BackgroundAgents { get; init; }
+    /// <summary>Credentials the agent can use as {{vault:NAME}} (substituted when a tool runs, scrubbed
+    /// from every tool result), and this chat's "ask first" approvals.</summary>
+    public CredentialVault? Vault { get; init; }
+    public VaultGrants VaultGrants { get; init; } = new();
 
     public Engine(ILlmClient client, ToolRegistry registry, string systemPrompt, EngineConfig config,
                   string workspace, PermissionPolicy policy, PermissionGate permissionGate)
@@ -360,6 +364,23 @@ public sealed class Engine
                     continue;
                 }
 
+                // Credentials: {{vault:NAME}} becomes the real value only now, after the permission
+                // check saw the placeholder.
+                var arguments = call.Arguments;
+                switch (await ResolveVaultAsync(call).ConfigureAwait(false))
+                {
+                    case VaultResolution.Substituted substituted:
+                        arguments = substituted.Arguments;
+                        break;
+                    case VaultResolution.Refused refused:
+                        cancellationToken.ThrowIfCancellationRequested();
+                        messages.Add(LlmMessage.ToolOutput(call.Id, call.Name, refused.Message));
+                        progress?.Update(messages);
+                        sink(new EngineEvent.ToolFinished(call.Id, call.Name, false, Summary(refused.Message), refused.Message));
+                        continue;
+                }
+                cancellationToken.ThrowIfCancellationRequested();
+
                 var context = new ToolContext
                 {
                     Workspace = Workspace,
@@ -373,16 +394,20 @@ public sealed class Engine
                     Shell = Config.Shell,
                     RequestPermission = PermissionGate,
                     BackgroundAgents = BackgroundAgents,
+                    Vault = Vault,
+                    VaultGrants = VaultGrants,
                 };
                 var executor = Registry.Tool(call.Name);
                 // A (foreground) subagent is a whole task, not a quick tool call.
                 var timeout = call.Name == AgentTool.ToolName && Config.ToolTimeout < SubagentTimeout ? SubagentTimeout : Config.ToolTimeout;
                 var result = executor is not null
-                    ? await ExecuteWithTimeoutAsync(executor, call.Arguments, context, timeout, cancellationToken).ConfigureAwait(false)
+                    ? await ExecuteWithTimeoutAsync(executor, arguments, context, timeout, cancellationToken).ConfigureAwait(false)
                     : new ToolResult($"Error: unknown tool '{call.Name}'.");
 
                 if (result.Todos is not null) OnTodos(result.Todos);
-                var resultOutput = result.Output;
+                // No vault value ever reaches the model, the timeline or the logs.
+                var secrets = Vault?.ValuesForRedaction() ?? [];
+                var resultOutput = secrets.Count == 0 ? result.Output : VaultPlaceholders.Redact(result.Output, secrets);
                 if (result.Images.Count > 0)
                 {
                     if (Config.VisionEnabled)
@@ -495,6 +520,54 @@ public sealed class Engine
             messages.Add(new LlmMessage(MessageRole.User, notice) { ImageSource = "background agents" });
         }
         return true;
+    }
+
+    // MARK: - Vault
+
+    private abstract record VaultResolution
+    {
+        public sealed record None : VaultResolution;
+        public sealed record Substituted(string Arguments) : VaultResolution;
+        public sealed record Refused(string Message) : VaultResolution;
+    }
+
+    /// <summary>Resolve the {{vault:NAME}} placeholders in a call: unknown names and credentials the
+    /// user withheld refuse the call; "ask first" asks once per chat; the rest are substituted into
+    /// the arguments. Only tools that execute their arguments get real values — a subagent prompt, a
+    /// queued task, a skill draft or a todo would carry the secret to a model or to disk, so those keep
+    /// the placeholder.</summary>
+    private async Task<VaultResolution> ResolveVaultAsync(ToolCall call)
+    {
+        if (Vault is null || !VaultPlaceholders.SubstitutesInto(call.Name)) return new VaultResolution.None();
+        var names = VaultPlaceholders.Names(call.Arguments);
+        if (names.Count == 0) return new VaultResolution.None();
+        var values = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var name in names)
+        {
+            switch (Vault.Lookup(name))
+            {
+                case VaultLookup.Value { Access: VaultAccess.Never }:
+                    return new VaultResolution.Refused(
+                        $"Error: the user has made the credential {name} unavailable to the agent. Tell them what you needed it for.");
+                case VaultLookup.Value found:
+                    if (found.Access == VaultAccess.Ask && !VaultGrants.Has(name))
+                    {
+                        var approved = await PermissionGate(call.Id, call.Name,
+                            $"Use the credential {name} from the vault in {call.Name}").ConfigureAwait(false);
+                        if (!approved)
+                            return new VaultResolution.Refused(
+                                $"Permission denied: the user did not allow {name} to be used. Don't retry with it; say what you needed it for.");
+                        VaultGrants.Grant(name);
+                    }
+                    values[name] = found.Secret;
+                    break;
+                default:
+                    return new VaultResolution.Refused(
+                        $"Error: there is no credential named {name} in the vault. Use vault_search to see what's there; if it's missing, ask the user to add it to the Credentials Vault ({VaultPrompt.Shortcut}) — never to paste it into chat.");
+            }
+        }
+        foreach (var name in names) Vault.NoteUse(name);
+        return new VaultResolution.Substituted(VaultPlaceholders.Substitute(call.Arguments, values));
     }
 
     // MARK: - Permission
