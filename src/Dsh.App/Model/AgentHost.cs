@@ -633,45 +633,41 @@ public sealed partial class AgentHost : ObservableObject
     }
 
     /// <summary>/goal: run turns until the model writes GOAL_COMPLETE (or GOAL_BLOCKED), re-stating the
-    /// goal every round so it survives compaction.</summary>
+    /// goal every round so it survives compaction. There is no round cap.</summary>
     private async Task RunGoalAsync(SessionVM vm, string goal, CancellationToken ct)
     {
-        const int maxRounds = GoalProtocol.DefaultMaxRounds;
-        vm.Goal = new GoalState(goal, 1, maxRounds, DateTimeOffset.Now);
+        vm.Goal = new GoalState(goal, 1, DateTimeOffset.Now);
         var result = await TurnAsync(vm, GoalProtocol.Kickoff(goal), "🎯 /goal " + goal, [], ct);
         var round = 1;
         while (true)
         {
-            switch (GoalProtocol.Status(result.FinalText))
+            if (!result.HitIterationLimit)
             {
-                case GoalStatus.Complete:
+                switch (GoalProtocol.Status(result.LastReplyText))
                 {
-                    var text = $"✅ Goal complete after {round} round{(round == 1 ? "" : "s")}.";
-                    vm.Note(text);
-                    Log.RecordItem(vm.Id, "notice", text);
-                    return;
-                }
-                case GoalStatus.Blocked blocked:
-                {
-                    var text = $"⏸ Goal paused — the agent needs you: {blocked.Reason}\nReply, then send `/goal {TextUtil.Prefix(goal, 60)}…` again to resume.";
-                    vm.Note(text);
-                    Log.RecordItem(vm.Id, "notice", text);
-                    return;
+                    case GoalStatus.Complete:
+                    {
+                        var text = $"✅ Goal complete after {round} round{(round == 1 ? "" : "s")}.";
+                        vm.Note(text);
+                        Log.RecordItem(vm.Id, "notice", text);
+                        return;
+                    }
+                    case GoalStatus.Blocked blocked:
+                    {
+                        var text = $"⏸ Goal paused — the agent needs you: {blocked.Reason}\nReply, then send `/goal` to pick it back up.";
+                        vm.Note(text);
+                        Log.RecordItem(vm.Id, "notice", text);
+                        return;
+                    }
                 }
             }
             ct.ThrowIfCancellationRequested();
-            if (round >= maxRounds)
-            {
-                var text = $"Goal stopped after {maxRounds} rounds without being declared complete. Send `/goal` again to keep going.";
-                vm.Note(text, MessageRole.Error);
-                Log.RecordItem(vm.Id, "notice", text);
-                return;
-            }
+            var misplaced = !result.HitIterationLimit && GoalProtocol.MentionsMarker(result.LastReplyText);
             round++;
             vm.Goal = vm.Goal! with { Round = round };
             result = await TurnAsync(vm,
-                GoalProtocol.Continuation(goal, round, maxRounds, result.HitIterationLimit),
-                $"↻ Goal round {round}: keep going", [], ct);
+                GoalProtocol.Continuation(goal, round, result.HitIterationLimit, markerMisplaced: misplaced),
+                $"↻ round {round}: keep going", [], ct);
         }
     }
 

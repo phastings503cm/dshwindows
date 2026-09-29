@@ -84,7 +84,7 @@ public sealed record GateVM(string Id, string Name, string Detail)
     public string ToolLabel => Icons.ToolLabel(Name);
 }
 
-public sealed record GoalState(string Text, int Round, int MaxRounds, DateTimeOffset Started);
+public sealed record GoalState(string Text, int Round, DateTimeOffset Started);
 
 /// <summary>Observable state for one agent session, driven by <see cref="AgentHost"/>. UI-thread only.</summary>
 public sealed partial class SessionVM : ObservableObject

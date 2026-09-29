@@ -350,7 +350,7 @@ public partial class ChatView : UserControl
         var goal = _session?.Goal;
         GoalBanner.Visibility = goal is null ? Visibility.Collapsed : Visibility.Visible;
         if (goal is null) return;
-        GoalTitle.Text = $"Goal · round {goal.Round} of {goal.MaxRounds}";
+        GoalTitle.Text = $"Goal · round {goal.Round}";
         GoalText.Text = goal.Text;
         GoalBanner.ToolTip = goal.Text;
     }

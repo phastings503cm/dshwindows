@@ -29,6 +29,9 @@ public sealed record ToolContext
     public AgentShell Shell { get; init; } = AgentShell.Default;
     /// <summary>Asks the user for permission; subagents inherit the parent's hook.</summary>
     public PermissionGate RequestPermission { get; init; } = static (_, _, _) => Task.FromResult(true);
+    /// <summary>Background subagents this chat has launched (agent with run_in_background, agent_status,
+    /// agent_stop). Null for subagents.</summary>
+    public BackgroundAgents? BackgroundAgents { get; init; }
 }
 
 public enum FileChangeKind { Created, Modified, Deleted }
@@ -83,6 +86,13 @@ public sealed class ToolRegistry
 
     /// <summary>A copy of this registry with extra tools appended (plugin contributions).</summary>
     public ToolRegistry Adding(IEnumerable<IToolExecutor> extra) => new(_tools.Concat(extra));
+
+    /// <summary>A copy without the named tools (subagents lose agent).</summary>
+    public ToolRegistry Removing(params string[] names) => new(_tools.Where(t => !names.Contains(t.Name)));
+
+    /// <summary>Tools for background subagents (the agent tool starts them with run_in_background).
+    /// Added by the app next to a <see cref="Core.BackgroundAgents"/> pool.</summary>
+    public static IReadOnlyList<IToolExecutor> BackgroundAgentTools() => [new AgentStatusTool(), new AgentStopTool()];
 
     /// <summary>The built-in tool set. The agent tool is only offered at the top level: subagents
     /// don't spawn subagents (keeps the permission surface and cost predictable).</summary>

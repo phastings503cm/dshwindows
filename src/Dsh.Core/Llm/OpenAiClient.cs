@@ -1,4 +1,6 @@
+using System.Collections.Concurrent;
 using System.Net;
+using System.Net.Security;
 using System.Net.Http.Headers;
 using System.Runtime.CompilerServices;
 using System.Text;
@@ -22,8 +24,11 @@ namespace Dsh.Core;
 
 public sealed class OpenAiClient : ILlmClient
 {
-    /// <summary>A stream that sends nothing for this long is treated as dead.</summary>
-    public static TimeSpan IdleTimeout { get; set; } = TimeSpan.FromSeconds(120);
+    /// <summary>A stream that sends nothing for this long is treated as dead (and the call retried,
+    /// see RequestRetry). Generous: a local server prefilling a few hundred thousand tokens sends
+    /// nothing until the first token, and a timeout here only means a retry that starts the prefill
+    /// over.</summary>
+    public static TimeSpan IdleTimeout { get; set; } = TimeSpan.FromSeconds(600);
 
     // One pooled handler for the whole app. No automatic decompression: a gzip'd SSE stream is
     // buffered until the compressor flushes, which would stall live output.
@@ -34,13 +39,40 @@ public sealed class OpenAiClient : ILlmClient
         AutomaticDecompression = DecompressionMethods.None,
     };
 
+    /// <summary>Handlers for servers with a pinned self-signed certificate, one per fingerprint (clients
+    /// are made per request and per retry; the connection pools must not be).</summary>
+    private static readonly ConcurrentDictionary<string, SocketsHttpHandler> PinnedHandlers = new(StringComparer.OrdinalIgnoreCase);
+
     public ProviderProfile Profile { get; }
     private readonly HttpClient _http;
 
     public OpenAiClient(ProviderProfile profile, HttpMessageHandler? handler = null)
     {
         Profile = profile;
-        _http = new HttpClient(handler ?? SharedHandler, disposeHandler: false) { Timeout = Timeout.InfiniteTimeSpan };
+        _http = new HttpClient(handler ?? HandlerFor(profile.PinnedCertificate), disposeHandler: false)
+        {
+            Timeout = Timeout.InfiniteTimeSpan,
+        };
+    }
+
+    /// <summary>The shared handler, or one that also accepts exactly the pinned certificate when normal
+    /// trust fails (a self-signed server the user chose to trust — never "accept anything").</summary>
+    private static SocketsHttpHandler HandlerFor(string? pinned)
+    {
+        if (string.IsNullOrWhiteSpace(pinned)) return SharedHandler;
+        return PinnedHandlers.GetOrAdd(pinned.Trim(), fingerprint => new SocketsHttpHandler
+        {
+            PooledConnectionLifetime = TimeSpan.FromMinutes(5),
+            ConnectTimeout = TimeSpan.FromSeconds(15),
+            AutomaticDecompression = DecompressionMethods.None,
+            SslOptions = new SslClientAuthenticationOptions
+            {
+                RemoteCertificateValidationCallback = (_, certificate, _, errors) =>
+                    errors == SslPolicyErrors.None
+                    || (certificate is not null && string.Equals(SparkSwapperClient.Fingerprint(certificate.GetRawCertData()),
+                                                                 fingerprint, StringComparison.OrdinalIgnoreCase)),
+            },
+        });
     }
 
     // MARK: ILlmClient
@@ -225,6 +257,10 @@ public sealed class OpenAiClient : ILlmClient
 
     private static readonly Regex[] OverflowPatterns =
     [
+        // SGLang: "The input (270000 tokens) is longer than the model's context length (262144 tokens)."
+        new(@"context length \((\d+) tokens\)", RegexOptions.IgnoreCase),
+        new(@"maximum context length of (\d+)", RegexOptions.IgnoreCase),
+        new(@"context length of (\d+)", RegexOptions.IgnoreCase),
         new(@"maximum context length is (\d+)", RegexOptions.IgnoreCase),
         new(@"context length is (\d+)", RegexOptions.IgnoreCase),
         new(@"exceed the maximum context length of (\d+)", RegexOptions.IgnoreCase),
@@ -260,7 +296,7 @@ public sealed class OpenAiClient : ILlmClient
 
     internal sealed record TurnResult(string Text, IReadOnlyList<ToolCall> Calls, string? Finish, LlmUsage? Usage);
 
-    private sealed class PendingCall
+    internal sealed class PendingCall
     {
         public string Id = "";
         public string Name = "";
@@ -290,6 +326,12 @@ public sealed class OpenAiClient : ILlmClient
         {
             throw LlmException.Connection(ex.InnerException?.Message ?? ex.Message, ex);
         }
+        catch (OperationCanceledException ex) when (!cancellationToken.IsCancellationRequested)
+        {
+            // Not our Stop: the connect timed out or the system dropped the request — worth a retry,
+            // not a reason to halt a queue.
+            throw LlmException.Connection("the request timed out", ex);
+        }
 
         using (response)
         {
@@ -310,13 +352,13 @@ public sealed class OpenAiClient : ILlmClient
                 // SGLang / vLLM report a context overflow as "This model's maximum context length
                 // is N tokens; however, you requested M ...".
                 if (OverflowLimit(body) is { } limit) throw LlmException.Overflow(limit, body);
+                // A proxy in front of the model (nginx's client_max_body_size) refusing the body:
+                // the conversation must shrink, like an overflow.
+                if (code == 413) throw LlmException.Overflow(0, "request too large for the server (HTTP 413)");
                 throw LlmException.Http(code, body);
             }
 
-            var text = new StringBuilder();
-            LlmUsage? usage = null;
-            string? finish = null;
-            var pending = new SortedDictionary<int, PendingCall>();
+            var state = new StreamState();
 
             Stream stream;
             try
@@ -353,16 +395,42 @@ public sealed class OpenAiClient : ILlmClient
                     throw LlmException.Sse(ex.Message);
                 }
                 if (line is null) break;
-                ParseLine(line, text, ref usage, ref finish, pending, onText, onReasoning);
+                ParseLine(line, state, onText, onReasoning);
             }
 
-            var calls = pending.Select(entry => new ToolCall(
+            var status = (int)response.StatusCode;
+            // Not SSE at all: some servers ignore stream: true and answer with one JSON completion
+            // (or a JSON error).
+            if (!state.SawData && state.OtherBody.Length > 0)
+            {
+                ParsePlainBody(state.OtherBody.ToString(), state, status, onText);
+                if (state.Finish is null)
+                {
+                    // Something answered, but not a model (a proxy's HTML page, a wrong base URL):
+                    // retrying can't fix that.
+                    var snippet = TextUtil.Prefix(state.OtherBody.ToString().Replace("\r", "").Replace('\n', ' '), 200);
+                    throw LlmException.Http(status,
+                        $"unrecognised reply (is the base URL an OpenAI-compatible /v1?): {snippet}");
+                }
+            }
+            if (state.Finish == "error") throw LlmException.Http(500, "the server ended the reply with an error");
+            // Every OpenAI-compatible server ends a reply with a finish_reason and/or data: [DONE].
+            // Neither means the connection closed mid-reply (server restarted, proxy dropped it) — a
+            // failure worth retrying, not a short answer.
+            if (!state.SawDone && state.Finish is null)
+            {
+                throw LlmException.Sse(state.SawData
+                    ? "the reply was cut off before it finished"
+                    : "the server closed the connection without replying");
+            }
+
+            var calls = state.Pending.Select(entry => new ToolCall(
                     entry.Value.Id.Length == 0 ? $"call-{entry.Key}" : entry.Value.Id,
                     entry.Value.Name,
                     entry.Value.Args.Length == 0 ? "{}" : entry.Value.Args.ToString()))
                 .ToList();
 
-            var full = text.ToString();
+            var full = state.Text.ToString();
             // XML tool-call fallback: some backends (Qwen on Ollama without function calling, older
             // vLLM) emit tool blocks in the text instead.
             if (calls.Count == 0 && XmlToolCalls.ContainsBlock(full))
@@ -371,7 +439,7 @@ public sealed class OpenAiClient : ILlmClient
                 for (var i = 0; i < parsed.Count; i++)
                     calls.Add(new ToolCall($"xml-{i}", parsed[i].Name, parsed[i].ArgumentsJson));
             }
-            return new TurnResult(full, calls, finish, usage);
+            return new TurnResult(full, calls, state.Finish, state.Usage);
         }
     }
 
@@ -396,16 +464,40 @@ public sealed class OpenAiClient : ILlmClient
         }
     }
 
-    private static void ParseLine(string rawLine, StringBuilder text, ref LlmUsage? usage, ref string? finish,
-                                  SortedDictionary<int, PendingCall> pending,
-                                  Action<string> onText, Action<string> onReasoning)
+    /// <summary>Everything one streamed reply accumulates.</summary>
+    internal sealed class StreamState
+    {
+        public readonly StringBuilder Text = new();
+        public LlmUsage? Usage;
+        public string? Finish;
+        public readonly SortedDictionary<int, PendingCall> Pending = new();
+        /// <summary>Saw data: [DONE].</summary>
+        public bool SawDone;
+        /// <summary>Saw at least one data: line.</summary>
+        public bool SawData;
+        /// <summary>Non-SSE lines (capped), for servers that answer in plain JSON.</summary>
+        public readonly StringBuilder OtherBody = new();
+    }
+
+    internal static void ParseLine(string rawLine, StreamState state, Action<string> onText, Action<string> onReasoning)
     {
         var line = rawLine.TrimEnd('\r');
-        // SSE: only "data:" lines matter (ignore event:, id:, keepalives).
-        if (!line.StartsWith("data:", StringComparison.Ordinal)) return;
+        // SSE: only "data:" lines matter (ignore event:, id:, keepalives) — but keep anything else
+        // until the first data: line, in case the server answered with plain JSON.
+        if (!line.StartsWith("data:", StringComparison.Ordinal))
+        {
+            if (!state.SawData && line.Length > 0 && !line.StartsWith(':') && state.OtherBody.Length < 2_000_000)
+                state.OtherBody.Append(line).Append('\n');
+            return;
+        }
+        state.SawData = true;
         var payload = line[5..];
         if (payload.StartsWith(' ')) payload = payload[1..];
-        if (payload == "[DONE]") return;
+        if (payload.Trim() == "[DONE]")
+        {
+            state.SawDone = true;
+            return;
+        }
 
         JsonObject? obj;
         try
@@ -418,12 +510,20 @@ public sealed class OpenAiClient : ILlmClient
         }
         if (obj is null) return;
 
+        // An error reported mid-stream (vLLM: {"object":"error",...}; others: {"error":{...}}) —
+        // surface it instead of ending with an empty reply.
+        if ((obj["error"] is not null || obj["choices"] is null) && StreamError(obj) is var (code, message))
+        {
+            if (OverflowLimit(message) is { } limit) throw LlmException.Overflow(limit, message);
+            throw LlmException.Http(code, message);
+        }
+
         if (obj["usage"] is JsonObject u
             && JsonNumbers.TryGetInt(u["prompt_tokens"], out var p)
             && JsonNumbers.TryGetInt(u["completion_tokens"], out var c)
             && (p > 0 || c > 0))
         {
-            usage = new LlmUsage(p, c);
+            state.Usage = new LlmUsage(p, c);
         }
         if (obj["choices"] is not JsonArray { Count: > 0 } choices || choices[0] is not JsonObject first) return;
 
@@ -434,7 +534,7 @@ public sealed class OpenAiClient : ILlmClient
             var content = JsonArgs.String(delta, "content");
             if (!string.IsNullOrEmpty(content))
             {
-                text.Append(content);
+                state.Text.Append(content);
                 onText(content);
             }
             if (delta["tool_calls"] is JsonArray toolCalls)
@@ -442,7 +542,7 @@ public sealed class OpenAiClient : ILlmClient
                 foreach (var tc in toolCalls.OfType<JsonObject>())
                 {
                     var index = JsonNumbers.TryGetInt(tc["index"], out var i) ? i : 0;
-                    if (!pending.TryGetValue(index, out var entry)) pending[index] = entry = new PendingCall();
+                    if (!state.Pending.TryGetValue(index, out var entry)) state.Pending[index] = entry = new PendingCall();
                     if (JsonArgs.String(tc, "id") is { Length: > 0 } id) entry.Id = id;
                     if (tc["function"] is JsonObject fn)
                     {
@@ -452,7 +552,75 @@ public sealed class OpenAiClient : ILlmClient
                 }
             }
         }
-        if (JsonArgs.String(first, "finish_reason") is { } fr) finish = fr;
+        if (JsonArgs.String(first, "finish_reason") is { } fr) state.Finish = fr;
+    }
+
+    /// <summary>A plain (non-streamed) JSON reply: a completion, or an error.</summary>
+    internal static void ParsePlainBody(string body, StreamState state, int status, Action<string> onText)
+    {
+        JsonObject? obj;
+        try
+        {
+            obj = JsonNode.Parse(body) as JsonObject;
+        }
+        catch (JsonException)
+        {
+            return;
+        }
+        if (obj is null) return;
+        if (obj["choices"] is null && StreamError(obj) is var (code, message))
+        {
+            if (OverflowLimit(message) is { } limit) throw LlmException.Overflow(limit, message);
+            throw LlmException.Http(code == 500 ? status : code, message);
+        }
+        if (obj["choices"] is not JsonArray { Count: > 0 } choices || choices[0] is not JsonObject first
+            || first["message"] is not JsonObject msg) return;
+        if (JsonArgs.String(msg, "content") is { Length: > 0 } content)
+        {
+            state.Text.Append(content);
+            onText(content);
+        }
+        if (msg["tool_calls"] is JsonArray calls)
+        {
+            var i = 0;
+            foreach (var tc in calls.OfType<JsonObject>())
+            {
+                var entry = new PendingCall { Id = JsonArgs.String(tc, "id") ?? "" };
+                if (tc["function"] is JsonObject fn)
+                {
+                    entry.Name = JsonArgs.String(fn, "name") ?? "";
+                    entry.Args.Append(JsonArgs.String(fn, "arguments") ?? "");
+                }
+                state.Pending[i++] = entry;
+            }
+        }
+        state.Finish = JsonArgs.String(first, "finish_reason") ?? "stop";
+        if (obj["usage"] is JsonObject u
+            && JsonNumbers.TryGetInt(u["prompt_tokens"], out var p)
+            && JsonNumbers.TryGetInt(u["completion_tokens"], out var c))
+        {
+            state.Usage = new LlmUsage(p, c);
+        }
+    }
+
+    /// <summary>The status code and message of an error object, if <paramref name="obj"/> is one.</summary>
+    internal static (int Code, string Message)? StreamError(JsonObject obj)
+    {
+        static int? Code(JsonNode? node) =>
+            JsonNumbers.TryGetInt(node, out var n) ? n
+            : node is JsonValue v && v.TryGetValue<string>(out var s) && int.TryParse(s, out var parsed) ? parsed
+            : null;
+
+        if (obj["error"] is JsonObject err)
+        {
+            var message = JsonArgs.String(err, "message") ?? err.ToJsonString();
+            return (Code(err["code"]) ?? Code(err["status"]) ?? 500, message);
+        }
+        if (JsonArgs.String(obj, "error") is { } text)
+            return (Code(obj["code"]) ?? Code(obj["status"]) ?? 500, text);
+        if (JsonArgs.String(obj, "object") == "error")
+            return (Code(obj["code"]) ?? 500, JsonArgs.String(obj, "message") ?? "server error");
+        return null;
     }
 
     // MARK: Request body
@@ -526,10 +694,12 @@ public sealed class OpenAiClient : ILlmClient
             var tools = new JsonArray();
             foreach (var spec in request.Tools)
             {
+                // SGLang (Pydantic) rejects anything but a real schema object here — even for
+                // parameterless tools — so a spec that doesn't parse to an object gets an empty one.
                 JsonNode parameters;
                 try
                 {
-                    parameters = JsonNode.Parse(spec.Parameters) ?? EmptySchema();
+                    parameters = JsonNode.Parse(spec.Parameters) as JsonObject ?? EmptySchema();
                 }
                 catch (JsonException)
                 {

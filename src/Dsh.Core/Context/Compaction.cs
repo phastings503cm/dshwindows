@@ -203,11 +203,13 @@ public static class Compaction
         var request = new LlmRequest("You write concise, factual continuity notes for a coding agent.",
             [LlmMessage.User(prompt)], [], model, null, maxOutputTokens, ThinkingLevel.Off);
         var text = new StringBuilder();
+        var finished = false;
         try
         {
             await foreach (var ev in client.StreamAsync(request, cancellationToken).ConfigureAwait(false))
             {
                 if (ev is LlmStreamEvent.Text t) text.Append(t.Delta);
+                if (ev is LlmStreamEvent.Done) finished = true;
             }
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
@@ -218,6 +220,8 @@ public static class Compaction
         {
             return null;
         }
+        // Stopped mid-summary: a cut-off summary must never replace history.
+        if (!finished || cancellationToken.IsCancellationRequested) return null;
         var trimmed = StripThinking(text.ToString()).Trim();
         return trimmed.Length == 0 ? null : trimmed;
     }

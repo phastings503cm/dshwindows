@@ -175,8 +175,9 @@ public sealed class AgentToolGuardTests : IDisposable
     [Fact]
     public async Task ClientFailureIsReportedNotThrown()
     {
+        // A permanent error: transient ones (a cut-off stream) are retried until the server answers.
         var result = await new AgentTool().ExecuteAsync("""{"description":"scan","prompt":"p"}""",
-            Context(new FlakyClient(() => LlmException.Sse("boom"))), CancellationToken.None);
+            Context(new FlakyClient(() => LlmException.Http(401, "boom"))), CancellationToken.None);
         Assert.StartsWith("Subagent 'scan' failed: ", result.Output);
         Assert.Contains("boom", result.Output);
     }

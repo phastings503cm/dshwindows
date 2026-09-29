@@ -106,6 +106,10 @@ public sealed record ProviderProfile
     public string? ReasoningEffort { get; set; }
     /// <summary>Whether the model can take images. null = assume yes.</summary>
     public bool? Vision { get; set; }
+    /// <summary>SHA-256 fingerprint ("AB:CD:…", as openssl prints it) of a self-signed certificate this
+    /// server is trusted to present — e.g. the DGX Spark's nginx TLS front. Checked only when normal
+    /// Windows trust fails; null = normal trust only.</summary>
+    public string? PinnedCertificate { get; set; }
 
     public ProviderProfile() { }
 
@@ -340,7 +344,9 @@ public sealed class LlmException : Exception
     /// <summary>The server refused the request because it would exceed the model's context window,
     /// and said what the limit is. The caller should compact the transcript and retry once.</summary>
     public static LlmException Overflow(int limit, string detail) => new(LlmErrorKind.Overflow,
-        $"Conversation is too long for the {Fmt.N(limit)}-token window ({TextUtil.Prefix(detail, 120)}).",
+        limit > 0
+            ? $"Conversation is too long for the {Fmt.N(limit)}-token window ({TextUtil.Prefix(detail, 120)})."
+            : $"Conversation is too long for the server ({TextUtil.Prefix(detail, 120)}).",
         400, detail, limit);
 
     public static LlmException Sse(string why) => new(LlmErrorKind.Sse, $"The model stream ended unexpectedly ({why}).");
