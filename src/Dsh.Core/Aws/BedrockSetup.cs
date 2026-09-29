@@ -101,7 +101,7 @@ public sealed record BedrockModel(
 }
 
 /// <summary>Turning the CLI's model and inference-profile listings into <see cref="BedrockModel"/>s.</summary>
-public static partial class BedrockModels
+public static partial class BedrockCatalog
 {
     private sealed record Profile(string Id, string Prefix, HashSet<string> ModelIds);
 
@@ -474,12 +474,12 @@ public sealed partial class BedrockSetup
         _cli.RunJsonAsync(command, Profile, Region, cancellationToken: cancellationToken);
 
     /// <summary>The models this Region offers for chat, each with the id to call it by
-    /// (<see cref="BedrockModels.Build"/>). Needs bedrock:ListFoundationModels and bedrock:ListInferenceProfiles.</summary>
+    /// (<see cref="BedrockCatalog.Build"/>). Needs bedrock:ListFoundationModels and bedrock:ListInferenceProfiles.</summary>
     public async Task<IReadOnlyList<BedrockModel>> ListModelsAsync(CancellationToken cancellationToken = default)
     {
         var models = await JsonAsync(["bedrock", "list-foundation-models", "--by-output-modality", "TEXT"], cancellationToken).ConfigureAwait(false);
         var profiles = await ListInferenceProfilesAsync(cancellationToken).ConfigureAwait(false);
-        return BedrockModels.Build(models, profiles, Region);
+        return BedrockCatalog.Build(models, profiles, Region);
     }
 
     /// <summary>All system inference profiles. The CLI fetches every page itself; should it ever stop

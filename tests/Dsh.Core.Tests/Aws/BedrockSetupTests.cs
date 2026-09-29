@@ -89,7 +89,7 @@ public sealed class BedrockSetupTests
         """) + "]}";
 
     private static IReadOnlyList<BedrockModel> Build(string region) =>
-        BedrockModels.Build(JsonNode.Parse(FoundationModels), JsonNode.Parse(InferenceProfiles), region);
+        BedrockCatalog.Build(JsonNode.Parse(FoundationModels), JsonNode.Parse(InferenceProfiles), region);
 
     // MARK: - Models and the id to call them by
 
@@ -167,8 +167,8 @@ public sealed class BedrockSetupTests
         // Then the rest of the families, newest first, then everything else.
         Assert.Equal(["anthropic.claude-sonnet-4-20250514-v1:0", "anthropic.claude-3-7-sonnet-20250219-v1:0"],
             models.Skip(recommended.Count).Take(2).Select(m => m.ModelId));
-        Assert.Equal("Claude Sonnet", BedrockModels.FamilyOf("anthropic.claude-3-7-sonnet-20250219-v1:0"));
-        Assert.Null(BedrockModels.FamilyOf("cohere.command-r-plus-v1:0"));
+        Assert.Equal("Claude Sonnet", BedrockCatalog.FamilyOf("anthropic.claude-3-7-sonnet-20250219-v1:0"));
+        Assert.Null(BedrockCatalog.FamilyOf("cohere.command-r-plus-v1:0"));
     }
 
     [Theory]
@@ -179,7 +179,7 @@ public sealed class BedrockSetupTests
     [InlineData("meta.llama4-scout-17b-instruct-v1:0", "meta.llama3-3-70b-instruct-v1:0")]
     [InlineData("openai.gpt-oss-120b-1:0", "openai.gpt-oss-20b-1:0")]
     public void KnowsWhichModelIsNewer(string newer, string older) =>
-        Assert.True(BedrockModels.RecencyComparer.Instance.Compare(newer, older) > 0);
+        Assert.True(BedrockCatalog.RecencyComparer.Instance.Compare(newer, older) > 0);
 
     [Theory]
     [InlineData("us-east-1", "us,global")]
