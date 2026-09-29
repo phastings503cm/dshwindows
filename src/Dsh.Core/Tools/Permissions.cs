@@ -233,7 +233,7 @@ public static class ComputerAccessInfo
     /// <summary>The access a tool needs, or null for tools that don't touch the machine outside the project.</summary>
     public static ComputerAccess? ForTool(string name) => name switch
     {
-        "screenshot" or "list_windows" or "screen_watch" or "ui_tree" or "inspect_process" => ComputerAccess.Observe,
+        "screenshot" or "list_windows" or "screen_watch" or "ui_tree" or "inspect_process" or "view_image" => ComputerAccess.Observe,
         "mouse" or "keyboard" or "focus_app" => ComputerAccess.Control,
         _ => null,
     };

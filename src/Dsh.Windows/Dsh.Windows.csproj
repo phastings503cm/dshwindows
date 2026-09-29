@@ -1,0 +1,23 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- The tools that see and steer the rest of the machine: screenshots, window lists, UI
+       Automation trees, process inspection, mouse and keyboard input. Win32 + WPF imaging +
+       UI Automation, so it lives apart from the OS-neutral Dsh.Core. -->
+  <PropertyGroup>
+    <TargetFramework>net10.0-windows</TargetFramework>
+    <!-- WPF brings the imaging codecs (decode, scale, PNG/JPEG encode) and the managed UI
+         Automation client (UIAutomationClient/UIAutomationTypes). -->
+    <UseWPF>true</UseWPF>
+    <RootNamespace>Dsh.Windows</RootNamespace>
+    <AssemblyName>Dsh.Windows</AssemblyName>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="Dsh.Windows.Tests" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Dsh.Core\Dsh.Core.csproj" />
+  </ItemGroup>
+
+</Project>

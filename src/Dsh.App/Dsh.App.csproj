@@ -23,6 +23,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\Dsh.Core\Dsh.Core.csproj" />
+    <ProjectReference Include="..\Dsh.Windows\Dsh.Windows.csproj" />
   </ItemGroup>
 
   <ItemGroup>

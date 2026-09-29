@@ -137,6 +137,7 @@ public sealed class ComputerAccessTests : IDisposable
     [InlineData("list_windows", ComputerAccess.Observe)]
     [InlineData("ui_tree", ComputerAccess.Observe)]
     [InlineData("inspect_process", ComputerAccess.Observe)]
+    [InlineData("view_image", ComputerAccess.Observe)]
     [InlineData("mouse", ComputerAccess.Control)]
     [InlineData("keyboard", ComputerAccess.Control)]
     [InlineData("focus_app", ComputerAccess.Control)]
