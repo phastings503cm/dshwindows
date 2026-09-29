@@ -65,6 +65,52 @@ An agent needs a model that can call tools. Qwen3, Qwen2.5-Coder, and DeepSeek-V
 well; very small models struggle. Models without native function calling still work: tool calls
 written as XML in plain text are recovered and run.
 
+**Find Servers on My Network** on the connection step scans this PC and your network (each /24 your
+PC is on, up to 1,024 hosts) for vLLM, SGLang, llama.cpp, Ollama, LM Studio and DGX Sparks, and fills
+in the address of the one you pick.
+
+## Setting up a DGX Spark
+
+On the wizard's first page, **I have a DGX Spark — walk me through everything (beginner)** starts a
+guide with a picture for every step, written for people who have never opened a terminal. It can be
+closed at any point and picks up where you left off.
+
+1. **What you need**, then **brand new or start fresh**. A new Spark ships with DGX OS: the guide
+   walks through cables (power last), the Quick Start card's hotspot sticker, joining that Wi-Fi, the
+   setup page (username, password, home Wi-Fi) and the ~10-minute update, while it watches your
+   network for the Spark to come back. *Start fresh* makes NVIDIA's recovery USB stick for you: pick
+   the recovery archive you downloaded from NVIDIA (`.tar.gz`, `.zip` or an unpacked folder) and a USB
+   stick; DSH checks the files fit FAT32, asks Windows for permission (a small elevated helper,
+   `DSH.exe --write-recovery-usb`, does the erasing — only USB disks between 8 and 256 GB that don't
+   hold Windows are offered, and the disk is re-checked right before it is wiped), writes the
+   known-good layout (MBR, one active FAT32 partition ≤ 31 GB labelled `BOOTME`,
+   `EFI\BOOT\recovery.txt`) and shows how to boot from it.
+2. **Find your Spark** — a network scan shows friendly cards ("DGX Spark at 192.168.1.42 —
+   spark-3f2a"); an address can also be typed in.
+3. **Install Spark Swapper** — DSH signs in over SSH with the account from the Spark's setup page
+   (the host key is trusted on first use and remembered in `known_hosts.json`), runs
+   [Spark Swapper](https://github.com/gnubyte/DGX-Spark-Swapper)'s one-line installer in a terminal,
+   answers `sudo`'s password prompt itself (never shown or saved), and adds an nginx HTTPS front for
+   the model API on port 11443 if there isn't one.
+4. **The padlock warning** — what a self-signed certificate is, why browsers say *Your connection
+   isn't private*, why that's fine for your own Spark, and its fingerprint (checked against the
+   certificate file on the Spark over SSH). DSH pins it; optionally Windows trusts it too.
+5. **Your Swapper login** — creates Spark Swapper's admin account right away (the first visitor
+   becomes admin).
+6. **Get a model running** — installs what's missing through the Swapper's Provisioning API and
+   starts a model, following the Spark's log.
+7. **Connect DSH** — fetches the model's API key, saves the route
+   `https://<spark>:11443/v1` with the certificate pinned, sets up Settings › DGX Spark (so `/swap`
+   works), and says hello.
+
+Later: manage the Spark at `https://<spark>:8999` or in Settings › DGX Spark; switch models with
+`/swap`. Update Spark Swapper by running the guide again (*It's already set up* → *Reinstall or
+update*); reset a forgotten Swapper login on the Spark with `sudo spark-swapper-reset-login`. Spark
+Swapper logs: `journalctl -u spark-swapper -f` on the Spark.
+
+The guide's pictures are drawn by `src/Dsh.App/Assets/Guide/make_art.py`; the Spark Swapper
+screenshots in them are from its repository (MIT, see `SWAPPER-SCREENSHOTS-LICENSE.txt` there).
+
 ## The window
 
 **Chat** (Ctrl+1) — the transcript interleaves messages and tool calls in the order they happened,

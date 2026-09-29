@@ -8,6 +8,7 @@ using System.Windows.Threading;
 using Dsh.App.Infrastructure;
 using Dsh.App.Model;
 using Dsh.App.Views;
+using Dsh.App.Views.Guide;
 using Dsh.App.Views.Settings;
 using Dsh.App.Views.Wizard;
 using Dsh.Core;
@@ -119,6 +120,8 @@ public sealed class SelfTest
             var wizard = new SetupWizardWindow(model) { Owner = window };
             await ShowAndCapture(wizard, "wizard");
 
+            await CaptureGuide(window, model);
+
             var memory = new MemoryWindow(model) { Owner = window };
             await ShowAndCapture(memory, "memory");
 
@@ -140,6 +143,75 @@ public sealed class SelfTest
             Fail("run", error);
         }
         Finish();
+    }
+
+    /// <summary>The DGX Spark guide's pages with sample state (no network is touched), and the
+    /// normal wizard's connection step with the network scanner open.</summary>
+    private async Task CaptureGuide(Window owner, AppModel model)
+    {
+        var wizard = new SetupWizardWindow(model) { Owner = owner, WindowStartupLocation = WindowStartupLocation.CenterOwner };
+        try
+        {
+            wizard.Show();
+            GuidePage[] pages =
+            [
+                GuidePage.Welcome, GuidePage.Start, GuidePage.Sticker, GuidePage.Download, GuidePage.WriteUsb, GuidePage.Find,
+                GuidePage.Install, GuidePage.Certificate, GuidePage.Admin, GuidePage.Model, GuidePage.Connect, GuidePage.Done,
+            ];
+            foreach (var page in pages)
+            {
+                wizard.ShowGuideDemo(page);
+                await Settle(900);
+                Capture(wizard, $"guide-{page.ToString().ToLowerInvariant()}");
+                if (page is GuidePage.Install or GuidePage.Certificate or GuidePage.WriteUsb or GuidePage.Model)
+                {
+                    wizard.ScrollGuide(0.55);
+                    await Settle(400);
+                    Capture(wizard, $"guide-{page.ToString().ToLowerInvariant()}-more");
+                }
+            }
+        }
+        catch (Exception error)
+        {
+            Fail("guide", error);
+        }
+        finally
+        {
+            try { wizard.Close(); } catch (Exception) { }
+        }
+
+        var scanning = new SetupWizardWindow(model) { Owner = owner, WindowStartupLocation = WindowStartupLocation.CenterOwner, Height = 760 };
+        try
+        {
+            scanning.Show();
+            scanning.ShowScannerDemo(
+            [
+                new FoundHost(System.Net.IPAddress.Parse("192.168.1.42"),
+                [
+                    new FoundService(22, ServiceKind.Ssh, "Remote login (SSH)") { Identified = true, Detail = "OpenSSH 9.6p1 · Ubuntu" },
+                    new FoundService(8999, ServiceKind.SparkSwapper, "Spark Swapper") { Identified = true, Tls = true },
+                    new FoundService(11443, ServiceKind.SparkModelFront, "Spark model API") { Identified = true, Tls = true, NeedsKey = true, BaseUrl = "https://192.168.1.42:11443/v1" },
+                ]) { HostName = "spark-3f2a.local", Identified = true },
+                new FoundHost(System.Net.IPAddress.Parse("192.168.1.9"),
+                [
+                    new FoundService(8000, ServiceKind.ModelServer, "vLLM server") { Identified = true, Engine = "vllm", Models = ["qwen3-coder-30b-a3b"], Detail = "vLLM · qwen3-coder-30b-a3b", BaseUrl = "http://192.168.1.9:8000/v1" },
+                ]) { HostName = "workstation.lan", Identified = true },
+                new FoundHost(System.Net.IPAddress.Loopback,
+                [
+                    new FoundService(11434, ServiceKind.Ollama, "Ollama") { Identified = true, Models = ["qwen3:8b"], Detail = "qwen3:8b", BaseUrl = "http://127.0.0.1:11434/v1" },
+                ]) { Identified = true },
+            ]);
+            await Settle(900);
+            Capture(scanning, "wizard-scan");
+        }
+        catch (Exception error)
+        {
+            Fail("wizard-scan", error);
+        }
+        finally
+        {
+            try { scanning.Close(); } catch (Exception) { }
+        }
     }
 
     /// <summary>A chat with one of everything the transcript can show.</summary>
