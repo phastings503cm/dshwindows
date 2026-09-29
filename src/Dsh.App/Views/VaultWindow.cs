@@ -132,6 +132,14 @@ public sealed class VaultWindow : Window
         Refresh();
     }
 
+    /// <summary>Open with a credential selected.</summary>
+    public void SelectEntry(string id)
+    {
+        _adding = false;
+        _selectedId = id;
+        Refresh();
+    }
+
     private void OnHostChanged(object? sender, System.ComponentModel.PropertyChangedEventArgs e)
     {
         // Another window (or the agent's use count) changed the vault.

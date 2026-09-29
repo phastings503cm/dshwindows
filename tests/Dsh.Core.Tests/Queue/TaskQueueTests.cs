@@ -206,6 +206,28 @@ public sealed class TaskQueueTests
         q.Finish(e.Id, QueueTaskStatus.Failed);
         Assert.Equal("Blocked — needs the user.", q.Find(d.Id)!.Log[^1].Text);
         Assert.Equal("Failed — unknown error.", q.Find(e.Id)!.Log[^1].Text);
+
+        // A reason that already ends a sentence gets no second full stop.
+        var f = q.Add("F");
+        var g = q.Add("G");
+        q.Finish(f.Id, QueueTaskStatus.Blocked, reason: "Which branch?");
+        q.Finish(g.Id, QueueTaskStatus.Failed, reason: "The server said no.");
+        Assert.Equal("Blocked — Which branch?", q.Find(f.Id)!.Log[^1].Text);
+        Assert.Equal("Failed — The server said no.", q.Find(g.Id)!.Log[^1].Text);
+    }
+
+    [Fact]
+    public void NoRateUntilATaskHasRunForASecond()
+    {
+        var q = NewQueue();
+        var a = q.Add("A");
+        q.Start(a.Id);
+        q.RecordRound(a.Id, round: 1, prompt: 40_000, completion: 3_000);
+        _clock.Advance(TimeSpan.FromMilliseconds(5));
+        q.Finish(a.Id, QueueTaskStatus.Complete);
+        Assert.Null(q.Find(a.Id)!.AvgTokensPerSecond());
+        Assert.Null(q.Stats().TokensPerSecond);
+        Assert.Equal("Complete after 1 round, 0s.", q.Find(a.Id)!.Log[^1].Text);
     }
 
     [Fact]

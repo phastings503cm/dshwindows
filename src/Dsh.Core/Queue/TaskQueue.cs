@@ -343,15 +343,22 @@ public sealed class TaskQueue
                 var rate = t.AvgTokensPerSecond() is { } r ? $" · {QueueLog.Rounded(r)} tokens/s avg" : "";
                 return Log(t, QueueLogKind.Complete, $"Complete after {t.Rounds} round{(t.Rounds == 1 ? "" : "s")}, {d}{rate}.");
             case QueueTaskStatus.Blocked:
-                return Log(t, QueueLogKind.Blocked, $"Blocked — {reason ?? "needs the user"}.");
+                return Log(t, QueueLogKind.Blocked, $"Blocked — {Sentence(reason ?? "needs the user")}");
             case QueueTaskStatus.Failed:
-                return Log(t, QueueLogKind.Failed, $"Failed — {reason ?? "unknown error"}.");
+                return Log(t, QueueLogKind.Failed, $"Failed — {Sentence(reason ?? "unknown error")}");
             case QueueTaskStatus.Skipped:
                 return Log(t, QueueLogKind.Skipped, "Skipped.");
             default:
                 return t;
         }
     });
+
+    /// <summary>End with a full stop unless the text already ends a sentence.</summary>
+    private static string Sentence(string text)
+    {
+        text = text.TrimEnd();
+        return text.EndsWith('.') || text.EndsWith('!') || text.EndsWith('?') ? text : text + ".";
+    }
 
     // MARK: - Mutation plumbing
 

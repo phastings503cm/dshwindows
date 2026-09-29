@@ -248,6 +248,9 @@ public partial class MainWindow : Window
 
     private void ToggleQueuePanel() => SetQueuePanel(_queuePanel.Visibility != Visibility.Visible);
 
+    /// <summary>Show or hide the task queue panel (the self-test drives it).</summary>
+    public void ShowQueuePanel(bool open) => SetQueuePanel(open);
+
     private void QueueSplitter_DragCompleted(object sender, DragCompletedEventArgs e) =>
         Model.Config.QueuePanelWidth = QueueColumn.ActualWidth;
 

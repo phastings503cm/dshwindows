@@ -97,6 +97,13 @@ public sealed class GeneralPage : UserControl
                              Ui.Secondary("What run_shell_command uses. The agent is told which shell it is so it writes commands for it.")), shell),
             customPath, resolved)));
 
+        // Computer use
+        page.Children.Add(Ui.Section("Computer use"));
+        page.Children.Add(Ui.Row("Let the agent see and use this PC",
+            "Screenshots, the window list, UI trees, mouse clicks and keystrokes — for testing an app or game it built. " +
+            "Each chat asks before the first use (full-access chats don't). Typing into terminals, the Run box and Explorer is always refused.",
+            Ui.Toggle(config.ComputerToolsEnabled, on => config.ComputerToolsEnabled = on), Icons.Mouse));
+
         // Windows integration
         page.Children.Add(Ui.Section("Windows"));
         page.Children.Add(Ui.Row("\u201COpen with DSH\u201D in Explorer",

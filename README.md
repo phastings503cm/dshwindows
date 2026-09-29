@@ -89,6 +89,10 @@ menu (with DGX Spark model switching), thinking level, skills, and a live contex
 Open tabs, the terminal panel and the panes' visibility are remembered per project. F1 lists the
 keyboard shortcuts.
 
+**Task Queue** (Ctrl+Shift+Q, or the list button in the top bar) — a panel on the right for work
+that should happen unattended. **Credentials Vault** (Ctrl+Shift+K, or the key button) — the API
+keys and passwords the agent may use. Both are described below.
+
 ## Permissions
 
 | Preset | What happens |
@@ -103,16 +107,65 @@ the agent is told which shell it is so it writes commands for it.
 
 ## Tools
 
-The tool set matches [Qwen Code](https://qwenlm.github.io/qwen-code-docs/en/developers/tools/introduction/)
+The core tool set matches [Qwen Code](https://qwenlm.github.io/qwen-code-docs/en/developers/tools/introduction/)
 name for name: `read_file`, `read_many_files`, `write_file`, `edit`, `list_directory`, `glob`,
 `grep`, `run_shell_command`, `web_fetch`, `todo_write`, `exit_plan_mode`, and `agent` (a subagent for
-a scoped task). Plugins add more (below).
+a scoped task). On top of those:
+
+- **Background subagents** — `agent` with `run_in_background: true` works while the main agent
+  carries on (up to four at once). `agent_status` checks on them or waits for one, `agent_stop` ends
+  one. When they finish, the main agent is told automatically; an idle chat picks the work back up
+  by itself. A bar above the composer shows what is running, with a stop button.
+- **Long-running programs** — `process_start`, `process_read`, `process_write`, `process_stop`,
+  `process_list`: dev servers, game engines, REPLs and watchers run in a pseudo console and keep
+  running between tool calls. The agent reads their output (optionally waiting for a line to appear),
+  types into them, and stops them with Ctrl+C, then the whole process tree. They end with the app.
+- **Seeing and using the PC** — `screenshot`, `list_windows`, `screen_watch`, `ui_tree`,
+  `inspect_process`, `view_image`, `mouse`, `keyboard`, `focus_app`, for testing what the agent
+  built. Each chat asks before the first look and the first click (full-access chats don't). Typing
+  into terminals, the Run box, Explorer or Task Manager is always refused. Switch them off in
+  **Settings › General › Computer use**.
+- **`queue_task`** adds follow-up work to the task queue; **`vault_search`** finds credentials by
+  name (never their values).
+
+Plugins add more (below).
+
+## Task queue
+
+Queue up work — one task per item — and press **Start**: DSH works the tasks one at a time, top to
+bottom, each in its own chat, as an unattended goal that runs until the model declares it complete.
+A task that needs you is marked blocked and the queue moves on; answer in its chat and press
+**Resume**. Drag waiting tasks to reorder them. The log (the clock button) records when each task
+started, every round, retries, and how it ended, with token counts and speed.
+
+The queue is saved to `task-queue.json` and survives restarts: if the app quits or crashes mid-task,
+the task goes back in line and the queue picks up where it left off on the next launch (unless you
+had pressed Stop). Three failed tasks in a row pause it. Windows is kept awake while it runs.
+Permission questions in a queue task are answered "no" after five minutes, so an unattended run
+never stalls on one.
+
+## Credentials vault
+
+Keep API keys, tokens and passwords in the vault and the agent can use them without ever seeing
+them: it writes `{{vault:NAME}}` wherever the value goes — a shell command, a `.env` file, a request
+header — and DSH substitutes the real value only when the tool runs. Tool output shows
+`[vault:NAME]` instead of the value, so the secret never reaches the model, the transcript or the
+logs. Each credential is **Agent may use**, **Ask first** (once per chat) or **Never**. Values are
+encrypted for your Windows account with DPAPI; the window shows a fingerprint until you reveal a
+value, which asks for Windows Hello or your Windows password first.
+
+## Model outages
+
+When the model server is down, restarting, or switching models, requests are retried automatically
+— after 2, 4, 8, 16 and then every 30 seconds — until it answers, and the chat shows the countdown.
+Press Stop to give up. Nothing already done is lost: tool calls that ran stay in the conversation.
 
 ## Slash commands
 
 | Command | What it does |
 |---|---|
-| `/goal <task>` | Works on the task round after round until the model ends a reply with `GOAL_COMPLETE` (or `GOAL_BLOCKED: …`). Ctrl+. stops it. |
+| `/goal <task>` | Works on the task round after round, with no round limit, until the model ends a reply with `GOAL_COMPLETE` (or `GOAL_BLOCKED: …`). Outages are retried; Ctrl+. stops it. A bare `/goal` picks an unfinished goal back up. |
+| `/queue` | Starts the task queue (or says what it is doing). |
 | `/compact [focus]` | Summarizes the conversation now. Long chats also compact automatically at 75% of the window. |
 | `/think off\|low\|medium\|high\|max\|default` | Thinking level for this chat. |
 | `/context` | Window size, usage, and where the window figure came from. |
@@ -132,7 +185,9 @@ DSH reads their folders in place (`.claude`, `.cursor`, `.agents`, `.qwen`, and 
 equivalents) alongside its own (`<project>\.dsh\skills`, `%APPDATA%\DSH\skills`). The Skills button
 under the composer picks the skills a chat uses; **Settings › Skills** switches them on or off, edits,
 generates new ones with the model (nothing is active until you approve it), and imports from a
-folder, a zip, a file or a GitHub link, or exports for Claude Code, Cursor or Agent Skills.
+folder, a zip, a file or a GitHub link, or exports for Claude Code, Cursor or Agent Skills. One skill
+ships with the app: **godot-debugging**, which runs a Godot game, reads its output and drives it
+with the computer-use tools.
 
 **Plugins** are JSON manifests declaring tools backed by shell commands — drop one in
 `%APPDATA%\DSH\plugins` or `<project>\.dsh\plugins` and reload in **Settings › Plugins**.
@@ -159,6 +214,8 @@ folder, a zip, a file or a GitHub link, or exports for Claude Code, Cursor or Ag
 |---|---|
 | Settings, conversations, skills, plugins, crash logs | `%APPDATA%\DSH` (or the portable `data` folder; `DSH_HOME` overrides both) |
 | API keys, Spark password | Windows Credential Manager (`DSH/…` entries) |
+| Task queue | `%APPDATA%\DSH\task-queue.json` |
+| Credentials vault | `%APPDATA%\DSH\vault.json` (names and details) and `vault.bin` (values, DPAPI-encrypted) |
 | Program | `%LOCALAPPDATA%\Programs\DSH` (installer) |
 
 ## Build from source
@@ -169,6 +226,8 @@ library and its tests also build and run on Linux and macOS.
 ```powershell
 dotnet build DSH.sln
 dotnet test tests/Dsh.Core.Tests
+dotnet test tests/Dsh.App.Tests       # Windows: task queue, /goal, background agents, vault
+dotnet test tests/Dsh.Windows.Tests   # Windows: screenshots, windows, mouse and keyboard
 dotnet run --project src/Dsh.App
 ```
 
@@ -189,7 +248,10 @@ a throwaway data folder and a demo project, and exits non-zero on any error. CI 
 |---|---|
 | `src/Dsh.Core` | The harness: OpenAI-compatible client, engine, tools, permissions, compaction, skills, plugins, VT emulator, ConPTY, conversation log |
 | `src/Dsh.App` | The WPF app |
+| `src/Dsh.Windows` | The computer-use tools (screen capture, UI Automation, input) |
 | `tests/Dsh.Core.Tests` | xUnit tests (Windows-only ones are skipped elsewhere) |
+| `tests/Dsh.App.Tests` | The app host against a fake model server: queue runner, /goal, background agents, vault |
+| `tests/Dsh.Windows.Tests` | The computer-use tools against real windows |
 | `installer/DSH.iss` | Inno Setup script |
 | `scripts/` | Packaging, self-test and installer-test scripts used by CI |
 | `.github/workflows` | `ci.yml` (pull requests and branches), `release.yml` (default branch → GitHub release) |
@@ -198,7 +260,7 @@ a throwaway data folder and a demo project, and exits non-zero on any error. CI 
 
 - **`ci.yml`** runs on pull requests and pushes to any branch other than the default one: core tests
   on Linux; on Windows a Release build, the full test suite (including the ConPTY, path and
-  PowerShell tests), the x64 zip and installer, the UI self-test (screenshots are uploaded as an
+  PowerShell tests, the app tests and the computer-use tests), the x64 zip and installer, the UI self-test (screenshots are uploaded as an
   artifact), and an installer test: silent install, launch the installed app, check the Start menu
   and folder-menu entries, uninstall, and check nothing is left behind.
 - **`release.yml`** runs on every push to the default branch, whatever it is named: tests, packages

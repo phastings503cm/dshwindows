@@ -121,6 +121,19 @@ public sealed class SelfTest
 
             var memory = new MemoryWindow(model) { Owner = window };
             await ShowAndCapture(memory, "memory");
+
+            FillQueue(model);
+            window.ShowQueuePanel(true);
+            model.Select(chat.Id);
+            await Settle(1000);
+            Capture(window, "queue");
+            await ShowAndCapture(new QueueLogWindow(model.Host) { Owner = window }, "queue-log");
+            window.ShowQueuePanel(false);
+
+            var vault = FillVault(model);
+            var vaultWindow = new VaultWindow(model.Host) { Owner = window };
+            if (vault is not null) vaultWindow.SelectEntry(vault);
+            await ShowAndCapture(vaultWindow, "vault");
         }
         catch (Exception error)
         {
@@ -159,9 +172,46 @@ public sealed class SelfTest
         chat.RecordFileChanges([new FileChange(Path.Combine(model.Project!, "src", "Stock.cs"), FileChangeKind.Modified),
                                 new FileChange(Path.Combine(model.Project!, "tests", "StockTests.cs"), FileChangeKind.Created)]);
         chat.LastUsage = new LlmUsage(18_452, 1_210);
+        chat.Goal = new GoalState("Fix the negative stock bug and add a regression test", 3, DateTimeOffset.Now.AddMinutes(-4));
+        chat.UpsertBackgroundJob(new BackgroundAgentJob("bg-1", "audit the other callers of Remove", DateTimeOffset.Now.AddSeconds(-42)));
         chat.Running = true;
         chat.PendingGates.Add(new GateVM("g1", "run_shell_command", "dotnet add tests package FluentAssertions --version 6.12.0"));
         return chat;
+    }
+
+    /// <summary>A queue with one task in each state.</summary>
+    private static void FillQueue(AppModel model)
+    {
+        var queue = model.Host.Queue;
+        var done = queue.Add("Write parser tests", "Cover empty input, nested quotes and the 64 KB limit.", cwd: model.Project);
+        queue.Start(done.Id);
+        queue.RecordRound(done.Id, 1, 18_000, 2_400);
+        queue.RecordRound(done.Id, 2, 21_000, 1_900);
+        queue.Finish(done.Id, QueueTaskStatus.Complete);
+        var blocked = queue.Add("Deploy the staging build", "Needs the deploy token from the vault.", cwd: model.Project);
+        queue.Start(blocked.Id);
+        queue.RecordRound(blocked.Id, 1, 9_000, 800);
+        queue.Finish(blocked.Id, QueueTaskStatus.Blocked, "The DEPLOY_TOKEN credential is set to Never.");
+        queue.Add("Refactor Stock into a repository", "Keep the public API; move persistence behind IStockStore.", cwd: model.Project);
+        queue.Add("Update the README build section", cwd: model.Project);
+    }
+
+    /// <summary>Two credentials; returns the id of the one to show.</summary>
+    private string? FillVault(AppModel model)
+    {
+        try
+        {
+            var vault = model.Host.Vault;
+            var token = vault.Add("GITHUB_TOKEN", "ghp_selftest0000000000000000000000000000", VaultKind.Token,
+                "Push to the inventory repo", ["github", "ci"], access: VaultAccess.Allowed);
+            vault.Add("DEPLOY_TOKEN", "deploy-selftest-1234", VaultKind.ApiKey, "Staging deploys", ["deploy"], access: VaultAccess.Ask);
+            return token.Id;
+        }
+        catch (Exception error)
+        {
+            Fail("vault", error);
+            return null;
+        }
     }
 
     private async Task ShowAndCapture(Window window, string name)

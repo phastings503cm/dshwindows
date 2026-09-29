@@ -90,6 +90,15 @@ public sealed partial class AgentHost : ObservableObject
             OnPropertyChanged(nameof(RunningCount));
         };
         Reload();
+        // Skills that ship with the app (godot-debugging) are kept current on every launch.
+        try
+        {
+            BuiltinSkills.Install(SkillLocations.BuiltinSkills);
+        }
+        catch (Exception error) when (error is IOException or UnauthorizedAccessException)
+        {
+            // Not fatal: the app works without them.
+        }
         RefreshDrafts();
         InitQueue();
         Vault.Changed += (_, _) => _dispatcher.BeginInvoke(() => VaultRevision = Vault.Revision);
@@ -339,7 +348,13 @@ public sealed partial class AgentHost : ObservableObject
             prompt += "\n\n--- Plan mode ---\nDo not modify anything. Research and produce a plan, then call `exit_plan_mode` with it and stop.";
         _systemPrompts[sessionId] = prompt;
 
-        var builtins = ToolRegistry.Standard(0, shell);
+        // Background processes: the model's own long-running programs (game engines, dev servers,
+        // REPLs) that keep running between tool calls. Seeing and steering the machine — screenshots,
+        // windows, UI trees, clicks, keystrokes — is off with the computer-tools switch; each first use
+        // in a chat still asks (the engine's gate). Both count as built-ins, so a plugin can't take
+        // over their names.
+        var builtins = ToolRegistry.Standard(0, shell).Adding(ExtraTools.Processes());
+        if (Config.ComputerToolsEnabled) builtins = builtins.Adding(ExtraTools.Machine());
         var extra = new List<IToolExecutor>(PluginLoader.Tools(Plugins, builtins.Names));
         if (skillState.Active.Count > 0) extra.Add(new UseSkillTool(skillState.Active));
         extra.Add(new VaultSearchTool(Vault));
@@ -350,12 +365,6 @@ public sealed partial class AgentHost : ObservableObject
                 _dispatcher.InvokeAsync(() => AgentQueueTask(title, details, front, start, sessionId)).Task));
             extra.Add(new ProposeSkillTool(vm.WorkspacePath, SkillLocations));
         }
-        // Background processes: the model's own long-running programs (game engines, dev servers,
-        // REPLs) that keep running between tool calls.
-        extra.AddRange(ExtraTools.Processes());
-        // Seeing and steering the machine — screenshots, windows, UI trees, clicks, keystrokes. Off
-        // with the computer-tools switch; each first use in a chat still asks (the engine's gate).
-        if (Config.ComputerToolsEnabled) extra.AddRange(ExtraTools.Machine());
         var registry = builtins.Adding(extra);
 
         if (!_grants.TryGetValue(sessionId, out var grants)) _grants[sessionId] = grants = new ComputerGrants();

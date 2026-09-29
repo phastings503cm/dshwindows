@@ -58,6 +58,9 @@ jobs:
       - name: "App tests (task queue, /goal, background agents, vault)"
         run: dotnet test tests/Dsh.App.Tests -c Release --no-build --logger "console;verbosity=minimal"
 
+      - name: "Machine tool tests (screenshots, windows, input)"
+        run: dotnet test tests/Dsh.Windows.Tests -c Release --no-build --logger "console;verbosity=minimal"
+
       - name: Install Inno Setup
         shell: pwsh
         run: |

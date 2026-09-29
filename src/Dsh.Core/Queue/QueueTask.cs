@@ -167,9 +167,9 @@ public sealed record QueueTask
     }
 
     /// <summary>Average tokens/second over the task's runtime (both directions, as the model server
-    /// served them). Null until the task has runtime.</summary>
+    /// served them). Null until the task has run for a second — a shorter span gives no real rate.</summary>
     public double? AvgTokensPerSecond(DateTimeOffset? now = null) =>
-        Duration(now) is { } d && d > TimeSpan.Zero && TotalTokens > 0 ? TotalTokens / d.TotalSeconds : null;
+        Duration(now) is { TotalSeconds: >= 1 } d && TotalTokens > 0 ? TotalTokens / d.TotalSeconds : null;
 
     /// <summary>A copy with one more line in its history.</summary>
     public QueueTask AppendingLog(QueueLogKind kind, string text, DateTimeOffset at) =>
@@ -197,7 +197,7 @@ public readonly record struct QueueStats(
 {
     /// <summary>All tokens over the finished tasks' runtime; null before anything has finished.</summary>
     public double? TokensPerSecond =>
-        TotalDuration > TimeSpan.Zero ? (CompletionTokens + PromptTokens) / TotalDuration.TotalSeconds : null;
+        TotalDuration.TotalSeconds >= 1 ? (CompletionTokens + PromptTokens) / TotalDuration.TotalSeconds : null;
 
     /// <summary>Nothing left to run: no queued task and none running.</summary>
     public bool Finished => Total > 0 && Queued == 0 && Running == 0;

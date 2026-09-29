@@ -866,5 +866,5 @@ internal static class ExtraTools
     public static IEnumerable<IToolExecutor> Processes() => ProcessTools.All();
 
     /// <summary>Screenshots, windows, UI trees, clicks and keystrokes.</summary>
-    public static IEnumerable<IToolExecutor> Machine() => [];
+    public static IEnumerable<IToolExecutor> Machine() => Dsh.Windows.MachineTools.All();
 }
