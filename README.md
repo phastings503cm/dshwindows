@@ -7,7 +7,7 @@
 <p align="center">
   A native Windows coding agent that <em>is</em> the harness. It runs the tool loop itself and talks
   straight to an OpenAI-compatible model server — a DGX Spark on your LAN, a local Ollama or
-  LM Studio, or a hosted provider. No Node, no sidecar process, no web view.
+  LM Studio, a hosted provider, or Amazon Bedrock. No Node, no sidecar process, no web view.
 </p>
 
 ---
@@ -56,6 +56,7 @@ pin a permission preset, and optionally open a project folder.
 | Ollama | `http://127.0.0.1:11434/v1` | Start the Ollama app or `ollama serve` |
 | LM Studio | `http://127.0.0.1:1234/v1` | Developer › Start Server |
 | OpenAI, OpenRouter | hosted | API key required |
+| Amazon Bedrock | `https://bedrock-runtime.<region>.amazonaws.com` | Set up by its own guide — see below |
 
 API keys are stored in **Windows Credential Manager**, never in the settings file. If a server on
 another machine can't be reached, check it's bound to `0.0.0.0` rather than `127.0.0.1`, and that the
@@ -110,6 +111,51 @@ Swapper logs: `journalctl -u spark-swapper -f` on the Spark.
 
 The guide's pictures are drawn by `src/Dsh.App/Assets/Guide/make_art.py`; the Spark Swapper
 screenshots in them are from its repository (MIT, see `SWAPPER-SCREENSHOTS-LICENSE.txt` there).
+
+## Using Amazon Bedrock
+
+On the wizard's first page, **Use Amazon Bedrock with my AWS account (guided)** — or **Settings ›
+Models › Add Amazon Bedrock…** — starts a guide for people who have never used the AWS CLI. All it
+needs is an AWS account you can sign in to on the website.
+
+1. **The AWS CLI.** DSH looks for it and installs it if it's missing (or updates it if it's too old
+   for the browser sign-in, which needs 2.32 or later): Amazon's per-user MSI, no administrator
+   prompt, with its Authenticode signature checked (signer *Amazon Web Services, Inc.*) before it
+   runs. If that's blocked, it can install for all users (Windows asks for permission) or with
+   `winget`.
+2. **Sign in.** Pick a Region, then **Sign in with my browser**: DSH runs `aws login` into its own
+   profile, `dsh-bedrock`, so profiles you already have are left alone. Your browser opens to the
+   AWS sign-in page; DSH never sees your password. Signing in on a PC without a browser works too
+   (the CLI's `--remote` mode: open the link elsewhere and paste the code back). Already set up with
+   IAM Identity Center (SSO), keys or a role? Choose **Use a profile I already have** — DSH runs
+   `aws sso login` for SSO profiles. The guide then shows the account you're signed in to.
+3. **Pick a model.** The Region's chat models (Claude, Amazon Nova, Llama, Mistral, DeepSeek, …)
+   with the best of each family first, using a cross-Region inference profile where the model needs
+   one. DSH checks what each one needs before first use.
+4. **Enable it** — only when needed; most models are ready immediately:
+   - **Claude** needs Anthropic's one-time *use case* form per AWS account. DSH asks the same
+     questions (company, website, industry, who will use it, what for) and submits it
+     (`PutUseCaseForModelAccess`).
+   - **Marketplace models** show their offer first — price per unit, licence (EULA) link, refund
+     policy — and are enabled only after you tick *I accept* and press **Accept and enable**
+     (`CreateFoundationModelAgreement`).
+   - Then DSH waits for AWS to finish (usually seconds, up to 15 minutes for a new subscription).
+   If your AWS identity isn't allowed to do something, the page says which permission is missing
+   and has a ready-made IAM policy to copy for your administrator.
+5. **Connect** — saves the route (profile, Region, model) and says hello through Bedrock.
+
+Requests are signed with SigV4 using short-lived credentials the AWS CLI exports for the profile
+(`aws configure export-credentials`), refreshed before they expire; nothing secret is stored in
+DSH's settings. Chats use Bedrock's Converse API with streaming, tools, images, prompt caching for
+Claude and Nova, and Claude's extended thinking. When the sign-in runs out, the banner offers **Sign
+in to AWS…** (the browser opens, and your next message goes through); **Settings › Models** has
+**Sign in again** and **Change…** (another model, Region or account) for each Bedrock route.
+
+Need a **Bedrock API key** for another tool? The guide's last page can create one from your sign-in
+(valid up to 12 hours) and save it in the Credentials Vault as `AWS_BEARER_TOKEN_BEDROCK`.
+
+Costs are billed by AWS to your account (Amazon Bedrock, and AWS Marketplace for Marketplace models).
+To remove DSH's sign-in: `aws logout --profile dsh-bedrock`.
 
 ## The window
 

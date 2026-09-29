@@ -84,14 +84,12 @@ def aws_cli_install(t):
     out += rect(x + 18, y + 86, w - 36, 10, t["surface3"], rx=5) + rect(x + 18, y + 86, (w - 36) * .68, 10, "url(#brandH)", rx=5)
     out += text(x + 18, y + 112, "Copying files…", 9.5, 500, t["muted"])
     out += rect(x + w - 92, y + h - 36, 74, 22, t["surface"], rx=5, stroke=t["stroke"]) + text(x + w - 55, y + h - 21, "Cancel", 9.5, 600, t["muted"], "middle")
-    # Windows asks first
+    # just for this user: no administrator prompt
     out += card(t, 400, 80, 176, 92, rx=10)
     out += rect(416, 96, 22, 26, "url(#brand)", rx=4)
     out += path("M427,100 L435,104 V111 C435,116 431,119 427,121 C423,119 419,116 419,111 V104 Z", fill="#ffffff", opacity=.9)
-    out += text(446, 106, "Windows asks:", 9.5, 700, t["ink"]) + text(446, 120, "allow the installer?", 9.5, 500, t["muted"])
-    out += rect(416, 136, 70, 22, "url(#brand)", rx=5) + text(451, 151, "Yes", 10, 700, "#ffffff", "middle")
-    out += rect(494, 136, 66, 22, t["surface"], rx=5, stroke=t["stroke"]) + text(527, 151, "No", 10, 600, t["muted"], "middle")
-    out += cursor(468, 146, .9)
+    out += text(446, 106, "Just for you", 9.5, 700, t["ink"]) + text(446, 120, "installs in your user folder", 9.5, 500, t["muted"])
+    out += chip(t, 416, 138, "No admin prompt", "ok")
     # checks
     for i, s in enumerate(["Downloaded from Amazon", "Signature checked", "Installed"]):
         out += check(412, 194 + i * 20, 7, t["ok"]) + text(425, 197.5 + i * 20, s, 9.5, 600, t["ink"])
