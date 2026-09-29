@@ -83,6 +83,9 @@ public enum ProviderKind
     [JsonStringEnumMemberName("openAICompat")] OpenAICompat,
     [JsonStringEnumMemberName("openAI")] OpenAI,
     [JsonStringEnumMemberName("openRouter")] OpenRouter,
+    /// <summary>Amazon Bedrock through its Converse API, signed with AWS credentials from the AWS CLI
+    /// (<see cref="ProviderProfile.AwsProfile"/>) or a Bedrock API key.</summary>
+    [JsonStringEnumMemberName("bedrock")] Bedrock,
 }
 
 /// <summary>One configured model route: where the server is, which model, and how to talk to it.
@@ -110,6 +113,11 @@ public sealed record ProviderProfile
     /// server is trusted to present — e.g. the DGX Spark's nginx TLS front. Checked only when normal
     /// Windows trust fails; null = normal trust only.</summary>
     public string? PinnedCertificate { get; set; }
+    /// <summary>Bedrock: the AWS CLI profile whose sign-in DSH uses (e.g. "dsh-bedrock"). Null with an
+    /// <see cref="ApiKey"/> = authenticate with that Bedrock API key instead.</summary>
+    public string? AwsProfile { get; set; }
+    /// <summary>Bedrock: the AWS Region to call (e.g. "us-east-1").</summary>
+    public string? AwsRegion { get; set; }
 
     public ProviderProfile() { }
 
@@ -160,7 +168,7 @@ public sealed record ProviderProfile
             [
                 "openai.com", "openrouter.ai", "anthropic.com", "groq.com", "together.xyz", "together.ai",
                 "fireworks.ai", "mistral.ai", "deepseek.com", "x.ai", "googleapis.com", "azure.com",
-                "cerebras.ai", "perplexity.ai",
+                "cerebras.ai", "perplexity.ai", "amazonaws.com", "api.aws",
             ];
             return !hosted.Any(h => host == h || host.EndsWith("." + h, StringComparison.Ordinal));
         }
@@ -172,6 +180,7 @@ public sealed record ProviderProfile
     {
         ProviderKind.Ollama or ProviderKind.LmStudio => false,
         ProviderKind.OpenAICompat => !IsLoopbackOrLan,
+        ProviderKind.Bedrock => AwsProfile is null,
         _ => true,
     };
 
