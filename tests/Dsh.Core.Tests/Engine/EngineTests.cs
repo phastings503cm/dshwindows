@@ -52,6 +52,22 @@ public sealed class EngineTests : IDisposable
         Assert.Contains(events.Of<EngineEvent.ToolFinished>(), e => e.Ok);
     }
 
+    /// <summary>Opaque provider state from Done (Claude's signed reasoning on Bedrock) is stored on the
+    /// assistant message and so reaches the next request with it.</summary>
+    [Fact]
+    public async Task ProviderStateRidesOnTheAssistantMessageIntoTheNextRequest()
+    {
+        var call = new ToolCall("c1", "echo", """{"text":"ping"}""");
+        var client = new ScriptedClient(new Turn("let me check", [call]) { ProviderState = "[signed]" }, new Turn("all done"));
+        var result = await MakeEngine(client).RunAsync([], "go");
+
+        Assert.Equal("[signed]", result.Messages[1].ProviderState);
+        Assert.Null(result.Messages[^1].ProviderState);
+        var next = client.Requests[1].Messages.Single(m => m.Role == MessageRole.Assistant);
+        Assert.Equal("[signed]", next.ProviderState);
+        Assert.Equal("let me check", next.Content);
+    }
+
     /// <summary>The engine must forward a tool's file changes so the editor can reload.</summary>
     [Fact]
     public async Task FileChangesAreEmitted()

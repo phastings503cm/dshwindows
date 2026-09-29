@@ -228,6 +228,7 @@ public sealed class Engine
             var text = new StringBuilder();
             IReadOnlyList<ToolCall> calls = [];
             LlmUsage? turnUsage = null;
+            string? providerState = null;
             var failures = 0;
             // HTTP 500s get a bounded number of tries of their own — counted apart from outage
             // retries, so a 500 after a long outage still gets its full allowance.
@@ -259,6 +260,7 @@ public sealed class Engine
                 text.Clear();
                 calls = [];
                 turnUsage = null;
+                providerState = null;
                 try
                 {
                     await foreach (var ev in client.StreamAsync(request, cancellationToken).ConfigureAwait(false))
@@ -276,6 +278,7 @@ public sealed class Engine
                             case LlmStreamEvent.Done d:
                                 calls = d.Calls;
                                 turnUsage = d.Usage;
+                                providerState = d.ProviderState;
                                 break;
                         }
                     }
@@ -333,7 +336,9 @@ public sealed class Engine
             if (finalText.Trim().Length > 0) lastReplyText = finalText;
 
             var assistantId = $"m{iteration}";
-            messages.Add(LlmMessage.Assistant(finalText, calls));
+            // The provider's opaque state (signed reasoning) rides on the message so the next request
+            // can send it back.
+            messages.Add(LlmMessage.Assistant(finalText, calls) with { ProviderState = providerState });
             progress?.Update(messages);
             sink(new EngineEvent.AssistantMessage(assistantId, finalText, calls));
 
