@@ -22,7 +22,7 @@ namespace Dsh.Core;
 //   2. the Qwen/DeepSeek XML convention emitted inside plain text, for backends that lack
 //      function calling (see XmlToolCalls).
 
-public sealed class OpenAiClient : ILlmClient
+public sealed class OpenAiClient : IProviderClient
 {
     /// <summary>A stream that sends nothing for this long is treated as dead (and the call retried,
     /// see RequestRetry). Generous: a local server prefilling a few hundred thousand tokens sends
@@ -443,7 +443,8 @@ public sealed class OpenAiClient : ILlmClient
         }
     }
 
-    private static async Task<string> ReadErrorBodyAsync(HttpResponseMessage response, CancellationToken cancellationToken)
+    /// <summary>The first 8 KB of an error reply (enough for any message; a proxy's HTML page can be huge).</summary>
+    internal static async Task<string> ReadErrorBodyAsync(HttpResponseMessage response, CancellationToken cancellationToken)
     {
         try
         {
@@ -909,6 +910,9 @@ public static class FallbackContextWindow
     /// <summary>A context window for a model name, or null if unknown.</summary>
     public static int? Limit(string modelId)
     {
+        // Bedrock ids ("us.anthropic.claude-sonnet-4-5-20250929-v1:0", inference-profile ARNs) carry
+        // vendor and Region prefixes the tables below don't expect.
+        if (BedrockModels.ContextWindow(modelId) is { } bedrock) return bedrock;
         var baseName = modelId.Split('/')[^1].ToLowerInvariant();
         if (Exact.TryGetValue(baseName, out var hit)) return hit;
         var noTag = baseName.Split(':')[0];
