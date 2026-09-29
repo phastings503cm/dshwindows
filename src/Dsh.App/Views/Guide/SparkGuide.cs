@@ -344,7 +344,8 @@ public sealed partial class SparkGuide : IDisposable
         OnHidden();
         _installCts?.Cancel();
         _connectCts?.Cancel();
-        _state.Save();
+        // A finished guide already removed its progress file; don't write it back.
+        if (!_state.Completed) _state.Save();
         _disposed = true;
         _ssh?.Dispose();
         _swapper?.Dispose();

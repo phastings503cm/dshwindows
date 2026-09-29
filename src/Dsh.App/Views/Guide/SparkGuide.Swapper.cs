@@ -223,6 +223,10 @@ public sealed partial class SparkGuide
                 ? "The Spark presented a different certificate from the one you trusted. Go back one step and look at it again."
                 : error.Message;
         }
+        catch (Exception error)
+        {
+            _sessionError = error.Message;
+        }
         finally
         {
             _adminBusy = false;
@@ -344,6 +348,10 @@ public sealed partial class SparkGuide
                 : error.Detail ?? error.Message;
             if (error.StatusCode == 409) _session = null;
         }
+        catch (Exception error)
+        {
+            _adminError = error.Message;
+        }
         finally
         {
             client?.Dispose();
@@ -413,7 +421,7 @@ public sealed partial class SparkGuide
                 StartPolling();
             }
         }
-        catch (SwapperException error)
+        catch (Exception error)
         {
             _modelError = error.Message;
         }
@@ -537,6 +545,10 @@ public sealed partial class SparkGuide
         {
             _modelError = error.Detail ?? error.Message;
         }
+        catch (Exception error)
+        {
+            _modelError = error.Message;
+        }
         finally
         {
             _starting = false;
@@ -597,7 +609,7 @@ public sealed partial class SparkGuide
         catch (OperationCanceledException)
         {
         }
-        catch (SwapperException error)
+        catch (Exception error)
         {
             _modelError = error.Message;
             RenderIf(GuidePage.Model);
