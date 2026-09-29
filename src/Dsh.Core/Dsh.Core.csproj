@@ -12,6 +12,12 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <!-- DPAPI for the credential vault's values file. The package builds on
+         every OS; the API throws PlatformNotSupportedException off Windows. -->
+    <PackageReference Include="System.Security.Cryptography.ProtectedData" Version="10.0.12" />
+  </ItemGroup>
+
+  <ItemGroup>
     <InternalsVisibleTo Include="Dsh.Core.Tests" />
     <InternalsVisibleTo Include="DSH" />
   </ItemGroup>
