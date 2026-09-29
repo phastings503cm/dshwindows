@@ -69,6 +69,7 @@ public static class RequestRetry
         switch (error)
         {
             case OperationCanceledException:
+            case LlmException { Permanent: true }:
                 return new RetryDisposition.Fail();
             case LlmException llm:
                 return llm.Kind switch

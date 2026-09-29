@@ -177,6 +177,19 @@ public sealed class RequestRetryTests : IDisposable
     }
 
     [Fact]
+    public void ClientCanMarkAFailurePermanentWhateverItsStatus()
+    {
+        // A 404 about a model heals on a server that swaps models — unless the client knows better.
+        Assert.IsType<RetryDisposition.UntilAvailable>(RequestRetry.Disposition(
+            LlmException.Rejected(404, "gone", "Model not found.")));
+        Assert.IsType<RetryDisposition.Fail>(RequestRetry.Disposition(
+            LlmException.Rejected(404, "gone", "Model not found.", permanent: true)));
+        Assert.IsType<RetryDisposition.Fail>(RequestRetry.Disposition(
+            LlmException.Rejected(503, "signed out", "", permanent: true)));
+        Assert.IsType<RetryDisposition.UntilAvailable>(RequestRetry.Disposition(LlmException.Rejected(429, "slow down", "")));
+    }
+
+    [Fact]
     public void BackoffGrowsThenHoldsAtThirtySeconds()
     {
         Assert.Equal([2, 4, 8, 16, 30, 30, 30], Enumerable.Range(1, 7).Select(n => RequestRetry.Backoff(n).TotalSeconds));

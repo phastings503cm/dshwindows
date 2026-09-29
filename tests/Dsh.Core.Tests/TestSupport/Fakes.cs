@@ -10,6 +10,9 @@ namespace Dsh.Core.Tests;
 /// <summary>One scripted model turn: text streamed in pieces, then the tool calls and usage on Done.</summary>
 public sealed record Turn(string Text = "", IReadOnlyList<ToolCall>? Calls = null, LlmUsage? Usage = null)
 {
+    /// <summary>Handed back on Done, as a provider that needs its signed reasoning again would.</summary>
+    public string? ProviderState { get; init; }
+
     /// <summary>A turn with no text that only asks for tools.</summary>
     public static Turn Calling(params ToolCall[] calls) => new("", calls);
 }
@@ -61,7 +64,7 @@ public sealed class ScriptedClient : ILlmClient
             cancellationToken.ThrowIfCancellationRequested();
             yield return new LlmStreamEvent.Text(elements.GetTextElement());
         }
-        yield return new LlmStreamEvent.Done(turn.Calls ?? [], "stop", turn.Usage);
+        yield return new LlmStreamEvent.Done(turn.Calls ?? [], "stop", turn.Usage) { ProviderState = turn.ProviderState };
     }
 
     public Task<IReadOnlyList<string>> ListModelsAsync(CancellationToken cancellationToken = default) =>

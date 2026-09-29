@@ -24,6 +24,12 @@ public sealed record LlmMessage
     /// tools). Such messages are pruned to the newest few so a long debugging session doesn't fill
     /// the window with old screenshots.</summary>
     public string? ImageSource { get; init; }
+    /// <summary>For <see cref="MessageRole.Assistant"/>: opaque provider data that must be sent back
+    /// verbatim with this message (copied from <see cref="LlmStreamEvent.Done.ProviderState"/>) — e.g.
+    /// Claude's signed reasoning on Bedrock, which Claude insists on seeing again while it works through
+    /// the tool calls of that turn. Only the client that wrote it reads it; others ignore it. Lost when a
+    /// transcript is rebuilt from text (compaction, replay), which every reader must tolerate.</summary>
+    public string? ProviderState { get; init; }
 
     public LlmMessage(MessageRole role, string? content = null)
     {
@@ -315,10 +321,17 @@ public abstract record LlmStreamEvent
 {
     /// <summary>A text delta to append to the assistant message.</summary>
     public sealed record Text(string Delta) : LlmStreamEvent;
-    /// <summary>A reasoning ("thinking") delta. Shown live, never sent back.</summary>
+    /// <summary>A reasoning ("thinking") delta. Shown live; a provider that needs it back carries it in
+    /// <see cref="Done.ProviderState"/>.</summary>
     public sealed record Reasoning(string Delta) : LlmStreamEvent;
     /// <summary>The stream finished: complete tool calls (may be empty) + metadata.</summary>
-    public sealed record Done(IReadOnlyList<ToolCall> Calls, string? Finish, LlmUsage? Usage) : LlmStreamEvent;
+    public sealed record Done(IReadOnlyList<ToolCall> Calls, string? Finish, LlmUsage? Usage) : LlmStreamEvent
+    {
+        /// <summary>Opaque provider data the caller must store on the assistant message this turn
+        /// becomes (<see cref="LlmMessage.ProviderState"/>) and so send back verbatim — e.g. signed
+        /// reasoning. Null for providers that need nothing.</summary>
+        public string? ProviderState { get; init; }
+    }
 }
 
 public enum LlmErrorKind { NoModel, Connection, Http, Overflow, Sse, Unsupported }
@@ -331,14 +344,18 @@ public sealed class LlmException : Exception
     public string Body { get; } = "";
     /// <summary>For <see cref="LlmErrorKind.Overflow"/>: the window the server says it has.</summary>
     public int Limit { get; }
+    /// <summary>The client knows retrying cannot help, whatever the status code would suggest (a 404 for
+    /// a model that will not appear by waiting — unlike a self-hosted server swapping models).</summary>
+    public bool Permanent { get; }
 
     private LlmException(LlmErrorKind kind, string message, int statusCode = 0, string body = "", int limit = 0,
-                         Exception? inner = null) : base(message, inner)
+                         Exception? inner = null, bool permanent = false) : base(message, inner)
     {
         Kind = kind;
         StatusCode = statusCode;
         Body = body;
         Limit = limit;
+        Permanent = permanent;
     }
 
     public static LlmException NoModel() => new(LlmErrorKind.NoModel,
@@ -349,6 +366,14 @@ public sealed class LlmException : Exception
 
     public static LlmException Http(int code, string body) => new(LlmErrorKind.Http,
         $"The model server replied {code}: {TextUtil.Prefix(body, 300)}", code, body);
+
+    /// <summary>An HTTP-class refusal the provider client has already put into plain words (Bedrock's
+    /// AccessDenied → "enable access to the model"; an AWS sign-in that ran out). Retried by
+    /// <paramref name="code"/> like <see cref="Http"/> unless <paramref name="permanent"/>;
+    /// <paramref name="body"/> is the server's own wording, for the retry status line.</summary>
+    public static LlmException Rejected(int code, string message, string body, bool permanent = false,
+                                        Exception? inner = null) =>
+        new(LlmErrorKind.Http, message, code, body, inner: inner, permanent: permanent);
 
     /// <summary>The server refused the request because it would exceed the model's context window,
     /// and said what the limit is. The caller should compact the transcript and retry once.</summary>
