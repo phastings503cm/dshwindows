@@ -5,6 +5,7 @@ using System.Windows.Media;
 using System.Windows.Media.Imaging;
 using Dsh.App.Infrastructure;
 using Dsh.App.Model;
+using Dsh.App.Views.Guide;
 using Dsh.App.Views.Settings;
 using Dsh.Core;
 
@@ -12,8 +13,11 @@ namespace Dsh.App.Views.Wizard;
 
 /// <summary>First-run configuration, re-runnable from Settings or the Help menu. The job is narrow:
 /// find a model server, prove we can reach it, and pin a permission preset. Everything else in the app
-/// assumes those three are done.</summary>
-public sealed class SetupWizardWindow : Window
+/// assumes those three are done.
+///
+/// Its first page also offers the DGX Spark guide (<see cref="SparkGuide"/>): a beginner's walk from a
+/// Spark in its box to a working connection, shown in this same window in place of the normal steps.</summary>
+public sealed class SetupWizardWindow : Window, IGuideHost
 {
     private enum Step { Welcome, Backend, Connection, Model, Tuning, Permissions, Project, Done }
 
@@ -41,11 +45,23 @@ public sealed class SetupWizardWindow : Window
     private string _thinking = "";
     /// <summary>The route being edited when the wizard is re-run, so fields it doesn't show survive.</summary>
     private ProviderProfile? _existing;
+    /// <summary>A self-signed certificate the user chose to trust for a server the scanner found.</summary>
+    private string? _pinnedCertificate;
+    private bool _trustPin = true;
+    private ScannerPanel? _scanner;
+    private bool _showScanner;
+    private string? _scanNote;
+
+    /// <summary>The DGX Spark guide, while it is shown instead of the normal steps.</summary>
+    private SparkGuide? _guide;
+    private GuidePage? _renderedGuidePage;
 
     private readonly StackPanel _progress = new() { Orientation = Orientation.Horizontal };
     private readonly TextBlock _stepTitle = Ui.Text("", 12.5, FontWeights.SemiBold, wrap: false);
     private readonly TextBlock _stepCount = Ui.Secondary("");
     private readonly ContentControl _body = new() { Focusable = false };
+    private readonly Border _frame;
+    private readonly ScrollViewer _scroll;
     private readonly Button _back;
     private readonly Button _skip;
     private readonly Button _next;
@@ -64,7 +80,7 @@ public sealed class SetupWizardWindow : Window
         SetResourceReference(BackgroundProperty, "SolidBackgroundFillColorBaseBrush");
 
         _back = Ui.Button("Back", Back);
-        _skip = Ui.Button("Skip", () => Go(Step.Done));
+        _skip = Ui.Button("Skip", Skip);
         _next = Ui.Button("Continue", Advance, accent: true);
         _next.IsDefault = true;
 
@@ -91,15 +107,77 @@ public sealed class SetupWizardWindow : Window
         var divider = Ui.Divider();
         DockPanel.SetDock(divider, Dock.Top);
         root.Children.Add(divider);
-        root.Children.Add(new ScrollViewer
+        _frame = new Border { Child = _body, MaxWidth = 640, Padding = new Thickness(28, 20, 28, 20) };
+        _scroll = new ScrollViewer
         {
-            Content = new Border { Child = _body, MaxWidth = 640, Padding = new Thickness(28, 20, 28, 20) },
+            Content = _frame,
             VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
-        });
+            HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled,
+        };
+        root.Children.Add(_scroll);
         Content = root;
+        Closed += (_, _) =>
+        {
+            _guide?.Dispose();
+            _scanner?.Cancel();
+        };
 
         Seed();
         Render();
+    }
+
+    // MARK: - The DGX Spark guide
+
+    /// <summary>Show the guide in place of the normal steps (resuming saved progress when asked).</summary>
+    private void StartGuide(bool resume)
+    {
+        _guide?.Dispose();
+        var saved = resume ? GuideState.Load() : null;
+        if (!resume) GuideState.Clear();
+        _guide = new SparkGuide(_model, this, saved);
+        // The guide's pages carry pictures: give them room, within the screen.
+        var area = SystemParameters.WorkArea;
+        if (Width < 900) Width = Math.Min(900, area.Width);
+        if (Height < 760) Height = Math.Min(760, area.Height);
+        Render();
+        if (SelfTest.Current is null) _guide.Activate();
+    }
+
+    /// <summary>For the self-test: the guide on <paramref name="page"/>, with sample state.</summary>
+    internal void ShowGuideDemo(GuidePage page)
+    {
+        if (_guide is null) StartGuide(resume: false);
+        _guide!.ShowDemo(page);
+    }
+
+    /// <summary>For the self-test: scroll the page to a fraction of its height.</summary>
+    internal void ScrollGuide(double fraction)
+    {
+        _scroll.UpdateLayout();
+        _scroll.ScrollToVerticalOffset(_scroll.ScrollableHeight * fraction);
+    }
+
+    Window IGuideHost.Window => this;
+
+    void IGuideHost.Render() => Render();
+
+    void IGuideHost.RefreshChrome() => RenderChrome();
+
+    void IGuideHost.LeaveGuide()
+    {
+        _guide?.Dispose();
+        _guide = null;
+        _renderedGuidePage = null;
+        Go(Step.Welcome);
+    }
+
+    void IGuideHost.FinishGuide()
+    {
+        // The guide saved the model route itself; don't overwrite it with this window's draft.
+        _model.Config.WizardCompleted = true;
+        if (_model.Host.Sessions.Count == 0) _model.NewChat();
+        GuideState.Clear();
+        DialogResult = true;
     }
 
     // MARK: - State
@@ -197,6 +275,7 @@ public sealed class SetupWizardWindow : Window
             var some => some,
         };
         profile.ReasoningEffort = _thinking.Length == 0 ? null : _thinking;
+        if (_pinnedCertificate is not null) profile.PinnedCertificate = _trustPin ? _pinnedCertificate : null;
         return profile;
     }
 
@@ -224,7 +303,22 @@ public sealed class SetupWizardWindow : Window
 
     private void Back()
     {
+        if (_guide is { } guide)
+        {
+            guide.Back();
+            return;
+        }
         if (_step > Step.Welcome) Go(_step - 1);
+    }
+
+    private void Skip()
+    {
+        if (_guide is { } guide)
+        {
+            guide.Secondary();
+            return;
+        }
+        Go(Step.Done);
     }
 
     private bool CanAdvance => _step switch
@@ -237,6 +331,11 @@ public sealed class SetupWizardWindow : Window
 
     private async void Advance()
     {
+        if (_guide is { } guide)
+        {
+            guide.Next();
+            return;
+        }
         if (!CanAdvance) return;
         switch (_step)
         {
@@ -291,22 +390,27 @@ public sealed class SetupWizardWindow : Window
 
     private void Render()
     {
-        var steps = Enum.GetValues<Step>();
-        _progress.Children.Clear();
-        foreach (var step in steps)
+        if (_guide is { } guide)
         {
-            var bar = new Border { Height = 3, CornerRadius = new CornerRadius(1.5), Margin = new Thickness(0, 0, 4, 0) };
-            bar.SetResourceReference(Border.BackgroundProperty, step <= _step ? "AccentFillColorDefaultBrush" : "DividerStrokeColorDefaultBrush");
-            _progress.Children.Add(bar);
+            RenderChrome();
+            _frame.MaxWidth = 700;
+            _body.Content = guide.Render();
+            if (_renderedGuidePage != guide.Page)
+            {
+                _renderedGuidePage = guide.Page;
+                _scroll.ScrollToTop();
+            }
+            return;
         }
-        _progress.SizeChanged -= LayoutBars;
-        _progress.SizeChanged += LayoutBars;
-        LayoutBars(null, null);
+        _frame.MaxWidth = 640;
+        var steps = Enum.GetValues<Step>();
+        RenderBars(steps.Length, (int)_step);
         _stepTitle.Text = StepTitle(_step);
         _stepCount.Text = $"Step {(int)_step + 1} of {steps.Length}";
 
         _back.Visibility = _step == Step.Welcome ? Visibility.Hidden : Visibility.Visible;
         _skip.Visibility = _step == Step.Project ? Visibility.Visible : Visibility.Collapsed;
+        _skip.Content = "Skip";
         _next.Content = _step == Step.Done ? "Start Working" : "Continue";
         _next.IsEnabled = CanAdvance;
 
@@ -321,6 +425,39 @@ public sealed class SetupWizardWindow : Window
             Step.Project => ProjectStep(),
             _ => Done(),
         };
+    }
+
+    private void RenderBars(int count, int current)
+    {
+        if (_progress.Children.Count != count)
+        {
+            _progress.Children.Clear();
+            for (var i = 0; i < count; i++)
+                _progress.Children.Add(new Border { Height = 3, CornerRadius = new CornerRadius(1.5), Margin = new Thickness(0, 0, 4, 0) });
+        }
+        for (var i = 0; i < count; i++)
+            ((Border)_progress.Children[i]).SetResourceReference(Border.BackgroundProperty, i <= current ? "AccentFillColorDefaultBrush" : "DividerStrokeColorDefaultBrush");
+        _progress.SizeChanged -= LayoutBars;
+        _progress.SizeChanged += LayoutBars;
+        LayoutBars(null, null);
+    }
+
+    /// <summary>The guide's header and footer, without rebuilding its page.</summary>
+    private void RenderChrome()
+    {
+        if (_guide is not { } guide)
+        {
+            Refresh();
+            return;
+        }
+        RenderBars(guide.SectionCount, guide.SectionIndex);
+        _stepTitle.Text = guide.Title;
+        _stepCount.Text = guide.StepText;
+        _back.Visibility = Visibility.Visible;
+        _skip.Visibility = guide.SecondaryLabel is null ? Visibility.Collapsed : Visibility.Visible;
+        _skip.Content = guide.SecondaryLabel ?? "Skip";
+        _next.Content = guide.NextLabel;
+        _next.IsEnabled = guide.CanAdvance;
     }
 
     private void LayoutBars(object? sender, SizeChangedEventArgs? e)
@@ -369,11 +506,23 @@ public sealed class SetupWizardWindow : Window
             Margin = new Thickness(0, 0, 0, 12),
         };
         var title = Ui.Text("Set up DSH", 28, FontWeights.SemiBold);
-        return Ui.Stack(logo, title,
-            Lead("This app is the agent harness — it runs the tool loop itself and talks straight to a model server. Nothing else has to be installed or kept running."),
-            Bullet(Icons.Connect, "Point it at a model", "A DGX Spark or any OpenAI-compatible server on your network, a local Ollama or LM Studio, or a cloud provider."),
-            Bullet(Icons.Wrench, "Give it tools", "Read, write, edit, glob, grep, shell (PowerShell by default), and web fetch — the Qwen Code tool set, so prompts and skills written for it work here."),
-            Bullet(Icons.Code, "Work in a project", "Open a folder to get a file tree, an editor, and a terminal beside the chat."));
+        var panel = Ui.Stack(logo, title,
+            Lead("This app is the agent harness — it runs the tool loop itself and talks straight to a model server. Nothing else has to be installed or kept running."));
+        if (GuideState.Load() is { HasProgress: true } saved)
+        {
+            panel.Children.Add(Choice(Icons.Play, "Continue the DGX Spark guide",
+                $"Pick up where you left off{(saved.Host is { } host ? $" with your Spark at {host}" : "")}.", false, () => StartGuide(resume: true)));
+        }
+        panel.Children.Add(Choice(Icons.Education, "I have a DGX Spark — walk me through everything (beginner)",
+            "Step by step, with a picture for each: power it on, find it on your network, install Spark Swapper, and connect DSH. No terminal needed — it can even make a USB stick to reinstall it.",
+            false, () => StartGuide(resume: false)));
+        var or = Ui.Secondary("Or press Continue to set DSH up yourself:");
+        or.Margin = new Thickness(0, 6, 0, 12);
+        panel.Children.Add(or);
+        panel.Children.Add(Bullet(Icons.Connect, "Point it at a model", "A DGX Spark or any OpenAI-compatible server on your network, a local Ollama or LM Studio, or a cloud provider."));
+        panel.Children.Add(Bullet(Icons.Wrench, "Give it tools", "Read, write, edit, glob, grep, shell (PowerShell by default), and web fetch — the Qwen Code tool set, so prompts and skills written for it work here."));
+        panel.Children.Add(Bullet(Icons.Code, "Work in a project", "Open a folder to get a file tree, an editor, and a terminal beside the chat."));
+        return panel;
     }
 
     private static UIElement Bullet(string glyph, string title, string detail)
@@ -528,7 +677,33 @@ public sealed class SetupWizardWindow : Window
         var test = Ui.Button("Test Connection", () => _ = ProbeAsync());
         test.IsEnabled = !_probing && _host.Trim().Length > 0;
 
-        var panel = Ui.Stack(Heading("Connection"), Lead(hint), grid, Ui.Stack(Orientation.Horizontal, test, status));
+        var find = Ui.Button(_showScanner ? "Hide the Scan" : "Find Servers on My Network", ToggleScanner,
+            tooltip: "Look for model servers (a DGX Spark, vLLM, SGLang, Ollama, LM Studio, llama.cpp) on your network and on this PC");
+        find.Margin = new Thickness(8, 0, 0, 0);
+        var panel = Ui.Stack(Heading("Connection"), Lead(hint), grid, Ui.Stack(Orientation.Horizontal, test, find, status));
+        if (_pinnedCertificate is { } pin)
+        {
+            var trust = Ui.Check($"Trust this server's self-signed certificate (SHA-256 {CertificateProbe.Shorten(pin)})", _trustPin, value =>
+            {
+                _trustPin = value;
+                _probeCount = null;
+            });
+            trust.Margin = new Thickness(0, 10, 0, 0);
+            trust.ToolTip = pin;
+            panel.Children.Add(trust);
+        }
+        if (_scanNote is { } note)
+        {
+            var hintText = Ui.Secondary(note);
+            hintText.Margin = new Thickness(0, 8, 0, 0);
+            panel.Children.Add(hintText);
+        }
+        if (_showScanner && _scanner is { } scanner)
+        {
+            var card = Ui.Card(GuideVisuals.Detach(scanner));
+            card.Margin = new Thickness(0, 14, 0, 0);
+            panel.Children.Add(card);
+        }
         if (_probeError is { } error)
         {
             var troubleshooting = _kind switch
@@ -544,6 +719,64 @@ public sealed class SetupWizardWindow : Window
             panel.Children.Add(card);
         }
         return panel;
+    }
+
+    private void ToggleScanner()
+    {
+        _showScanner = !_showScanner;
+        if (_showScanner && _scanner is null)
+        {
+            _scanner = new ScannerPanel(ScannerPanel.Purpose.ModelServer);
+            _scanner.ServiceChosen += UseFoundServer;
+            if (SelfTest.Current is null) _scanner.Start();
+        }
+        Render();
+    }
+
+    /// <summary>For the self-test: the connection step with the scanner open, showing sample results.</summary>
+    internal void ShowScannerDemo(IEnumerable<FoundHost> hosts)
+    {
+        _kind = ProviderKind.OpenAICompat;
+        Go(Step.Connection);
+        _showScanner = false;
+        ToggleScanner();
+        _scanner!.ShowDemo(hosts);
+    }
+
+    /// <summary>Fill the connection from a server the scan found.</summary>
+    private void UseFoundServer(FoundHost host, FoundService service)
+    {
+        _kind = service.Kind switch
+        {
+            ServiceKind.Ollama => ProviderKind.Ollama,
+            ServiceKind.LmStudio => ProviderKind.LmStudio,
+            _ => ProviderKind.OpenAICompat,
+        };
+        var address = host.IsLoopback ? "127.0.0.1" : host.Address.ToString();
+        if (service.Tls)
+        {
+            _host = service.BaseUrl ?? $"https://{address}:{service.Port}/v1";
+            _port = "";
+            _pinnedCertificate = service.CertificateFingerprint;
+            _trustPin = true;
+        }
+        else
+        {
+            _host = address;
+            _port = service.Port.ToString();
+            _pinnedCertificate = null;
+        }
+        _discovered = service.Models.OrderBy(m => m, StringComparer.OrdinalIgnoreCase).ToList();
+        _probeCount = service.Models.Count > 0 ? service.Models.Count : null;
+        _probeError = null;
+        if (_discovered.Count > 0) _modelId = _discovered[0];
+        _scanNote = service.NeedsKey
+            ? host.LooksLikeSpark
+                ? "This server wants an API key. For a DGX Spark with Spark Swapper, it's under Keys & connection on the Swapper's page — or go back to the first page and use the DGX Spark guide, which fetches it for you."
+                : "This server wants an API key — paste it above."
+            : $"Filled in from {host.Headline}.";
+        _showScanner = false;
+        Render();
     }
 
     private async Task ProbeAsync()

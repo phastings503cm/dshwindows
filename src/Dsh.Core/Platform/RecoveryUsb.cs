@@ -7,6 +7,7 @@ using System.Runtime.Versioning;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
+using System.Text.Json.Serialization;
 
 namespace Dsh.Core;
 
@@ -537,10 +538,10 @@ public sealed record RecoveryUsbJob(
 public sealed record RecoveryUsbStatus(
     string State, string Stage, string Message, long Done = 0, long Total = 0, string? Error = null, string? DriveLetter = null)
 {
-    public bool IsRunning => State == "running";
-    public bool IsDone => State == "done";
-    public bool IsFailed => State == "failed";
-    public double Fraction => Total <= 0 ? 0 : Math.Clamp((double)Done / Total, 0, 1);
+    [JsonIgnore] public bool IsRunning => State == "running";
+    [JsonIgnore] public bool IsDone => State == "done";
+    [JsonIgnore] public bool IsFailed => State == "failed";
+    [JsonIgnore] public double Fraction => Total <= 0 ? 0 : Math.Clamp((double)Done / Total, 0, 1);
 }
 
 public static class RecoveryUsbWriter
