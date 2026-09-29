@@ -191,23 +191,9 @@ public sealed class BackgroundAgents
         {
             var report = job.Report ?? "";
             var clipped = report.Length > 6_000 ? report[..6_000] + "\n[… report truncated]" : report;
-            lines.Add($"\n## {job.Id} “{job.Description}” — {job.StatusWord} after {Durations.Format(job.Elapsed)}\n{clipped}");
+            lines.Add($"\n## {job.Id} “{job.Description}” — {job.StatusWord} after {job.Elapsed.FormattedDuration()}\n{clipped}");
         }
         return string.Join("\n", lines);
-    }
-}
-
-/// <summary>Short human durations: "42s", "5m", "5m 12s", "2h", "2h 5m".</summary>
-public static class Durations
-{
-    public static string Format(TimeSpan span)
-    {
-        var secs = (int)Math.Round(Math.Max(0, span.TotalSeconds));
-        if (secs < 60) return $"{secs}s";
-        int m = secs / 60, s = secs % 60;
-        if (m < 60) return s == 0 ? $"{m}m" : $"{m}m {s}s";
-        int h = m / 60, mm = m % 60;
-        return mm == 0 ? $"{h}h" : $"{h}h {mm}m";
     }
 }
 
@@ -232,7 +218,7 @@ public sealed class AgentStatusTool : IToolExecutor
             if (jobs.Count == 0) return "No background agents have been started in this chat.";
             var lines = jobs.Select(j =>
             {
-                var line = $"- {j.Id} “{j.Description}”: {j.StatusWord}, {Durations.Format(j.Elapsed)}";
+                var line = $"- {j.Id} “{j.Description}”: {j.StatusWord}, {j.Elapsed.FormattedDuration()}";
                 if (j.Status != BackgroundAgentStatus.Running && j.Report is { } r)
                     line += " — " + TextUtil.Prefix(r.Split('\n')[0], 120);
                 return line;
@@ -244,9 +230,9 @@ public sealed class AgentStatusTool : IToolExecutor
         if (await pool.WaitAsync(id, TimeSpan.FromSeconds(wait), cancellationToken).ConfigureAwait(false) is not { } job)
             return $"Error: no background agent {id}. agent_status without an id lists them.";
         if (job.Status == BackgroundAgentStatus.Running)
-            return $"{job.Id} “{job.Description}” is still running ({Durations.Format(job.Elapsed)}). Carry on with other work, or wait with wait_seconds.";
+            return $"{job.Id} “{job.Description}” is still running ({job.Elapsed.FormattedDuration()}). Carry on with other work, or wait with wait_seconds.";
         pool.MarkReported(job.Id);
-        return $"{job.Id} “{job.Description}” {job.StatusWord} after {Durations.Format(job.Elapsed)}.\n\n{job.Report ?? "(no report)"}";
+        return $"{job.Id} “{job.Description}” {job.StatusWord} after {job.Elapsed.FormattedDuration()}.\n\n{job.Report ?? "(no report)"}";
     }
 }
 
