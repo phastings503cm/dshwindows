@@ -187,7 +187,9 @@ public sealed class ViewImageTests
         var dims = ImageSize.Dimensions(image.Data);
         Assert.NotNull(dims);
         Assert.Equal(1600, Math.Max(dims.Value.Width, dims.Value.Height));
-        Assert.True(image.Data.Length < big.Length, "and it actually shrank");
+        // Fewer pixels, still compressed. (Not "fewer bytes than the original": a synthetic pattern
+        // compresses so well that its resampled copy can come out larger on Windows' PNG encoder.)
+        Assert.True(image.Data.Length < dims.Value.Width * dims.Value.Height * 4, "the result is a compressed image");
     }
 
     [Fact]
