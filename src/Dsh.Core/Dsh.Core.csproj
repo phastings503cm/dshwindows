@@ -16,4 +16,9 @@
     <InternalsVisibleTo Include="DSH" />
   </ItemGroup>
 
+  <ItemGroup>
+    <!-- SSH to a DGX Spark: the setup guide installs Spark Swapper over it. -->
+    <PackageReference Include="SSH.NET" Version="2026.0.0" />
+  </ItemGroup>
+
 </Project>
