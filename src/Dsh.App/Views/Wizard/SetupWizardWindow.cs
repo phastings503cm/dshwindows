@@ -137,6 +137,22 @@ public sealed class SetupWizardWindow : Window, IGuideHost
         ShowGuide(new SparkGuide(_model, this, saved));
     }
 
+    /// <summary>Show the Amazon Bedrock guide in place of the normal steps, on <paramref name="page"/>.</summary>
+    public void StartBedrockGuide(BedrockPage page = BedrockPage.Welcome, ProviderProfile? route = null)
+    {
+        _guide?.Dispose();
+        ShowGuide(new BedrockGuide(_model, this, page, route));
+    }
+
+    /// <summary>For the self-test: the Bedrock guide on <paramref name="page"/>, with sample state.</summary>
+    internal void ShowBedrockDemo(BedrockPage page, bool terms = false)
+    {
+        if (_guide is not BedrockGuide) StartBedrockGuide();
+        var guide = (BedrockGuide)_guide!;
+        if (terms) guide.ShowTermsDemo();
+        else guide.ShowDemo(page);
+    }
+
     /// <summary>Show <paramref name="guide"/> in place of the normal steps.</summary>
     private void ShowGuide(IWizardGuide guide)
     {
@@ -287,6 +303,8 @@ public sealed class SetupWizardWindow : Window, IGuideHost
 
     private void SaveProvider()
     {
+        // A Bedrock route is made and changed by its guide; the plain steps leave it as it is.
+        if (_kind == ProviderKind.Bedrock) return;
         var profile = Draft();
         var key = _apiKey;
         profile.ApiKey = null;
@@ -314,7 +332,8 @@ public sealed class SetupWizardWindow : Window, IGuideHost
             guide.Back();
             return;
         }
-        if (_step > Step.Welcome) Go(_step - 1);
+        if (_step == Step.Permissions && _kind == ProviderKind.Bedrock) Go(Step.Backend);
+        else if (_step > Step.Welcome) Go(_step - 1);
     }
 
     private void Skip()
@@ -366,6 +385,10 @@ public sealed class SetupWizardWindow : Window, IGuideHost
                 break;
             case Step.Done:
                 Finish();
+                break;
+            case Step.Backend when _kind == ProviderKind.Bedrock:
+                // Keeping the Bedrock route: its model and sign-in are the guide's (or Settings'), not these steps'.
+                Go(Step.Permissions);
                 break;
             default:
                 Go(_step + 1);
@@ -522,6 +545,9 @@ public sealed class SetupWizardWindow : Window, IGuideHost
         panel.Children.Add(Choice(Icons.Education, "I have a DGX Spark — walk me through everything (beginner)",
             "Step by step, with a picture for each: power it on, find it on your network, install Spark Swapper, and connect DSH. No terminal needed — it can even make a USB stick to reinstall it.",
             false, () => StartGuide(resume: false)));
+        panel.Children.Add(Choice(Icons.Cloud, "Use Amazon Bedrock with my AWS account (guided)",
+            "Claude, Amazon Nova, Llama and more, billed to your AWS account. DSH installs the AWS CLI if needed, signs you in through your browser, and takes care of each model's first-time form or terms — showing you the price first.",
+            false, () => StartBedrockGuide()));
         var or = Ui.Secondary("Or press Continue to set DSH up yourself:");
         or.Margin = new Thickness(0, 6, 0, 12);
         panel.Children.Add(or);
@@ -598,6 +624,9 @@ public sealed class SetupWizardWindow : Window, IGuideHost
                 Render();
             }));
         }
+        panel.Children.Add(Choice(Icons.Cloud, "Amazon Bedrock",
+            "Models from AWS — Claude, Amazon Nova, Llama, Mistral — with your AWS sign-in. Opens a short guide that sets everything up, including the AWS CLI.",
+            _kind == ProviderKind.Bedrock, () => StartBedrockGuide()));
         return panel;
     }
 

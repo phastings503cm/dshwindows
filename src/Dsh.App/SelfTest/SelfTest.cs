@@ -55,7 +55,11 @@ public sealed class SelfTest
         Directory.CreateDirectory(Home);
         var settings = new
         {
-            providers = new[] { new { kind = "openAICompat", name = "DGX Spark / vLLM", baseUrl = "http://127.0.0.1:9/v1", model = "qwen3-coder-30b-a3b", contextWindow = 262144 } },
+            providers = new object[]
+            {
+                new { kind = "openAICompat", name = "DGX Spark / vLLM", baseUrl = "http://127.0.0.1:9/v1", model = "qwen3-coder-30b-a3b", contextWindow = 262144 },
+                new { kind = "bedrock", name = "Amazon Bedrock", baseUrl = "https://bedrock-runtime.us-east-1.amazonaws.com", model = "us.anthropic.claude-sonnet-4-5-20250929-v1:0", awsProfile = "dsh-bedrock", awsRegion = "us-east-1" },
+            },
             activeRoute = "DGX Spark / vLLM|qwen3-coder-30b-a3b",
             wizardCompleted = true,
             checkForUpdates = false,
@@ -178,6 +182,39 @@ public sealed class SelfTest
         finally
         {
             try { wizard.Close(); } catch (Exception) { }
+        }
+
+        // The Amazon Bedrock guide, with sample state (no AWS CLI or network).
+        var bedrock = new SetupWizardWindow(model) { Owner = owner, WindowStartupLocation = WindowStartupLocation.CenterOwner };
+        try
+        {
+            bedrock.Show();
+            foreach (var page in Enum.GetValues<BedrockPage>())
+            {
+                bedrock.ShowBedrockDemo(page);
+                await Settle(900);
+                Capture(bedrock, $"bedrock-{page.ToString().ToLowerInvariant()}");
+                if (page is BedrockPage.Model or BedrockPage.Access or BedrockPage.Done)
+                {
+                    bedrock.ScrollGuide(0.6);
+                    await Settle(400);
+                    Capture(bedrock, $"bedrock-{page.ToString().ToLowerInvariant()}-more");
+                }
+            }
+            bedrock.ShowBedrockDemo(BedrockPage.Access, terms: true);
+            await Settle(900);
+            Capture(bedrock, "bedrock-terms");
+            bedrock.ScrollGuide(0.6);
+            await Settle(400);
+            Capture(bedrock, "bedrock-terms-more");
+        }
+        catch (Exception error)
+        {
+            Fail("bedrock guide", error);
+        }
+        finally
+        {
+            try { bedrock.Close(); } catch (Exception) { }
         }
 
         var scanning = new SetupWizardWindow(model) { Owner = owner, WindowStartupLocation = WindowStartupLocation.CenterOwner, Height = 760 };

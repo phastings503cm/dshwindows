@@ -3,6 +3,7 @@ using System.Windows.Controls;
 using System.Windows.Input;
 using Dsh.App.Infrastructure;
 using Dsh.App.Model;
+using Dsh.App.Views.Guide;
 using Dsh.App.Views.Dialogs;
 using Dsh.Core;
 
@@ -19,6 +20,7 @@ public static class ProviderKinds
         ProviderKind.LmStudio => "LM Studio",
         ProviderKind.OpenAI => "OpenAI",
         ProviderKind.OpenRouter => "OpenRouter",
+        ProviderKind.Bedrock => "Amazon Bedrock",
         _ => "OpenAI-compatible server (vLLM, SGLang, llama.cpp, DGX Spark)",
     };
 }
@@ -35,11 +37,12 @@ public sealed class ModelsPage : UserControl
         _model = model;
         var page = new StackPanel { MaxWidth = 760 };
         page.Children.Add(Ui.Title("Models"));
-        var intro = Ui.Secondary("Any OpenAI-compatible server works: a local Ollama or LM Studio, vLLM or SGLang on your LAN, a DGX Spark, or a hosted API. API keys are kept in Windows Credential Manager, never in the settings file.");
+        var intro = Ui.Secondary("Any OpenAI-compatible server works: a local Ollama or LM Studio, vLLM or SGLang on your LAN, a DGX Spark, or a hosted API — or Amazon Bedrock with your AWS sign-in. API keys are kept in Windows Credential Manager, never in the settings file.");
         intro.Margin = new Thickness(0, 6, 0, 8);
         page.Children.Add(intro);
         page.Children.Add(Ui.Buttons(
             Ui.Button("Add Server…", () => Edit(new ProviderProfile(ProviderKind.OpenAICompat, "New server", "http://127.0.0.1:8000/v1", "")), accent: true),
+            Ui.Button("Add Amazon Bedrock…", () => model.ShowBedrockGuide()),
             Ui.Button("Test Active", () => _ = TestAsync()),
             Ui.Button("Setup Wizard…", model.ShowWizard)));
         _status.Margin = new Thickness(0, 8, 0, 4);
@@ -78,6 +81,17 @@ public sealed class ModelsPage : UserControl
                 use.Margin = new Thickness(0, 0, 8, 0);
                 actions.Children.Add(use);
             }
+            if (provider.Kind == ProviderKind.Bedrock)
+            {
+                var signIn = Ui.Button("Sign in again", () => _ = SignInAgainAsync(provider));
+                signIn.Margin = new Thickness(0, 0, 8, 0);
+                signIn.ToolTip = "Opens your browser to sign in to AWS again — for when the sign-in has run out.";
+                actions.Children.Add(signIn);
+                var change = Ui.Button("Change…", () => _model.ShowBedrockGuide(BedrockPage.Model, provider));
+                change.Margin = new Thickness(0, 0, 8, 0);
+                change.ToolTip = "Pick another model or Region, or sign in with another AWS account, in the Bedrock guide.";
+                actions.Children.Add(change);
+            }
             actions.Children.Add(Ui.Button("Edit…", () => Edit(provider)));
             var remove = new Button { Content = Icons.Delete, ToolTip = "Remove", Margin = new Thickness(6, 0, 0, 0) };
             remove.SetResourceReference(StyleProperty, "IconButton");
@@ -90,7 +104,9 @@ public sealed class ModelsPage : UserControl
             };
             actions.Children.Add(remove);
 
-            var detail = $"{provider.Model} · {provider.BaseUrl}";
+            var detail = provider.Kind == ProviderKind.Bedrock
+                ? $"{provider.Model} · {BedrockRegions.NameOf(provider.AwsRegion ?? BedrockRegions.Default)} · {(provider.AwsProfile is { } aws ? $"AWS profile {aws}" : "Bedrock API key")}"
+                : $"{provider.Model} · {provider.BaseUrl}";
             if (provider.ContextWindow is { } window) detail += $" · {window:N0} ctx";
             var row = Ui.Row(provider.Name, detail, actions, Icons.ForProvider(provider.Kind));
             row.MouseLeftButtonDown += (_, e) =>
@@ -109,6 +125,26 @@ public sealed class ModelsPage : UserControl
         if (editor.ShowDialog() == true) Rebuild();
     }
 
+    /// <summary>The route's AWS sign-in ran out: sign the same profile in again (the browser opens).</summary>
+    private async Task SignInAgainAsync(ProviderProfile provider)
+    {
+        var profile = provider.AwsProfile ?? AwsSignIn.DefaultProfile;
+        _status.SetResourceReference(TextBlock.ForegroundProperty, "TextFillColorSecondaryBrush");
+        _status.Text = "Finish signing in to AWS in the browser window that just opened…";
+        try
+        {
+            var result = await Task.Run(() => AwsAccounts.SignInAgainAsync(profile, provider.AwsRegion));
+            _status.Text = result.Succeeded ? $"✔ Signed in to AWS again (profile {profile})." : result.Message;
+            _status.SetResourceReference(TextBlock.ForegroundProperty, result.Succeeded ? "SystemFillColorSuccessBrush" : "SystemFillColorCriticalBrush");
+            if (result.Succeeded && _model.Host.AwsSignInProfile == profile) _model.Host.Banner = null;
+        }
+        catch (Exception error)
+        {
+            _status.Text = $"Signing in to AWS failed: {error.Message}";
+            _status.SetResourceReference(TextBlock.ForegroundProperty, "SystemFillColorCriticalBrush");
+        }
+    }
+
     private async Task TestAsync()
     {
         if (_model.Config.ActiveProvider is not { } provider)
@@ -119,10 +155,13 @@ public sealed class ModelsPage : UserControl
         _status.Text = "Testing…";
         try
         {
-            var models = await new OpenAiClient(provider).ListModelsAsync();
-            var info = await new OpenAiClient(provider).ModelInfoAsync();
+            var client = ProviderClients.Create(provider);
+            var models = await client.ListModelsAsync();
+            var info = await client.ModelInfoAsync();
             var window = info.ContextWindow is { } w ? $", {w:N0}-token window" : "";
-            _status.Text = $"✔ Connected — {models.Count} model(s) served{window}.";
+            _status.Text = provider.Kind == ProviderKind.Bedrock
+                ? $"✔ Connected to Amazon Bedrock — {models.Count} model(s) in {BedrockRegions.NameOf(provider.AwsRegion ?? BedrockRegions.Default)}{window}."
+                : $"✔ Connected — {models.Count} model(s) served{window}.";
             _status.SetResourceReference(TextBlock.ForegroundProperty, "SystemFillColorSuccessBrush");
         }
         catch (Exception error)
@@ -164,7 +203,12 @@ public sealed class ProviderEditorWindow : Window
         ShowInTaskbar = false;
         SetResourceReference(BackgroundProperty, "SolidBackgroundFillColorBaseBrush");
 
-        foreach (var kind in ProviderKinds.All) _kind.Items.Add(new ComboBoxItem { Content = kind.Label(), Tag = kind, IsSelected = kind == profile.Kind });
+        // A Bedrock route's kind, address and sign-in come from its guide; the rest can be tuned here.
+        var bedrock = profile.Kind == ProviderKind.Bedrock;
+        foreach (var kind in bedrock ? [ProviderKind.Bedrock] : ProviderKinds.All)
+            _kind.Items.Add(new ComboBoxItem { Content = kind.Label(), Tag = kind, IsSelected = kind == profile.Kind });
+        _kind.IsEnabled = !bedrock;
+        _url.IsReadOnly = bedrock;
         _kind.SelectionChanged += (_, _) => UpdateKeyVisibility();
         _name.Text = profile.Name;
         _url.Text = profile.BaseUrl;
@@ -190,7 +234,9 @@ public sealed class ProviderEditorWindow : Window
         form.Children.Add(Ui.Card(Ui.Stack(
             Labeled("Kind", _kind),
             Labeled("Name", _name),
-            Labeled("Base URL", _url, "The OpenAI-compatible endpoint, usually ending in /v1."),
+            Labeled("Base URL", _url, bedrock
+                ? "Bedrock's endpoint for the Region. To change the Region, model or AWS sign-in, use Change… on the Models page."
+                : "The OpenAI-compatible endpoint, usually ending in /v1."),
             _keyRow)));
         form.Children.Add(Ui.Section("Model"));
         var discover = Ui.Button("Discover", () => _ = DiscoverAsync());
@@ -252,7 +298,7 @@ public sealed class ProviderEditorWindow : Window
 
     private void UpdateKeyVisibility()
     {
-        var probe = new ProviderProfile(SelectedKind, "", _url.Text.Trim(), "");
+        var probe = new ProviderProfile(SelectedKind, "", _url.Text.Trim(), "") { AwsProfile = SelectedKind == ProviderKind.Bedrock ? _original.AwsProfile : null };
         _keyRow.Visibility = probe.NeedsApiKey || _key.Password.Length > 0 ? Visibility.Visible : Visibility.Collapsed;
     }
 
@@ -270,6 +316,8 @@ public sealed class ProviderEditorWindow : Window
             ReasoningEffort = _thinking.SelectedItem is ComboBoxItem { Tag: string raw } && raw.Length > 0 ? raw : null,
             Vision = _vision.IsChecked == true ? null : false,
             CustomHeaders = headers.Count == 0 ? null : headers,
+            AwsProfile = SelectedKind == ProviderKind.Bedrock ? _original.AwsProfile : null,
+            AwsRegion = SelectedKind == ProviderKind.Bedrock ? _original.AwsRegion : null,
         };
     }
 
@@ -285,7 +333,7 @@ public sealed class ProviderEditorWindow : Window
         _status.Text = "Connecting…";
         try
         {
-            var models = (await new OpenAiClient(Probe()).ListModelsAsync()).OrderBy(m => m, StringComparer.OrdinalIgnoreCase).ToList();
+            var models = (await ProviderClients.Create(Probe()).ListModelsAsync()).OrderBy(m => m, StringComparer.OrdinalIgnoreCase).ToList();
             var current = _modelName.Text;
             _modelName.Items.Clear();
             foreach (var m in models) _modelName.Items.Add(m);
@@ -302,7 +350,7 @@ public sealed class ProviderEditorWindow : Window
     private async Task DetectAsync()
     {
         _status.Text = "Asking the server…";
-        var info = await new OpenAiClient(Probe()).ModelInfoAsync();
+        var info = await ProviderClients.Create(Probe()).ModelInfoAsync();
         if (info.ContextWindow is { } limit)
         {
             var serving = info.Id.Length > 0 && info.Id != _modelName.Text ? $" (serving {info.Id})" : "";

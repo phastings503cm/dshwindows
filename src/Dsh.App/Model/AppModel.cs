@@ -37,6 +37,9 @@ public sealed partial class AppModel : ObservableObject
     /// <summary>Views ask the shell to open windows through these.</summary>
     public event Action<SettingsTab, SkillsAction?>? SettingsRequested;
     public event Action? WizardRequested;
+    /// <summary>Open the setup window straight into the Amazon Bedrock guide, on the given page (for an
+    /// existing Bedrock route, starting from its sign-in and Region).</summary>
+    public event Action<Views.Guide.BedrockPage, ProviderProfile?>? BedrockGuideRequested;
     public event Action? MemoryRequested;
     public event Action<string>? ImageRequested;
 
@@ -179,5 +182,7 @@ public sealed partial class AppModel : ObservableObject
 
     public void ShowSettings(SettingsTab tab = SettingsTab.General, SkillsAction? action = null) => SettingsRequested?.Invoke(tab, action);
     public void ShowWizard() => WizardRequested?.Invoke();
+    public void ShowBedrockGuide(Views.Guide.BedrockPage page = Views.Guide.BedrockPage.Welcome, ProviderProfile? route = null) =>
+        BedrockGuideRequested?.Invoke(page, route);
     public void ShowMemory() => MemoryRequested?.Invoke();
 }

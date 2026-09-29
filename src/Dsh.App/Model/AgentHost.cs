@@ -22,6 +22,10 @@ public sealed partial class AgentHost : ObservableObject
     public ObservableCollection<SessionVM> Sessions { get; } = [];
     [ObservableProperty] [NotifyPropertyChangedFor(nameof(Selected))] private string? _selectedId;
     [ObservableProperty] private string? _banner;
+    /// <summary>While the banner says an AWS sign-in ran out: the AWS CLI profile to sign in again.</summary>
+    [ObservableProperty] private string? _awsSignInProfile;
+
+    partial void OnBannerChanged(string? value) => AwsSignInProfile = null;
     /// <summary>Plugin manifests loaded for the current project, and any that failed.</summary>
     [ObservableProperty] private IReadOnlyList<PluginManifest> _plugins = [];
     [ObservableProperty] private IReadOnlyList<string> _pluginErrors = [];
@@ -720,6 +724,7 @@ public sealed partial class AgentHost : ObservableObject
                 ContextInfoChanged?.Invoke();
             }
             ReportFailure(vm, Describe(error));
+            if (error.InnerException is AwsSignInRequiredException expired) AwsSignInProfile = expired.Profile;
         }
         catch (Exception error)
         {

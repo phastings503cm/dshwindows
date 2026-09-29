@@ -185,6 +185,8 @@
                             Click="DismissBanner_Click" ToolTip="Dismiss" Margin="8,0,0,0" />
                     <Button x:Name="BannerSetupButton" DockPanel.Dock="Right" Content="Set Up…" Margin="8,0,0,0" Padding="10,3"
                             Click="Wizard_Click" Visibility="Collapsed" />
+                    <Button x:Name="BannerAwsButton" DockPanel.Dock="Right" Content="Sign in to AWS…" Margin="8,0,0,0" Padding="10,3"
+                            Click="AwsSignIn_Click" Visibility="Collapsed" />
                     <TextBlock x:Name="BannerText" TextWrapping="Wrap" VerticalAlignment="Center" MaxHeight="60" TextTrimming="CharacterEllipsis" />
                 </DockPanel>
             </Border>

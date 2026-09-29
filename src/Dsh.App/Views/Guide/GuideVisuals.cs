@@ -322,7 +322,7 @@ public static class GuideVisuals
     }
 
     /// <summary>A labelled form field.</summary>
-    public static StackPanel Field(string label, Control control, string? hint = null)
+    public static StackPanel Field(string label, FrameworkElement control, string? hint = null)
     {
         var title = Ui.Text(label, 12.5, FontWeights.SemiBold);
         title.Margin = new Thickness(0, 0, 0, 4);

@@ -61,6 +61,7 @@ public partial class MainWindow : Window
         model.Host.ContextInfoChanged += UpdateModelLabel;
         model.SettingsRequested += (tab, action) => ShowSettings(tab, action);
         model.WizardRequested += ShowWizard;
+        model.BedrockGuideRequested += ShowBedrockGuide;
         model.MemoryRequested += ShowMemory;
         model.ImageRequested += path => ImageViewerWindow.Show(this, path);
 
@@ -108,6 +109,7 @@ public partial class MainWindow : Window
                 UpdateRunning();
                 break;
             case nameof(AgentHost.Banner):
+            case nameof(AgentHost.AwsSignInProfile):
                 UpdateBanner();
                 break;
             case nameof(AgentHost.AnyRunning):
@@ -260,6 +262,8 @@ public partial class MainWindow : Window
         BannerCard.Visibility = banner is null ? Visibility.Collapsed : Visibility.Visible;
         BannerText.Text = banner ?? "";
         BannerSetupButton.Visibility = !Model.Config.IsConfigured ? Visibility.Visible : Visibility.Collapsed;
+        BannerAwsButton.Visibility = Model.Host.AwsSignInProfile is not null ? Visibility.Visible : Visibility.Collapsed;
+        BannerAwsButton.IsEnabled = !_signingInToAws;
         if (Model.Update is { } update)
         {
             UpdateCard.Visibility = Visibility.Visible;
@@ -521,6 +525,16 @@ public partial class MainWindow : Window
         UpdateBanner();
     }
 
+    public void ShowBedrockGuide(Dsh.App.Views.Guide.BedrockPage page, ProviderProfile? route)
+    {
+        var owner = OwnedWindows.OfType<Window>().FirstOrDefault(w => w.IsActive) ?? this;
+        var wizard = new SetupWizardWindow(Model) { Owner = owner };
+        wizard.StartBedrockGuide(page, route);
+        wizard.ShowDialog();
+        UpdateModelLabel();
+        UpdateBanner();
+    }
+
     public void ShowSettings(SettingsTab tab = SettingsTab.General, SkillsAction? action = null)
     {
         if (_settings is { IsLoaded: true })
@@ -601,6 +615,45 @@ public partial class MainWindow : Window
     private void DataFolder_Click(object sender, RoutedEventArgs e) => ShellIntegration.OpenFolder(AppPaths.Root);
     private void Releases_Click(object sender, RoutedEventArgs e) => ShellIntegration.Open(UpdateChecker.ReleasesPage);
     private void DismissBanner_Click(object sender, RoutedEventArgs e) => Model.Host.Banner = null;
+
+    private bool _signingInToAws;
+
+    /// <summary>The banner's "Sign in to AWS…": the AWS sign-in behind a Bedrock route ran out. Sign the
+    /// same profile in again (the browser opens), then the next message just works.</summary>
+    private async void AwsSignIn_Click(object sender, RoutedEventArgs e)
+    {
+        if (Model.Host.AwsSignInProfile is not { } profile || _signingInToAws) return;
+        var region = Model.Config.Providers.FirstOrDefault(p => p.Kind == ProviderKind.Bedrock && (p.AwsProfile ?? AwsSignIn.DefaultProfile) == profile)?.AwsRegion;
+        _signingInToAws = true;
+        Model.Host.Banner = "Finish signing in to AWS in the browser window that just opened…";
+        Model.Host.AwsSignInProfile = profile;
+        try
+        {
+            var result = await Task.Run(() => AwsAccounts.SignInAgainAsync(profile, region));
+            _signingInToAws = false;
+            if (result.Succeeded)
+            {
+                Model.Host.Banner = null;
+                Model.Host.Broadcast($"Signed in to AWS again (profile \"{profile}\"). Send your message again to carry on.");
+            }
+            else
+            {
+                Model.Host.Banner = result.Message;
+                Model.Host.AwsSignInProfile = profile;
+            }
+        }
+        catch (Exception error)
+        {
+            _signingInToAws = false;
+            Model.Host.Banner = $"Signing in to AWS failed: {error.Message}";
+            Model.Host.AwsSignInProfile = profile;
+        }
+        finally
+        {
+            _signingInToAws = false;
+            UpdateBanner();
+        }
+    }
     private void DismissUpdate_Click(object sender, RoutedEventArgs e) => Model.Update = null;
     private void DownloadUpdate_Click(object sender, RoutedEventArgs e)
     {
