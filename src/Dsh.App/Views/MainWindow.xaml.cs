@@ -29,6 +29,8 @@ public partial class MainWindow : Window
     private SessionVM? _watchedSession;
     private bool _closingConfirmed;
     private SettingsWindow? _settings;
+    private VaultWindow? _vault;
+    private readonly QueuePanel _queuePanel;
 
     public MainWindow(AppModel model)
     {
@@ -40,6 +42,9 @@ public partial class MainWindow : Window
         _codeView = new CodeModeView(model);
         _emptyState = new EmptyStateView(model);
         Sidebar.Attach(model);
+        _queuePanel = new QueuePanel(model);
+        _queuePanel.CloseRequested += () => SetQueuePanel(false);
+        QueueHost.Content = _queuePanel;
 
         RestorePlacement();
         SidebarColumn.Width = new GridLength(Math.Clamp(model.Config.SidebarWidth, 200, 440));
@@ -67,6 +72,8 @@ public partial class MainWindow : Window
         UpdatePreset();
         UpdateBanner();
         UpdateRunning();
+        UpdateQueueButton();
+        SetQueuePanel(model.Config.QueuePanelOpen);
         Closing += OnClosing;
     }
 
@@ -106,6 +113,9 @@ public partial class MainWindow : Window
             case nameof(AgentHost.AnyRunning):
             case nameof(AgentHost.RunningCount):
                 UpdateRunning();
+                break;
+            case nameof(AgentHost.QueueRunning):
+                UpdateQueueButton();
                 break;
         }
     }
@@ -215,6 +225,31 @@ public partial class MainWindow : Window
         StopButton.IsEnabled = session is { Stopping: false };
         StopLabel.Text = session is { Stopping: true } ? "Stopping…" : "Stop";
     }
+
+    private void UpdateQueueButton()
+    {
+        var running = Model.Host.QueueRunning;
+        QueueGlyph.Text = running ? Icons.Play : Icons.Queue;
+        QueueDot.Visibility = running ? Visibility.Visible : Visibility.Collapsed;
+        QueueButton.ToolTip = running
+            ? "The task queue is running (Ctrl+Shift+Q to show it)"
+            : "Task queue (Ctrl+Shift+Q) — queue up work and let the harness run it unattended";
+    }
+
+    /// <summary>Show or hide the task queue panel on the right.</summary>
+    private void SetQueuePanel(bool open)
+    {
+        Model.Config.QueuePanelOpen = open;
+        _queuePanel.Visibility = open ? Visibility.Visible : Visibility.Collapsed;
+        QueueSplitter.Visibility = open ? Visibility.Visible : Visibility.Collapsed;
+        QueueColumn.MinWidth = open ? 300 : 0;
+        QueueColumn.Width = open ? new GridLength(Math.Clamp(Model.Config.QueuePanelWidth, 300, 560)) : new GridLength(0);
+    }
+
+    private void ToggleQueuePanel() => SetQueuePanel(_queuePanel.Visibility != Visibility.Visible);
+
+    private void QueueSplitter_DragCompleted(object sender, DragCompletedEventArgs e) =>
+        Model.Config.QueuePanelWidth = QueueColumn.ActualWidth;
 
     private void UpdateBanner()
     {
@@ -375,6 +410,8 @@ public partial class MainWindow : Window
         Bind(Key.OemPeriod, ModifierKeys.Control, Model.StopSelected);
         Bind(Key.OemPeriod, ModifierKeys.Control | ModifierKeys.Shift, Model.StopAll);
         Bind(Key.M, ModifierKeys.Control | ModifierKeys.Shift, ShowMemory);
+        Bind(Key.Q, ModifierKeys.Control | ModifierKeys.Shift, ToggleQueuePanel);
+        Bind(Key.K, ModifierKeys.Control | ModifierKeys.Shift, ShowVault);
         Bind(Key.D1, ModifierKeys.Control, () => Model.Mode = WorkspaceMode.Chat);
         Bind(Key.D2, ModifierKeys.Control, () => Model.Mode = WorkspaceMode.Code);
         Bind(Key.B, ModifierKeys.Control, ToggleTree);
@@ -464,6 +501,8 @@ public partial class MainWindow : Window
         "Ctrl+S / Ctrl+Shift+S\tSave / Save all",
         "Ctrl+W\tClose editor",
         "Ctrl+Shift+M\tMemory & skills",
+        "Ctrl+Shift+Q\tTask queue",
+        "Ctrl+Shift+K\tCredentials vault",
         "Ctrl+,\tSettings",
         "",
         "In the terminal: Ctrl+Shift+C / Ctrl+Shift+V copy and paste; Ctrl+C copies when text is selected.",
@@ -490,6 +529,18 @@ public partial class MainWindow : Window
         _settings = new SettingsWindow(Model, tab, action) { Owner = this };
         _settings.Closed += (_, _) => _settings = null;
         _settings.Show();
+    }
+
+    public void ShowVault()
+    {
+        if (_vault is { IsLoaded: true })
+        {
+            _vault.Activate();
+            return;
+        }
+        _vault = new VaultWindow(Model.Host) { Owner = this };
+        _vault.Closed += (_, _) => _vault = null;
+        _vault.Show();
     }
 
     public void ShowMemory()
@@ -531,6 +582,9 @@ public partial class MainWindow : Window
     private void Stop_Click(object sender, RoutedEventArgs e) => Model.StopSelected();
     private void StopAll_Click(object sender, RoutedEventArgs e) => Model.StopAll();
     private void Memory_Click(object sender, RoutedEventArgs e) => ShowMemory();
+    private void Vault_Click(object sender, RoutedEventArgs e) => ShowVault();
+    private void ToggleQueue_Click(object sender, RoutedEventArgs e) => ToggleQueuePanel();
+    private void QueueLog_Click(object sender, RoutedEventArgs e) => new QueueLogWindow(Model.Host) { Owner = this }.Show();
     private void Skills_Click(object sender, RoutedEventArgs e) => ShowSettings(SettingsTab.Skills);
     private void GenerateSkill_Click(object sender, RoutedEventArgs e) => ShowSettings(SettingsTab.Skills, SkillsAction.Generate);
     private void ImportSkills_Click(object sender, RoutedEventArgs e) => ShowSettings(SettingsTab.Skills, SkillsAction.Import);

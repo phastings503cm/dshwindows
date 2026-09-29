@@ -14,18 +14,20 @@ public class PseudoConsoleTests
         var output = new StringBuilder();
         var exited = new TaskCompletionSource<int>(TaskCreationOptions.RunContinuationsAsynchronously);
         var cmd = Path.Combine(Environment.SystemDirectory, "cmd.exe");
-        using var session = PseudoConsoleSession.Start($"\"{cmd}\" /d /c echo dsh-conpty-ok & exit /b 7",
-                                                       Path.GetTempPath(), 100, 24);
-        session.Output += (buffer, count) =>
-        {
-            lock (emulator)
+        PseudoConsoleSession? console = null;
+        emulator.OnReply = reply => console?.Write(reply);
+        // Handlers attached at Start: this command can finish before Start even returns.
+        using var session = console = PseudoConsoleSession.Start($"\"{cmd}\" /d /c echo dsh-conpty-ok & exit /b 7",
+            Path.GetTempPath(), 100, 24,
+            output: (buffer, count) =>
             {
-                emulator.Feed(buffer.AsSpan(0, count));
-                output.Append(Encoding.UTF8.GetString(buffer, 0, count));
-            }
-        };
-        session.Exited += code => exited.TrySetResult(code);
-        emulator.OnReply = reply => session.Write(reply);
+                lock (emulator)
+                {
+                    emulator.Feed(buffer.AsSpan(0, count));
+                    output.Append(Encoding.UTF8.GetString(buffer, 0, count));
+                }
+            },
+            exited: code => exited.TrySetResult(code));
 
         var finished = await Task.WhenAny(exited.Task, Task.Delay(TimeSpan.FromSeconds(30)));
         Assert.Same(exited.Task, finished);
@@ -39,16 +41,17 @@ public class PseudoConsoleTests
         var emulator = new TerminalEmulator(24, 100);
         var seen = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var cmd = Path.Combine(Environment.SystemDirectory, "cmd.exe");
-        using var session = PseudoConsoleSession.Start($"\"{cmd}\" /d /q /k prompt $G", Path.GetTempPath(), 100, 24);
-        session.Output += (buffer, count) =>
-        {
-            lock (emulator)
+        PseudoConsoleSession? console = null;
+        emulator.OnReply = reply => console?.Write(reply);
+        using var session = console = PseudoConsoleSession.Start($"\"{cmd}\" /d /q /k prompt $G", Path.GetTempPath(), 100, 24,
+            output: (buffer, count) =>
             {
-                emulator.Feed(buffer.AsSpan(0, count));
-                if (emulator.Transcript.Contains("typed-through-conpty-42")) seen.TrySetResult();
-            }
-        };
-        emulator.OnReply = reply => session.Write(reply);
+                lock (emulator)
+                {
+                    emulator.Feed(buffer.AsSpan(0, count));
+                    if (emulator.Transcript.Contains("typed-through-conpty-42")) seen.TrySetResult();
+                }
+            });
 
         await Task.Delay(500);
         // One command line typed in pieces, with cursor keys in between, then Enter: cmd echoes it

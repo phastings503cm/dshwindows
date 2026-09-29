@@ -70,6 +70,9 @@ public sealed partial class AppModel : ObservableObject
     {
         Spark.StartMonitoring();
         Host.EnsureContextProbe();
+        // An interrupted task queue (crash, restart, quit) resumes by itself; one the user stopped
+        // on purpose does not.
+        Host.ResumeQueueIfNeeded();
     }
 
     // MARK: - Projects
@@ -159,7 +162,18 @@ public sealed partial class AppModel : ObservableObject
 
     public void StopAll() => Host.StopAll();
 
-    public bool AnythingRunning => Host.AnyRunning;
+    /// <summary>App exit: cancel everything without marking the queue as stopped by the user.</summary>
+    public void Shutdown() => Host.Shutdown();
+
+    /// <summary>Anything working — a turn, a queue task, or a background agent.</summary>
+    public bool AnythingRunning => Host.AnythingRunning;
+
+    /// <summary>Jump to a chat by id (the queue's "Open chat").</summary>
+    public void OpenSession(string id)
+    {
+        Mode = WorkspaceMode.Chat;
+        Select(id);
+    }
 
     // MARK: - Windows
 

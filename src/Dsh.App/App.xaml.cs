@@ -95,7 +95,11 @@ public partial class App : Application
     {
         try
         {
-            Model?.StopAll();
+            // Leaves the task queue's "resume on launch" alone: quitting mid-queue picks it back up.
+            Model?.Shutdown();
+            // Programs the agent started (game engines, dev servers) must not outlive the app that
+            // owns their consoles.
+            ProcessManager.Shared.StopAll();
             Model?.Config.SaveNow();
             Model?.Spark.Dispose();
         }

@@ -49,10 +49,7 @@ public sealed partial class TerminalSession : ObservableObject, IDisposable
         }
         try
         {
-            var console = PseudoConsoleSession.Start(commandLine, Cwd, cols, rows);
-            console.Output += OnOutput;
-            console.Exited += OnExited;
-            _console = console;
+            _console = PseudoConsoleSession.Start(commandLine, Cwd, cols, rows, output: OnOutput, exited: OnExited);
             IsRunning = true;
         }
         catch (Exception ex)

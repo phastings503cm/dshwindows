@@ -62,6 +62,14 @@ public sealed partial class AppConfig : ObservableObject
     [ObservableProperty] private double _sidebarWidth = 260;
     public WindowPlacement? Window { get; set; }
 
+    /// <summary>The user stopped the task queue on purpose: a relaunch doesn't start it again.</summary>
+    [ObservableProperty] private bool _queuePaused;
+    /// <summary>The queue was running when the app quit (or crashed): pick it back up on launch.</summary>
+    [ObservableProperty] private bool _queueResumeOnLaunch;
+    /// <summary>The Task Queue panel is showing.</summary>
+    [ObservableProperty] private bool _queuePanelOpen;
+    [ObservableProperty] private double _queuePanelWidth = 360;
+
     /// <summary>Skill ids (file paths) switched off everywhere.</summary>
     public HashSet<string> DisabledSkills { get; } = new(StringComparer.OrdinalIgnoreCase);
     /// <summary>Per-chat skill choices.</summary>
@@ -250,6 +258,10 @@ public sealed partial class AppConfig : ObservableObject
         public string? SparkPin { get; set; }
         public double? SidebarWidth { get; set; }
         public WindowPlacement? Window { get; set; }
+        public bool? QueuePaused { get; set; }
+        public bool? QueueResumeOnLaunch { get; set; }
+        public bool? QueuePanelOpen { get; set; }
+        public double? QueuePanelWidth { get; set; }
     }
 
     private void Load()
@@ -291,6 +303,10 @@ public sealed partial class AppConfig : ObservableObject
             SparkPin = stored?.SparkPin;
             SidebarWidth = stored?.SidebarWidth ?? 260;
             Window = stored?.Window;
+            QueuePaused = stored?.QueuePaused ?? false;
+            QueueResumeOnLaunch = stored?.QueueResumeOnLaunch ?? false;
+            QueuePanelOpen = stored?.QueuePanelOpen ?? false;
+            QueuePanelWidth = stored?.QueuePanelWidth ?? 360;
         }
         finally
         {
@@ -345,6 +361,10 @@ public sealed partial class AppConfig : ObservableObject
             SparkPin = SparkPin,
             SidebarWidth = SidebarWidth,
             Window = Window,
+            QueuePaused = QueuePaused,
+            QueueResumeOnLaunch = QueueResumeOnLaunch,
+            QueuePanelOpen = QueuePanelOpen,
+            QueuePanelWidth = QueuePanelWidth,
         };
         try
         {

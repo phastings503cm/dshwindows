@@ -55,6 +55,9 @@ jobs:
       - name: "Test (includes the Windows-only tests: ConPTY, paths, PowerShell)"
         run: dotnet test tests/Dsh.Core.Tests -c Release --no-build --logger "console;verbosity=minimal"
 
+      - name: "App tests (task queue, /goal, background agents, vault)"
+        run: dotnet test tests/Dsh.App.Tests -c Release --no-build --logger "console;verbosity=minimal"
+
       - name: Install Inno Setup
         shell: pwsh
         run: |

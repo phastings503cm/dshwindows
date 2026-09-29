@@ -51,9 +51,13 @@ public sealed class PseudoConsoleSession : IDisposable
         _reader = new Thread(ReadLoop) { IsBackground = true, Name = "ConPTY output" };
     }
 
-    /// <summary>Launch <paramref name="commandLine"/> on a new pseudo console of the given size.</summary>
+    /// <summary>Launch <paramref name="commandLine"/> on a new pseudo console of the given size.
+    /// <paramref name="output"/> and <paramref name="exited"/> are attached before the first byte is
+    /// read: a quick command (<c>echo hi</c>) can print everything and exit before a caller that
+    /// subscribes after Start returns gets the chance.</summary>
     public static PseudoConsoleSession Start(string commandLine, string workingDirectory, int cols, int rows,
-                                             IReadOnlyDictionary<string, string>? environment = null)
+                                             IReadOnlyDictionary<string, string>? environment = null,
+                                             Action<byte[], int>? output = null, Action<int>? exited = null)
     {
         if (!Native.CreatePipe(out var inputRead, out var inputWrite, IntPtr.Zero, 0)) throw new Win32Exception();
         if (!Native.CreatePipe(out var outputRead, out var outputWrite, IntPtr.Zero, 0)) throw new Win32Exception();
@@ -102,6 +106,8 @@ public sealed class PseudoConsoleSession : IDisposable
             }
 
             var session = new PseudoConsoleSession(console, attributeList, environmentBlock, info, inputWrite, outputRead);
+            if (output is not null) session.Output += output;
+            if (exited is not null) session.Exited += exited;
             session.Begin();
             return session;
         }

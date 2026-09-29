@@ -108,6 +108,7 @@ public partial class ChatView : UserControl
         old.Entries.CollectionChanged -= OnEntriesChanged;
         old.PendingGates.CollectionChanged -= OnGatesChanged;
         old.ContentChanged -= ScrollIfPinned;
+        old.BackgroundJobs.CollectionChanged -= OnBackgroundJobsChanged;
     }
 
     private void Attach()
@@ -125,6 +126,7 @@ public partial class ChatView : UserControl
         session.Entries.CollectionChanged += OnEntriesChanged;
         session.PendingGates.CollectionChanged += OnGatesChanged;
         session.ContentChanged += ScrollIfPinned;
+        session.BackgroundJobs.CollectionChanged += OnBackgroundJobsChanged;
 
         Transcript.ItemsSource = new CompositeCollection
         {
@@ -150,6 +152,7 @@ public partial class ChatView : UserControl
         UpdateSkillsButton();
         UpdateSpark();
         UpdateGoal();
+        UpdateBackgroundBar();
         UpdateRunningTool();
         UpdateGauge();
         _pinned = true;
@@ -195,6 +198,39 @@ public partial class ChatView : UserControl
     }
 
     private void OnGatesChanged(object? sender, NotifyCollectionChangedEventArgs e) => UpdateGate();
+
+    private void OnBackgroundJobsChanged(object? sender, NotifyCollectionChangedEventArgs e) => UpdateBackgroundBar();
+
+    private void UpdateBackgroundBar()
+    {
+        var jobs = _session?.RunningBackgroundJobs ?? [];
+        BackgroundBar.Visibility = jobs.Count == 0 ? Visibility.Collapsed : Visibility.Visible;
+        if (jobs.Count == 0) return;
+        BackgroundTitle.Text = $"{jobs.Count} background agent{(jobs.Count == 1 ? "" : "s")}";
+        BackgroundText.Text = string.Join(" · ", jobs.Select(j => $"{j.Id} “{j.Description}”"));
+        BackgroundBar.ToolTip = string.Join("\n", jobs.Select(j => $"{j.Id} “{j.Description}” — running {j.Elapsed.FormattedDuration()}"));
+    }
+
+    private void BackgroundStop_Click(object sender, RoutedEventArgs e)
+    {
+        if (_session is not { } session) return;
+        var jobs = session.RunningBackgroundJobs;
+        var menu = new ContextMenu { PlacementTarget = (UIElement)sender, Placement = System.Windows.Controls.Primitives.PlacementMode.Top };
+        foreach (var job in jobs)
+        {
+            var item = new MenuItem { Header = $"Stop {job.Id} “{job.Description}”".Replace("_", "__") };
+            item.Click += (_, _) => _model.Host.StopBackgroundAgent(session.Id, job.Id);
+            menu.Items.Add(item);
+        }
+        if (jobs.Count > 1)
+        {
+            menu.Items.Add(new Separator());
+            var all = new MenuItem { Header = "Stop all" };
+            all.Click += (_, _) => _model.Host.StopBackgroundAgents(session.Id);
+            menu.Items.Add(all);
+        }
+        menu.IsOpen = true;
+    }
 
     // MARK: - Scrolling
 
@@ -826,7 +862,7 @@ public sealed partial class ThinkingFooter : ObservableObject
     private void OnChanged(object? sender, PropertyChangedEventArgs e)
     {
         if (e.PropertyName is nameof(SessionVM.Running) or nameof(SessionVM.Stopping) or nameof(SessionVM.Activity)
-            or nameof(SessionVM.Reasoning) or nameof(SessionVM.RunningTool))
+            or nameof(SessionVM.Reasoning) or nameof(SessionVM.RunningTool) or nameof(SessionVM.Retry))
             Refresh();
     }
 
@@ -852,6 +888,12 @@ public sealed partial class ThinkingFooter : ObservableObject
     {
         if (_session is not { } session) return;
         if (session.Stopping) Headline = "Stopping…";
+        else if (session.Retry is { } retry)
+        {
+            var wait = (int)Math.Ceiling((retry.NextAttempt - DateTimeOffset.Now).TotalSeconds);
+            var when = wait > 0 ? $"retrying in {wait}s" : "retrying now";
+            Headline = $"Model unavailable ({retry.Reason}) — {when} · attempt {retry.Attempt + 1}. Stop to give up.";
+        }
         else if (session.Activity is { } activity) Headline = activity;
         else if (session.Reasoning.Length > 0 && session.ReasoningStarted is { } started)
             Headline = $"Thinking… {(int)(DateTimeOffset.Now - started).TotalSeconds}s";

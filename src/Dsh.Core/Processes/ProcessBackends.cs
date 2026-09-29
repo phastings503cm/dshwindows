@@ -136,39 +136,77 @@ internal sealed class ConPtyProcess : IProcessHandle
     /// <summary>How long a polite stop (Ctrl+C) gets before the process tree is ended.</summary>
     private static readonly TimeSpan GracePeriod = TimeSpan.FromMilliseconds(1500);
 
-    private readonly PseudoConsoleSession _session;
+    /// <summary>Set right after the console starts; output (and even the exit) can arrive before.</summary>
+    private PseudoConsoleSession _session = null!;
+    private readonly Lock _attach = new();
+    private List<byte[]>? _earlyReplies = [];
+    private bool _exitedBeforeAttach;
     private readonly IProcessSink _sink;
     /// <summary>Only answers the console's own queries (cursor position, device attributes), exactly as
     /// the terminal panel's emulator does; the text for the model comes from the raw stream.</summary>
     private readonly TerminalEmulator _responder;
     private int _exited;
 
-    public int ProcessId { get; }
+    public int ProcessId { get; private set; }
 
-    private ConPtyProcess(PseudoConsoleSession session, IProcessSink sink, TerminalEmulator responder)
+    private ConPtyProcess(IProcessSink sink, TerminalEmulator responder)
     {
-        _session = session;
         _sink = sink;
         _responder = responder;
-        ProcessId = session.ProcessId;
+        responder.OnReply = Reply;
     }
 
     public static ConPtyProcess Start(ProcessLaunch launch, IProcessSink sink)
     {
         var commandLine = BackgroundCommandLine.For(launch.Shell, launch.Command);
         var environment = BackgroundCommandLine.EnvironmentFor(launch);
-        var responder = new TerminalEmulator(launch.Rows, launch.Cols, scrollbackLimit: 0);
-        var session = PseudoConsoleSession.Start(commandLine, launch.WorkingDirectory, launch.Cols, launch.Rows, environment);
-        var process = new ConPtyProcess(session, sink, responder);
-        responder.OnReply = reply => session.Write(reply);
-        session.Output += process.OnOutput;
-        session.Exited += process.OnExited;
+        var process = new ConPtyProcess(sink, new TerminalEmulator(launch.Rows, launch.Cols, scrollbackLimit: 0));
+        // The handlers go in before the first read, so a command that prints and exits at once
+        // loses nothing.
+        var session = PseudoConsoleSession.Start(commandLine, launch.WorkingDirectory, launch.Cols, launch.Rows, environment,
+            process.OnOutput, process.OnExited);
+        process.Attach(session);
         return process;
+    }
+
+    private void Attach(PseudoConsoleSession session)
+    {
+        List<byte[]>? replies;
+        bool exited;
+        lock (_attach)
+        {
+            _session = session;
+            ProcessId = session.ProcessId;
+            replies = _earlyReplies;
+            _earlyReplies = null;
+            exited = _exitedBeforeAttach;
+        }
+        if (exited)
+        {
+            session.Dispose();
+            return;
+        }
+        foreach (var reply in replies ?? []) session.Write(reply);
+    }
+
+    /// <summary>The console asked something (cursor position, device attributes): answer it, or hold
+    /// the answer until the session is attached.</summary>
+    private void Reply(byte[] reply)
+    {
+        lock (_attach)
+        {
+            if (_earlyReplies is not null)
+            {
+                _earlyReplies.Add(reply);
+                return;
+            }
+        }
+        if (!HasExited) _session.Write(reply);
     }
 
     /// <summary>The session knows as soon as the shell exits; the Exited event only comes once its
     /// output is drained. Either way it is over, and its id must not be signalled any more.</summary>
-    private bool HasExited => Volatile.Read(ref _exited) != 0 || _session.HasExited;
+    private bool HasExited => Volatile.Read(ref _exited) != 0 || _session?.HasExited == true;
 
     private void OnOutput(byte[] buffer, int count)
     {
@@ -180,8 +218,15 @@ internal sealed class ConPtyProcess : IProcessHandle
     {
         if (Interlocked.Exchange(ref _exited, 1) != 0) return;
         _sink.Exited(code);
-        // The session raises Exited after its output is drained; release the console and handles.
-        _session.Dispose();
+        // The session raises Exited after its output is drained; release the console and handles
+        // (or let Attach do it, when the process was quicker than Start).
+        PseudoConsoleSession? session;
+        lock (_attach)
+        {
+            session = _session;
+            if (session is null) _exitedBeforeAttach = true;
+        }
+        session?.Dispose();
     }
 
     public void Write(string text)

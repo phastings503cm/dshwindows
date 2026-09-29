@@ -391,6 +391,19 @@
                                    TextTrimming="CharacterEllipsis" />
                     </DockPanel>
                 </Border>
+                <!-- Background subagents still working in this chat -->
+                <Border x:Name="BackgroundBar" CornerRadius="8" Padding="10,5" Margin="0,0,0,6" Visibility="Collapsed"
+                        Background="{DynamicResource SubtleFillColorSecondaryBrush}">
+                    <DockPanel>
+                        <Button x:Name="BackgroundStop" DockPanel.Dock="Right" Style="{StaticResource IconButton}" FontSize="12"
+                                Content="{x:Static infra:Icons.Stop}" ToolTip="Stop background agents" Click="BackgroundStop_Click"
+                                AutomationProperties.Name="Stop background agents" />
+                        <infra:Spinner Width="12" Height="12" Margin="0,0,8,0" Foreground="{DynamicResource AccentTextFillColorPrimaryBrush}" />
+                        <TextBlock x:Name="BackgroundTitle" FontSize="12" FontWeight="SemiBold" Margin="0,0,8,0" VerticalAlignment="Center" />
+                        <TextBlock x:Name="BackgroundText" FontSize="12" Foreground="{DynamicResource TextFillColorSecondaryBrush}"
+                                   TextTrimming="CharacterEllipsis" VerticalAlignment="Center" />
+                    </DockPanel>
+                </Border>
                 <!-- What is running right now -->
                 <StackPanel x:Name="RunningToolLine" Orientation="Horizontal" Margin="2,0,0,6" Visibility="Collapsed">
                     <infra:Spinner Width="12" Height="12" Margin="0,0,8,0" Foreground="{DynamicResource AccentTextFillColorPrimaryBrush}" />

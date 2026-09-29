@@ -77,6 +77,16 @@ public static class Icons
     public const string Pin = "\uE718";
     public const string Play = "\uE768";
     public const string Mail = "\uE715";
+    public const string Pause = "\uE769";
+    public const string Down = "\uE74B";
+    public const string Key = "\uE8D7";
+    public const string Queue = "\uE8FD";
+    public const string History = "\uE81C";
+    public const string View = "\uE890";
+    public const string Hide = "\uED1A";
+    public const string Next = "\uE893";
+    public const string Undo = "\uE7A7";
+    public const string Tray = "\uE7B8";
 
     /// <summary>Glyph for a tool call, so a transcript is scannable at a glance.</summary>
     public static string ForTool(string name) => name switch
@@ -97,6 +107,10 @@ public static class Icons
         "keyboard" => Keyboard,
         "mouse" => Mouse,
         "view_image" => Picture,
+        "vault_search" => Key,
+        "agent_status" or "agent_stop" => People,
+        "queue_task" => Queue,
+        "process_start" or "process_read" or "process_write" or "process_stop" or "process_list" => Terminal,
         _ => Wrench,
     };
 
@@ -131,6 +145,10 @@ public static class Icons
         "process_write" => "Send input",
         "process_stop" => "Stop process",
         "process_list" => "Processes",
+        "vault_search" => "Vault",
+        "agent_status" => "Agent status",
+        "agent_stop" => "Stop agent",
+        "queue_task" => "Queue task",
         _ => name,
     };
 

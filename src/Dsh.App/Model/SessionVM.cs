@@ -86,6 +86,9 @@ public sealed record GateVM(string Id, string Name, string Detail)
 
 public sealed record GoalState(string Text, int Round, DateTimeOffset Started);
 
+/// <summary>The model didn't answer; the engine is waiting to try again.</summary>
+public sealed record RetryState(int Attempt, string Reason, DateTimeOffset NextAttempt);
+
 /// <summary>Observable state for one agent session, driven by <see cref="AgentHost"/>. UI-thread only.</summary>
 public sealed partial class SessionVM : ObservableObject
 {
@@ -118,6 +121,14 @@ public sealed partial class SessionVM : ObservableObject
     [ObservableProperty] private GoalState? _goal;
     /// <summary>Tool call in flight — the composer shows what is happening.</summary>
     [ObservableProperty] private ToolEntryVM? _runningTool;
+    /// <summary>Set while a failed model call waits to be retried.</summary>
+    [ObservableProperty] private RetryState? _retry;
+    /// <summary>The last /goal of this chat, so a bare /goal picks it back up.</summary>
+    [ObservableProperty] private string? _lastGoal;
+    /// <summary>Background subagents this chat launched (the bar above the composer).</summary>
+    public ObservableCollection<BackgroundAgentJob> BackgroundJobs { get; } = [];
+    public IReadOnlyList<BackgroundAgentJob> RunningBackgroundJobs =>
+        BackgroundJobs.Where(j => j.Status == BackgroundAgentStatus.Running).ToList();
 
     /// <summary>Id of the assistant entry currently receiving streamed deltas.</summary>
     public string? StreamingId { get; private set; }
@@ -187,6 +198,33 @@ public sealed partial class SessionVM : ObservableObject
             StreamingId = AppendMessage(MessageRole.Assistant, chunk);
         }
         UpdatedAt = DateTimeOffset.Now;
+    }
+
+    /// <summary>Drop the live bubble: a failed attempt's partial reply is void, the retry streams the
+    /// whole reply again.</summary>
+    public void DropStreaming()
+    {
+        if (StreamingId is not null && Entries.LastOrDefault(e => e.Id == StreamingId) is MessageEntryVM message)
+            Entries.Remove(message);
+        StreamingId = null;
+        ContentChanged?.Invoke();
+    }
+
+    /// <summary>Add or refresh a background agent's row.</summary>
+    public void UpsertBackgroundJob(BackgroundAgentJob job)
+    {
+        var index = -1;
+        for (var i = 0; i < BackgroundJobs.Count; i++)
+        {
+            if (BackgroundJobs[i].Id == job.Id)
+            {
+                index = i;
+                break;
+            }
+        }
+        if (index >= 0) BackgroundJobs[index] = job;
+        else BackgroundJobs.Add(job);
+        OnPropertyChanged(nameof(RunningBackgroundJobs));
     }
 
     /// <summary>Close the streaming bubble so the next text starts a fresh one (a tool call in

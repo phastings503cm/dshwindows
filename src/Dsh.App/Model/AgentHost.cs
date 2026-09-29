@@ -4,6 +4,7 @@ using System.ComponentModel;
 using System.IO;
 using System.Windows.Threading;
 using CommunityToolkit.Mvvm.ComponentModel;
+using Dsh.App.Infrastructure;
 using Dsh.Core;
 
 namespace Dsh.App.Model;
@@ -30,7 +31,7 @@ public sealed partial class AgentHost : ObservableObject
     public ObservableCollection<SkillDraft> PendingDrafts { get; } = [];
     /// <summary>Bumped whenever skills change on disk through the app, so open views reload.</summary>
     [ObservableProperty] private int _skillsRevision;
-    public SkillLocations SkillLocations { get; } = SkillLocations.Standard;
+    public SkillLocations SkillLocations { get; }
 
     private readonly Dictionary<string, Engine> _engines = new();
     /// <summary>What each session's engine was built with; a mismatch rebuilds it.</summary>
@@ -63,17 +64,24 @@ public sealed partial class AgentHost : ObservableObject
     private sealed record RouteInfo(string ServedModel, IReadOnlyList<string> ServedModels, int? Context, DateTimeOffset At);
 
     private sealed record EngineKey(string Profile, int Window, ThinkingLevel? Thinking, PermissionPreset Preset,
-                                    int Skills, bool ComputerTools, bool Vision, string Shell);
+                                    int Skills, bool ComputerTools, bool Vision, string Shell, long Vault);
 
     /// <summary>Everything about skills one turn needs: what exists, what's on, and the prompt text.</summary>
     private sealed record SkillState(IReadOnlyList<Skill> All, IReadOnlyList<Skill> Active, SkillPromptResult Result, int Signature);
 
-    public AgentHost(AppConfig config, ConversationLog log, Dispatcher dispatcher, string? systemPrompt = null)
+    /// <param name="queueFile">Where the task queue is saved (default %APPDATA%\DSH\task-queue.json).</param>
+    /// <param name="skillLocations">Where skills live (tests point it at a temp folder).</param>
+    /// <param name="vault">The credentials vault (default: DPAPI-encrypted, under the data folder).</param>
+    public AgentHost(AppConfig config, ConversationLog log, Dispatcher dispatcher, string? systemPrompt = null,
+                     string? queueFile = null, SkillLocations? skillLocations = null, CredentialVault? vault = null)
     {
         Config = config;
         Log = log;
         _dispatcher = dispatcher;
         _basePrompt = systemPrompt ?? DefaultSystemPrompt;
+        SkillLocations = skillLocations ?? SkillLocations.Standard;
+        Vault = vault ?? new CredentialVault();
+        _queueFile = queueFile ?? TaskQueue.DefaultFilePath;
         Sessions.CollectionChanged += (_, e) =>
         {
             foreach (SessionVM vm in e.NewItems ?? Array.Empty<SessionVM>()) vm.PropertyChanged += OnSessionChanged;
@@ -83,6 +91,8 @@ public sealed partial class AgentHost : ObservableObject
         };
         Reload();
         RefreshDrafts();
+        InitQueue();
+        Vault.Changed += (_, _) => _dispatcher.BeginInvoke(() => VaultRevision = Vault.Revision);
     }
 
     private void OnSessionChanged(object? sender, PropertyChangedEventArgs e)
@@ -99,12 +109,19 @@ public sealed partial class AgentHost : ObservableObject
     public IReadOnlyList<SessionVM> RunningSessions => Sessions.Where(s => s.Running).ToList();
     public bool AnyRunning => Sessions.Any(s => s.Running);
     public int RunningCount => Sessions.Count(s => s.Running);
+    /// <summary>Anything working — a turn, a queue task, or a background agent.</summary>
+    public bool AnythingRunning => AnyRunning || Sessions.Any(s => s.RunningBackgroundJobs.Count > 0);
 
     public const string DefaultSystemPrompt =
         "You are a capable coding agent running inside a native Windows app, working in the user's project folder.\n\n" +
         "Use the tools to read, write, and search files and to run shell commands. Prefer small, verifiable steps:\n" +
         "read before you edit, and check your work after you change something. When a task needs more than a\n" +
         "couple of steps, track it with `todo_write` so the user can see the plan.\n\n" +
+        "Parallel and background work: for a well-scoped side task, launch a subagent with `agent` — with\n" +
+        "run_in_background: true it works while you continue (several can run at once); you're told when each\n" +
+        "finishes, and agent_status / agent_stop manage them. Long-running programs (dev servers, game engines,\n" +
+        "REPLs) go in `process_start`. Follow-up work that can happen later, unattended, goes on the task queue\n" +
+        "with `queue_task`.\n\n" +
         "Rules that matter:\n" +
         "- Never claim a command succeeded unless you ran it and saw the output.\n" +
         "- Prefer `edit` over `write_file` for changes to an existing file; rewriting a whole file loses work.\n" +
@@ -161,14 +178,14 @@ public sealed partial class AgentHost : ObservableObject
 
     // MARK: - Sessions
 
-    public SessionVM NewSession(string? cwd, PermissionPreset? preset = null)
+    public SessionVM NewSession(string? cwd, PermissionPreset? preset = null, bool select = true)
     {
         var id = Guid.NewGuid().ToString();
         var resolved = preset ?? Config.AsPreset;
         var vm = new SessionVM(id, "New chat", cwd, resolved);
         Sessions.Insert(0, vm);
         Log.Upsert(id, cwd, "New chat", resolved.RawValue());
-        SelectedId = id;
+        if (select) SelectedId = id;
         return vm;
     }
 
@@ -181,6 +198,11 @@ public sealed partial class AgentHost : ObservableObject
         _transcripts.Remove(id);
         _systemPrompts.Remove(id);
         _grants.Remove(id);
+        _vaultGrants.Remove(id);
+        _autoContinuations.Remove(id);
+        _agentQueuedCount.Remove(id);
+        if (_backgroundPools.Remove(id, out var pool)) pool.StopAll();
+        Queue.DetachSession(id);
         Config.SetSkillsFor(id, null);
         Log.Delete(id);
         if (Session(id) is { } vm) Sessions.Remove(vm);
@@ -311,6 +333,8 @@ public sealed partial class AgentHost : ObservableObject
         // Skills: always-on rules, the ones the user selected for this chat, and a catalog the
         // model can load from with use_skill.
         if (skillState.Result.Text.Length > 0) prompt += "\n\n" + skillState.Result.Text;
+        // The credentials the agent may use, by name — never a value.
+        if (VaultPrompt.Section(Vault.All, shell.Kind) is { Length: > 0 } vaultSection) prompt += "\n\n" + vaultSection;
         if (vm.Preset == PermissionPreset.Plan)
             prompt += "\n\n--- Plan mode ---\nDo not modify anything. Research and produce a plan, then call `exit_plan_mode` with it and stop.";
         _systemPrompts[sessionId] = prompt;
@@ -318,7 +342,20 @@ public sealed partial class AgentHost : ObservableObject
         var builtins = ToolRegistry.Standard(0, shell);
         var extra = new List<IToolExecutor>(PluginLoader.Tools(Plugins, builtins.Names));
         if (skillState.Active.Count > 0) extra.Add(new UseSkillTool(skillState.Active));
-        if (vm.Preset != PermissionPreset.Plan) extra.Add(new ProposeSkillTool(vm.WorkspacePath, SkillLocations));
+        extra.Add(new VaultSearchTool(Vault));
+        extra.AddRange(ToolRegistry.BackgroundAgentTools());
+        if (vm.Preset != PermissionPreset.Plan)
+        {
+            extra.Add(new QueueAddTool((title, details, front, start) =>
+                _dispatcher.InvokeAsync(() => AgentQueueTask(title, details, front, start, sessionId)).Task));
+            extra.Add(new ProposeSkillTool(vm.WorkspacePath, SkillLocations));
+        }
+        // Background processes: the model's own long-running programs (game engines, dev servers,
+        // REPLs) that keep running between tool calls.
+        extra.AddRange(ExtraTools.Processes());
+        // Seeing and steering the machine — screenshots, windows, UI trees, clicks, keystrokes. Off
+        // with the computer-tools switch; each first use in a chat still asks (the engine's gate).
+        if (Config.ComputerToolsEnabled) extra.AddRange(ExtraTools.Machine());
         var registry = builtins.Adding(extra);
 
         if (!_grants.TryGetValue(sessionId, out var grants)) _grants[sessionId] = grants = new ComputerGrants();
@@ -331,6 +368,7 @@ public sealed partial class AgentHost : ObservableObject
                 Thinking = thinking,
                 VisionEnabled = VisionOn(profile),
                 Shell = shell,
+                Retry = RetryPolicy,
             },
             workspace, policy,
             (id, name, detail) => _dispatcher.InvokeAsync(() => AskGateAsync(sessionId, id, name, detail)).Task.Unwrap())
@@ -339,6 +377,10 @@ public sealed partial class AgentHost : ObservableObject
             Compactor = (used, messages, ct) =>
                 _dispatcher.InvokeAsync(() => CompactTranscriptAsync(sessionId, used, messages, ct)).Task.Unwrap(),
             ComputerGrants = grants,
+            Reroute = ct => _dispatcher.InvokeAsync(() => RerouteForRetryAsync(sessionId)).Task.Unwrap(),
+            Vault = Vault,
+            VaultGrants = VaultGrantsFor(sessionId),
+            BackgroundAgents = BackgroundPool(sessionId),
         };
         _engines[sessionId] = engine;
         return engine;
@@ -348,20 +390,43 @@ public sealed partial class AgentHost : ObservableObject
         string.Equals(Path.GetFullPath(a).TrimEnd('\\', '/'), Path.GetFullPath(b).TrimEnd('\\', '/'), StringComparison.OrdinalIgnoreCase);
 
     /// <summary>Bridge the engine's permission gate to the UI: publish the gate on the session and
-    /// await the user's answer.</summary>
-    private async Task<bool> AskGateAsync(string sessionId, string gateId, string name, string detail)
+    /// await the user's answer.
+    ///
+    /// Queue tasks run unattended — a gate nobody answers would stall the whole queue. So for queue
+    /// sessions the decision times out (auto-deny) after a few minutes, and the stall is surfaced in
+    /// the chat.</summary>
+    private async Task<bool> AskGateAsync(string sessionId, string callId, string name, string detail)
     {
         if (Session(sessionId) is not { } vm) return false;
-        foreach (var stale in vm.PendingGates.Where(g => g.Id == gateId).ToList()) vm.PendingGates.Remove(stale);
+        // Tool-call ids repeat ("call-0" every turn, in every chat): key the question by a token of its
+        // own, so two chats can't overwrite each other's answer and an old timer can't answer a newer
+        // question.
+        var gateId = $"{callId}#{Guid.NewGuid():N}";
         vm.PendingGates.Add(new GateVM(gateId, name, detail));
         var tcs = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
         _gates[gateId] = (tcs, sessionId);
         vm.NotifyContentChanged();
+        if (_queueSessions.ContainsKey(sessionId)) _ = AutoDenyAsync();
         var decision = await tcs.Task;
         _gates.Remove(gateId);
         foreach (var answered in vm.PendingGates.Where(g => g.Id == gateId).ToList()) vm.PendingGates.Remove(answered);
         return decision;
+
+        async Task AutoDenyAsync()
+        {
+            await Task.Delay(QueueGateTimeout);
+            if (!_gates.Remove(gateId, out var entry)) return; // answered or cancelled
+            foreach (var stale in vm.PendingGates.Where(g => g.Id == gateId).ToList()) vm.PendingGates.Remove(stale);
+            var text = $"Permission for {Icons.ToolLabel(name)} auto-denied after {(int)QueueGateTimeout.TotalMinutes} minutes — queue tasks run unattended. " +
+                       "To allow it, change the permission preset in Settings, then Resume the task.";
+            vm.Note(text, MessageRole.Error);
+            Log.RecordItem(sessionId, "error", text, isError: true);
+            entry.Tcs.TrySetResult(false);
+        }
     }
+
+    /// <summary>How long a queue task's permission question waits before it is answered "no".</summary>
+    public static TimeSpan QueueGateTimeout { get; set; } = TimeSpan.FromMinutes(5);
 
     /// <summary>Answer a pending gate from the UI.</summary>
     public void AnswerGate(string sessionId, string gateId, bool allow)
@@ -387,11 +452,12 @@ public sealed partial class AgentHost : ObservableObject
     {
         attachments ??= [];
         if (Session(sessionId) is not { } vm) return;
-        if (vm.Running)
+        if (vm.Running || _runs.ContainsKey(sessionId))
         {
             vm.Note("The agent is still working; send again when it is done.");
             return;
         }
+        _autoContinuations[sessionId] = 0;
         if (attachments.Count == 0 && SlashCommand.Parse(text) is { } command)
         {
             RunCommand(command, vm);
@@ -508,22 +574,69 @@ public sealed partial class AgentHost : ObservableObject
                 break;
 
             case SlashCommand.Goal goal:
+                if (IsServerSwitching?.Invoke() == true)
+                {
+                    vm.Note("The Spark is switching models right now — send again once it says it's ready.");
+                    return;
+                }
                 if (goal.Text.Length == 0)
                 {
-                    vm.Note("Usage: `/goal <what you want done>` — the agent keeps working, round after round, until it " +
-                            "declares the goal complete (or needs you). Stop it any time with Ctrl+.");
+                    // A bare /goal picks the chat's unfinished goal back up (after a Stop, a block the
+                    // user has since answered, or a failure).
+                    if ((vm.LastGoal ?? LastGoalIn(vm.Entries)) is not { } previous)
+                    {
+                        vm.Note("Usage: `/goal <what you want done>` — the agent keeps working, round after round, until it " +
+                                "declares the goal complete (or needs you). Stop it any time with Ctrl+.");
+                        return;
+                    }
+                    StartRun(vm, ct => RunTurnAsync(vm, previous, [], goal: previous, modelText: null, ct, resumingGoal: true));
                     return;
                 }
                 StartRun(vm, ct => RunTurnAsync(vm, goal.Text, [], goal: goal.Text, modelText: null, ct));
                 break;
+
+            case SlashCommand.Queue:
+            {
+                var stats = Queue.Stats();
+                if (QueueRunning)
+                    vm.Note($"Queue is running — {stats.Queued} waiting, {stats.Completed} done so far. Ctrl+Shift+Q shows the panel; Stop there (or Ctrl+.) halts it.");
+                else if (stats.Queued > 0)
+                {
+                    vm.Note($"Starting the queue: {stats.Queued} task{(stats.Queued == 1 ? "" : "s")} to go, one at a time, unattended.");
+                    StartQueue();
+                }
+                else
+                    vm.Note("The queue is empty. Add tasks from the Task Queue panel (Ctrl+Shift+Q), then press Start — or /queue again.");
+                break;
+            }
         }
     }
 
     /// <summary>/compact: fold the conversation into a summary now, whatever its size.</summary>
     private async Task CompactNowAsync(SessionVM vm, string? focus, CancellationToken ct)
     {
-        var sessionId = vm.Id;
         vm.Running = true;
+        try
+        {
+            await CompactSessionAsync(vm, focus, ct);
+        }
+        catch (OperationCanceledException)
+        {
+            vm.Note("Stopped.");
+        }
+        finally
+        {
+            vm.Running = false;
+            vm.Stopping = false;
+            vm.Activity = null;
+        }
+    }
+
+    /// <summary>Fold the conversation into a summary now (the /compact work, and a goal round that
+    /// overflowed). Leaves the session's running state alone.</summary>
+    private async Task CompactSessionAsync(SessionVM vm, string? focus, CancellationToken ct)
+    {
+        var sessionId = vm.Id;
         vm.Activity = "Compacting conversation…";
         try
         {
@@ -546,7 +659,7 @@ public sealed partial class AgentHost : ObservableObject
                 vm.Note($"The conversation is already as compact as it gets (~{Fmt.N(before)} tokens).");
                 return;
             }
-            var summary = await Compaction.SummarizeAsync(new OpenAiClient(profile), plan, model: profile.Model, focus: focus,
+            var summary = await Compaction.SummarizeAsync(MakeClient(profile), plan, model: profile.Model, focus: focus,
                 cancellationToken: ct);
             if (summary is null)
             {
@@ -562,14 +675,8 @@ public sealed partial class AgentHost : ObservableObject
             vm.Note(text);
             Log.RecordItem(sessionId, "notice", text);
         }
-        catch (OperationCanceledException)
-        {
-            vm.Note("Stopped.");
-        }
         finally
         {
-            vm.Running = false;
-            vm.Stopping = false;
             vm.Activity = null;
         }
     }
@@ -577,20 +684,20 @@ public sealed partial class AgentHost : ObservableObject
     // MARK: - Turns
 
     private async Task RunTurnAsync(SessionVM vm, string text, IReadOnlyList<MessageAttachment> attachments,
-                                    string? goal, string? modelText, CancellationToken ct)
+                                    string? goal, string? modelText, CancellationToken ct, bool resumingGoal = false)
     {
         var sessionId = vm.Id;
         vm.Running = true;
         vm.Stopping = false;
         try
         {
-            if (goal is not null) await RunGoalAsync(vm, goal, ct);
+            if (goal is not null) await RunGoalAsync(vm, goal, resumingGoal, ct);
             else await TurnAsync(vm, modelText ?? text, text, attachments, ct);
         }
         catch (OperationCanceledException)
         {
             vm.EndStreaming();
-            var note = vm.Goal is not null ? "Stopped. The goal was not finished." : "Stopped.";
+            var note = goal is not null ? "Stopped. The goal was not finished — send `/goal` to pick it back up." : "Stopped.";
             vm.Note(note);
             Log.RecordItem(sessionId, "notice", note);
         }
@@ -615,6 +722,7 @@ public sealed partial class AgentHost : ObservableObject
             vm.Stopping = false;
             vm.Goal = null;
             vm.Activity = null;
+            vm.Retry = null;
             vm.RunningTool = null;
             vm.ClearReasoning();
             vm.EndStreaming();
@@ -632,51 +740,18 @@ public sealed partial class AgentHost : ObservableObject
         Banner = message;
     }
 
-    /// <summary>/goal: run turns until the model writes GOAL_COMPLETE (or GOAL_BLOCKED), re-stating the
-    /// goal every round so it survives compaction. There is no round cap.</summary>
-    private async Task RunGoalAsync(SessionVM vm, string goal, CancellationToken ct)
-    {
-        vm.Goal = new GoalState(goal, 1, DateTimeOffset.Now);
-        var result = await TurnAsync(vm, GoalProtocol.Kickoff(goal), "🎯 /goal " + goal, [], ct);
-        var round = 1;
-        while (true)
-        {
-            if (!result.HitIterationLimit)
-            {
-                switch (GoalProtocol.Status(result.LastReplyText))
-                {
-                    case GoalStatus.Complete:
-                    {
-                        var text = $"✅ Goal complete after {round} round{(round == 1 ? "" : "s")}.";
-                        vm.Note(text);
-                        Log.RecordItem(vm.Id, "notice", text);
-                        return;
-                    }
-                    case GoalStatus.Blocked blocked:
-                    {
-                        var text = $"⏸ Goal paused — the agent needs you: {blocked.Reason}\nReply, then send `/goal` to pick it back up.";
-                        vm.Note(text);
-                        Log.RecordItem(vm.Id, "notice", text);
-                        return;
-                    }
-                }
-            }
-            ct.ThrowIfCancellationRequested();
-            var misplaced = !result.HitIterationLimit && GoalProtocol.MentionsMarker(result.LastReplyText);
-            round++;
-            vm.Goal = vm.Goal! with { Round = round };
-            result = await TurnAsync(vm,
-                GoalProtocol.Continuation(goal, round, result.HitIterationLimit, markerMisplaced: misplaced),
-                $"↻ round {round}: keep going", [], ct);
-        }
-    }
-
     /// <summary>One user message → one engine run (which may take many tool steps).</summary>
     private async Task<RunResult> TurnAsync(SessionVM vm, string modelText, string displayText,
                                             IReadOnlyList<MessageAttachment> attachments, CancellationToken ct)
     {
         var sessionId = vm.Id;
-        vm.AppendMessage(MessageRole.User, displayText);
+        // A chat whose timeline was released (an archived queue chat) or never loaded: bring it back
+        // first, so the model keeps its history.
+        Hydrate(vm);
+        // Prime the model transcript from the timeline when it's missing (an archived queue chat whose
+        // transcript was evicted), before this turn's entry is added so its text isn't sent twice.
+        if (!_transcripts.ContainsKey(sessionId)) _transcripts[sessionId] = ReplayMessages(vm.Entries);
+        var userEntryId = vm.AppendMessage(MessageRole.User, displayText);
         Log.RecordItem(sessionId, "user", displayText);
         if (vm.Title == "New chat")
         {
@@ -684,7 +759,6 @@ public sealed partial class AgentHost : ObservableObject
             var title = TextUtil.Prefix(first.Trim(), 48);
             if (title.Length > 0) RenameSession(sessionId, title);
         }
-        if (!_transcripts.ContainsKey(sessionId)) _transcripts[sessionId] = [];
 
         // Re-read what the server serves right now: the Spark can swap models between turns, and the
         // window/model id must follow.
@@ -695,21 +769,37 @@ public sealed partial class AgentHost : ObservableObject
         var skillState = BuildSkillState(vm);
         var shell = Config.ResolvedAgentShell;
         var key = new EngineKey(ProfileKey(profile), window, thinking, vm.Preset, skillState.Signature,
-                                Config.ComputerToolsEnabled, VisionOn(profile), shell.Executable);
+                                Config.ComputerToolsEnabled, VisionOn(profile), shell.Executable, Vault.Revision);
         if (_engineKeys.TryGetValue(sessionId, out var previous) && !string.Equals(ModelOf(previous.Profile), profile.Model, StringComparison.Ordinal))
             vm.Note($"The server is now serving `{profile.Model}` (was `{ModelOf(previous.Profile)}`) — switched to it, {Fmt.N(window)}-token window.");
         if (!_engines.TryGetValue(sessionId, out var engine) || _engineKeys.GetValueOrDefault(sessionId) != key)
         {
-            engine = BuildEngine(vm, new OpenAiClient(profile), window, thinking, skillState);
+            engine = BuildEngine(vm, MakeClient(profile), window, thinking, skillState);
             _engineKeys[sessionId] = key;
         }
+        _retryRoute.Remove(sessionId);
         var input = _transcripts[sessionId].ToList();
 
         // Engine events arrive on a pool thread; hop to the UI thread so the timeline is only ever
         // mutated from one place.
         void Sink(EngineEvent evt) => _dispatcher.BeginInvoke(DispatcherPriority.Normal, () => Apply(evt, sessionId));
-        var result = await Task.Run(() => engine.RunAsync(input, modelText, attachments, Sink, ct), ct);
-
+        var progress = new RunProgress();
+        RunResult result;
+        try
+        {
+            result = await Task.Run(() => engine.RunAsync(input, modelText, attachments, Sink, ct, progress), CancellationToken.None);
+        }
+        catch (Exception)
+        {
+            // Keep what the run already did — tool calls that ran and their results — so the model's
+            // memory matches the files on disk and the timeline, instead of rolling back to before
+            // the run.
+            if (progress.Salvaged is { } salvaged) _transcripts[sessionId] = salvaged.ToList();
+            else MarkUndelivered(vm, userEntryId); // the model never saw this message
+            vm.Retry = null;
+            throw;
+        }
+        vm.Retry = null;
         _transcripts[sessionId] = result.Messages.ToList();
         vm.LastUsage = result.Usage;
         // How full the context is now: server-reported prompt tokens when available, otherwise a
@@ -720,6 +810,15 @@ public sealed partial class AgentHost : ObservableObject
             vm.Note($"Paused after {engine.Config.MaxIterations} steps. Say “continue” to keep going, or use `/goal` for long tasks.");
         return result;
     }
+
+    /// <summary>Every model client the host makes goes through here, so tests can swap the network.</summary>
+    private OpenAiClient MakeClient(ProviderProfile profile) => new(profile, HttpHandlerForTesting);
+
+    /// <summary>Tests: answer model requests from this handler instead of the network.</summary>
+    public HttpMessageHandler? HttpHandlerForTesting { get; set; }
+
+    /// <summary>How engine runs retry a model that doesn't answer (tests shorten the waits).</summary>
+    public RetryPolicy RetryPolicy { get; set; } = RetryPolicy.Standard;
 
     private static string ProfileKey(ProviderProfile p) =>
         string.Join("|", p.Kind, p.Name, p.BaseUrl, p.Model, p.Temperature, p.MaxOutputTokens, p.ContextWindow,
@@ -734,13 +833,43 @@ public sealed partial class AgentHost : ObservableObject
         switch (evt)
         {
             case EngineEvent.TextDelta d:
+                vm.Retry = null;
                 vm.ClearReasoning();
                 vm.AppendDelta(d.Text);
                 break;
 
             case EngineEvent.ReasoningDelta r:
+                vm.Retry = null;
                 vm.AppendReasoning(r.Text);
                 break;
+
+            case EngineEvent.Retrying retrying:
+            {
+                // The failed attempt's partial reply is void — the retry streams the whole reply
+                // again — so drop its bubble.
+                vm.DropStreaming();
+                vm.ClearReasoning();
+                vm.Retry = new RetryState(retrying.Attempt, retrying.Reason, DateTimeOffset.Now + retrying.Delay);
+                if (retrying.Attempt == 1)
+                {
+                    var text = $"⚠️ The model didn't answer ({retrying.Reason}). Retrying automatically until it's available — press Stop to give up.";
+                    vm.Note(text);
+                    Log.RecordItem(sessionId, "notice", text);
+                    if (_queueSessions.TryGetValue(sessionId, out var taskId))
+                        Queue.Note(taskId, $"Model unavailable ({retrying.Reason}) — retrying until it answers.");
+                }
+                break;
+            }
+
+            case EngineEvent.Recovered recovered:
+            {
+                vm.Retry = null;
+                var text = $"✓ The model is answering again (after {recovered.Attempts} retr{(recovered.Attempts == 1 ? "y" : "ies")}).";
+                vm.Note(text);
+                Log.RecordItem(sessionId, "notice", text);
+                if (_queueSessions.TryGetValue(sessionId, out var taskId)) Queue.Note(taskId, text);
+                break;
+            }
 
             case EngineEvent.AssistantMessage m:
                 // Fold a turn's complete text if deltas never arrived, then close the bubble so any
@@ -963,7 +1092,7 @@ public sealed partial class AgentHost : ObservableObject
         if (vm is not null && !_transcripts.ContainsKey(vm.Id)) Hydrate(vm);
         var conversation = vm is not null ? _transcripts.GetValueOrDefault(vm.Id) ?? [] : [];
         var request = new SkillGenerationRequest(goal, conversation, Skills(vm).Select(s => s.Name).ToList(), improving);
-        return await SkillGenerator.GenerateAsync(new OpenAiClient(profile), profile.Model, request, ct: ct);
+        return await SkillGenerator.GenerateAsync(MakeClient(profile), profile.Model, request, ct: ct);
     }
 
     /// <summary>/skill new …: write a skill from this chat and queue it for approval.</summary>
@@ -1006,12 +1135,25 @@ public sealed partial class AgentHost : ObservableObject
         if (Session(id) is { } vm && vm.Running) vm.Stopping = true;
         ResolveAllGates(id, false);
         if (_runs.TryGetValue(id, out var cts)) cts.Cancel();
+        // Stop in a chat stops what it launched in the background too.
+        if (_backgroundPools.TryGetValue(id, out var pool)) pool.StopAll();
     }
 
     public void StopAll()
     {
-        foreach (var id in _runs.Keys.ToList()) StopSession(id);
+        StopQueue();
+        foreach (var id in _runs.Keys.Concat(_backgroundPools.Keys).Distinct().ToList()) StopSession(id);
     }
+
+    /// <summary>The app is closing: cancel every run and background agent, but keep the queue's
+    /// "resume on launch" so a queue that was running picks back up next time.</summary>
+    public void Shutdown()
+    {
+        _shuttingDown = true;
+        foreach (var id in _runs.Keys.Concat(_backgroundPools.Keys).Distinct().ToList()) StopSession(id);
+    }
+
+    private bool _shuttingDown;
 
     // MARK: - Context window
 
@@ -1056,7 +1198,7 @@ public sealed partial class AgentHost : ObservableObject
         var fresh = _routeInfo.TryGetValue(routeId, out var known) && DateTimeOffset.Now - known.At < TimeSpan.FromSeconds(15);
         if (force || !fresh)
         {
-            var info = await new OpenAiClient(provider).ModelInfoAsync();
+            var info = await MakeClient(provider).ModelInfoAsync();
             if (info.Served.Count > 0)
             {
                 _routeInfo[routeId] = new RouteInfo(info.Id, info.Served, info.ContextWindow, DateTimeOffset.Now);
@@ -1146,7 +1288,7 @@ public sealed partial class AgentHost : ObservableObject
             await ResolveRouteAsync();
             var profile = Config.ActiveProvider is { } p ? Effective(p) : null;
             if (profile is null) return messages;
-            var summary = await Compaction.SummarizeAsync(new OpenAiClient(profile), plan, model: profile.Model, cancellationToken: ct);
+            var summary = await Compaction.SummarizeAsync(MakeClient(profile), plan, model: profile.Model, cancellationToken: ct);
             // No summary (no client, or it failed): keep the transcript as-is; the server may still
             // accept it, and an overflow is surfaced rather than silently dropped.
             if (summary is null) return messages;
