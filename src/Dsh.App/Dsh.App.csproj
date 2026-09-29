@@ -28,6 +28,8 @@
   <ItemGroup>
     <Resource Include="..\..\assets\logo-256.png" Link="Assets\logo-256.png" />
     <Resource Include="..\..\assets\dsh.ico" Link="Assets\dsh.ico" />
+    <!-- The DGX Spark guide's pictures (light and dark); make_art.py draws them from SVG. -->
+    <Resource Include="Assets\Guide\*.png" />
   </ItemGroup>
 
 </Project>
