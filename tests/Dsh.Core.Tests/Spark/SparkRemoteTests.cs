@@ -114,6 +114,25 @@ public sealed partial class SparkRemoteTests
     }
 
     [Fact]
+    public void SudoRsPromptsAndFailures()
+    {
+        var transcript = new RemoteTranscript(Nonce, "pw");
+        transcript.Feed($"{Begin}\n");
+        Assert.Contains(transcript.Feed("[sudo: authenticate] Password: "), e => e is TranscriptEvent.PasswordPrompt);
+        Assert.Contains(new TranscriptEvent.Problem(TranscriptProblem.WrongPassword),
+            transcript.Feed("\nsudo-rs: Authentication failed, try again.\n"));
+    }
+
+    [Fact]
+    public void OrdinaryLinesMentioningPasswordsAreNotPrompts()
+    {
+        var transcript = new RemoteTranscript(Nonce, "pw");
+        transcript.Feed($"{Begin}\n");
+        Assert.DoesNotContain(transcript.Feed("==> Forgot the password? Run spark-swapper-reset-login"), e => e is TranscriptEvent.PasswordPrompt);
+        Assert.DoesNotContain(transcript.Feed("\nUse a password of at least 8 characters."), e => e is TranscriptEvent.PasswordPrompt);
+    }
+
+    [Fact]
     public void WrongPasswordAndNotAnAdmin()
     {
         var wrong = new RemoteTranscript(Nonce, "pw");

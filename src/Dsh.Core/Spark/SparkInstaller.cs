@@ -119,7 +119,11 @@ public sealed partial class RemoteTranscript
             return;
         }
         if (text.Trim().Length == 0) return;
-        if (text.Contains("Sorry, try again", StringComparison.OrdinalIgnoreCase)) Flag(TranscriptProblem.WrongPassword, events);
+        // Classic sudo says "Sorry, try again."; sudo-rs (newer Ubuntu) says "Authentication failed, try again."
+        if (text.Contains("Sorry, try again", StringComparison.OrdinalIgnoreCase)
+            || text.Contains("Authentication failed", StringComparison.OrdinalIgnoreCase)
+            || text.Contains("incorrect password attempt", StringComparison.OrdinalIgnoreCase))
+            Flag(TranscriptProblem.WrongPassword, events);
         if (text.Contains("not in the sudoers file", StringComparison.OrdinalIgnoreCase)
             || text.Contains("is not allowed to run sudo", StringComparison.OrdinalIgnoreCase))
             Flag(TranscriptProblem.NotAllowed, events);
@@ -159,7 +163,9 @@ public sealed partial class RemoteTranscript
         return _secret is null ? clean : clean.Replace(_secret, "••••••", StringComparison.Ordinal);
     }
 
-    [GeneratedRegex(@"(\[sudo\] password for [^\s:]+:|^\s*password( for [^\s:]+)?:)\s*$", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
+    /// <summary>"[sudo] password for alice: " (sudo), "[sudo: authenticate] Password: " (sudo-rs), or a
+    /// bare "Password: ".</summary>
+    [GeneratedRegex(@"(\[sudo[^\]]*\][^\n]*password[^\n]*:|^\s*password( for [^\s:]+)?:)\s*$", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
     private static partial Regex PromptRegex();
 }
 

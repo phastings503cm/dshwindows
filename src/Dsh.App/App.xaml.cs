@@ -29,6 +29,16 @@ public partial class App : Application
         };
 
         var args = e.Args;
+
+        // DSH.exe --write-recovery-usb <job.json>: the elevated helper the DGX Spark guide starts to
+        // erase and write a recovery USB stick. It shows no window and exits when the job is done, so
+        // the main app never needs administrator rights.
+        if (RecoveryUsbWriter.TryRunHelper(args) is { } helperExit)
+        {
+            Shutdown(helperExit);
+            return;
+        }
+
         var selfTest = SelfTest.Parse(args);
 
         // One DSH per user: a second launch ("Open with DSH" on a folder) hands its folder over.

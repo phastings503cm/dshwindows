@@ -286,10 +286,15 @@ public static class NetworkScanner
                                                               [EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
         options ??= new ScanOptions();
-        var targets = new List<IPAddress>();
-        if (options.IncludeLoopback && options.Targets is null) targets.Add(IPAddress.Loopback);
-        targets.AddRange(options.Targets ?? TargetsFor(LocalNetworks(), options.MaxHosts));
-        targets = targets.Distinct().Take(options.MaxHosts + 1).ToList();
+        var scan = options;
+        // Listing adapters can take a moment on Windows: not on the caller's (UI) thread.
+        var targets = await Task.Run(() =>
+        {
+            var list = new List<IPAddress>();
+            if (scan.IncludeLoopback && scan.Targets is null) list.Add(IPAddress.Loopback);
+            list.AddRange(scan.Targets ?? TargetsFor(LocalNetworks(), scan.MaxHosts));
+            return list.Distinct().Take(scan.MaxHosts + 1).ToList();
+        }, cancellationToken).ConfigureAwait(false);
 
         var channel = Channel.CreateUnbounded<FoundHost>(new UnboundedChannelOptions { SingleReader = true });
         using var gate = new SemaphoreSlim(Math.Max(1, options.Concurrency));

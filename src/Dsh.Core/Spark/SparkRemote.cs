@@ -235,8 +235,8 @@ public sealed class SshSparkConnection : ISparkConnection
         // A wide terminal keeps long commands on one line; ECHO off keeps typed text (the sudo
         // password included, belt and braces) out of the output.
         var modes = new Dictionary<TerminalModes, uint> { [TerminalModes.ECHO] = 0 };
-        var stream = _client.CreateShellStream("xterm", 400, 50, 0, 0, 64 * 1024, modes);
-        return Task.FromResult<ISparkShell>(new Shell(stream));
+        // Opening the channel waits for the server's replies; keep that off the caller's (UI) thread.
+        return Task.Run<ISparkShell>(() => new Shell(_client.CreateShellStream("xterm", 400, 50, 0, 0, 64 * 1024, modes)), cancellationToken);
     }
 
     public void Dispose()
