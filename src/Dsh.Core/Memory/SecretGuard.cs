@@ -69,11 +69,28 @@ public static class SecretGuard
     private static readonly Regex DocumentationKey = new(@"example|x{6,}|(?<![A-Za-z])your(?![A-Za-z])|placeholder|redacted",
         RegexOptions.IgnoreCase | RegexOptions.CultureInvariant, Limit);
 
+    /// <summary>How much text one pass reads. A pattern walking a whole megabyte inside its time limit is at the mercy of the
+    /// machine (a busy or slow one turns a benign document into a refusal), so a long text is read in windows.</summary>
+    private const int WindowLength = 32_768;
+
+    /// <summary>How much two neighbouring windows share: longer than anything the scan links together (a name, its value and
+    /// what lies between are a few hundred characters), so whatever it would find in the whole text lies inside one window.</summary>
+    private const int WindowOverlap = 4_096;
+
     public static bool LooksLikeSecret(string text)
     {
         if (string.IsNullOrEmpty(text)) return false;
-        return HasKeyFormat(text) || HasCredentialInUrl(text) || HasNamedSecret(text) || HasStructuredSecret(text);
+        if (text.Length <= WindowLength) return Scan(text);
+        for (var start = 0; ; start += WindowLength - WindowOverlap)
+        {
+            var length = Math.Min(WindowLength, text.Length - start);
+            if (Scan(text.Substring(start, length))) return true;
+            if (start + length >= text.Length) return false;
+        }
     }
+
+    private static bool Scan(string text) =>
+        HasKeyFormat(text) || HasCredentialInUrl(text) || HasNamedSecret(text) || HasStructuredSecret(text);
 
     private static bool HasKeyFormat(string text)
     {

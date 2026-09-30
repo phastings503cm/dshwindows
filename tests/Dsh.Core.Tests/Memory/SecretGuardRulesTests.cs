@@ -144,6 +144,25 @@ public sealed class SecretGuardRulesTests
         Assert.True(MemoryStore.FlagSecrets(typed)[0]);
     }
 
+    [Fact]
+    public void ASecretIsFoundWhereverItFallsInALongText()
+    {
+        // A long text is read in overlapping windows (32 KB, 4 KB shared): a secret must be found whichever side of an edge it lies.
+        const string Secret = "DB_PASSWORD=Xk29mQ788abZ";
+        var filler = string.Concat(Enumerable.Repeat("The quick brown fox jumps over the lazy dog, and the plan goes on. ", 1_100)); // about 75 KB, nothing secret
+        Assert.False(SecretGuard.LooksLikeSecret(filler));
+        foreach (var edge in new[] { 28_672, 32_768, 57_344, 61_440 })
+        {
+            for (var offset = -100; offset <= 100; offset += 7)
+            {
+                var text = filler.Insert(edge + offset, "\n" + Secret + "\n");
+                Assert.True(SecretGuard.LooksLikeSecret(text), $"missed at {edge + offset}");
+            }
+        }
+        Assert.True(SecretGuard.LooksLikeSecret(Secret + "\n" + filler));
+        Assert.True(SecretGuard.LooksLikeSecret(filler + "\n" + Secret));
+    }
+
     [Theory]
     [InlineData("You can commit directly to main.", "You couldn't commit directly to main.")]
     [InlineData("We commit directly to main.", "We haven't committed directly to main.")]
