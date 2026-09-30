@@ -318,7 +318,14 @@ public sealed class QueuePanel : UserControl
         _ => (Icons.CircleRing, "TextFillColorSecondaryBrush"),
     };
 
-    private UIElement AddCard()
+    /// <summary>The add card, built once. Its boxes are fields (what was typed survives a refresh) and a control can sit in one
+    /// panel at a time — a card built afresh on every refresh would have to take them from the one just thrown away, which WPF
+    /// refuses ("already the logical child of another element"). Each refresh puts this same card back into the emptied list.</summary>
+    private UIElement? _addCard;
+
+    private UIElement AddCard() => _addCard ??= BuildAddCard();
+
+    private UIElement BuildAddCard()
     {
         var panel = new StackPanel();
         panel.Children.Add(_newTitle);
@@ -460,6 +467,20 @@ public sealed class QueuePanel : UserControl
         _selectedId = id;
         _editing = false;
         Refresh();
+    }
+
+    /// <summary>The UI self-test's way in: open the add card (twice over, so it is built again while open), then fill it in and press
+    /// its button, once for each title — the card has to survive being used and opened again.</summary>
+    public void SelfTestAddTasks(params string[] titles)
+    {
+        BeginAdd();
+        BeginAdd();
+        foreach (var title in titles)
+        {
+            BeginAdd();
+            _newTitle.Text = title;
+            AddTask();
+        }
     }
 
     public void BeginAdd()

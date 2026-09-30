@@ -138,6 +138,11 @@ public sealed class SelfTest
             await Settle(1000);
             Capture(window, "queue");
             await ShowAndCapture(new QueueLogWindow(model.Host) { Owner = window }, "queue-log");
+
+            // The add card, opened again while open and used twice (it once threw "already the logical child of another element").
+            window.SelfTestAddQueueTasks("Check the add card", "Check it once more");
+            await Settle(500);
+            Capture(window, "queue-added");
             window.ShowQueuePanel(false);
 
             // The plan panel beside a working chat: its steps, the goal, and subagents on two servers.

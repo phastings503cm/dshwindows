@@ -326,6 +326,9 @@ public partial class MainWindow : Window
     /// <summary>Show or hide the task queue panel (the self-test drives it).</summary>
     public void ShowQueuePanel(bool open) => SetQueuePanel(open);
 
+    /// <summary>Open the queue's add card and use it (the self-test drives it: the card has to survive being opened again and again).</summary>
+    public void SelfTestAddQueueTasks(params string[] titles) => _queuePanel.SelfTestAddTasks(titles);
+
     /// <summary>The panel is on the right, so dragging left makes it wider and the chat gives way (never past its minimum).</summary>
     private void QueueSplitter_DragDelta(object sender, DragDeltaEventArgs e)
     {
