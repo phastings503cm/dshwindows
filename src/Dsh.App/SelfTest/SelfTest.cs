@@ -9,6 +9,7 @@ using Dsh.App.Infrastructure;
 using Dsh.App.Model;
 using Dsh.App.Views;
 using Dsh.App.Views.Guide;
+using Dsh.App.Views.Import;
 using Dsh.App.Views.Settings;
 using Dsh.App.Views.Wizard;
 using Dsh.Core;
@@ -129,6 +130,8 @@ public sealed class SelfTest
             var memory = new MemoryWindow(model) { Owner = window };
             await ShowAndCapture(memory, "memory");
 
+            await CaptureImport(window, model);
+
             FillQueue(model);
             window.ShowQueuePanel(true);
             model.Select(chat.Id);
@@ -136,6 +139,21 @@ public sealed class SelfTest
             Capture(window, "queue");
             await ShowAndCapture(new QueueLogWindow(model.Host) { Owner = window }, "queue-log");
             window.ShowQueuePanel(false);
+
+            // The plan panel beside a working chat: its steps, the goal, and subagents on two servers.
+            FillAgents(chat);
+            chat.Running = true;
+            window.ShowPlanPanel(true);
+            model.Select(chat.Id);
+            await Settle(1000);
+            Capture(window, "plan");
+            window.ShowPlanPanel(false);
+            chat.Running = false;
+
+            // Remembered notes, and the OpenClaw import's first page (nothing is scanned until you press the button).
+            FillMemories(model);
+            await ShowAndCapture(new MemoriesWindow(model) { Owner = window }, "memories");
+            await ShowAndCapture(new OpenClawImportWindow(model) { Owner = window }, "import-openclaw");
 
             var vault = FillVault(model);
             var vaultWindow = new VaultWindow(model.Host) { Owner = window };
@@ -251,6 +269,63 @@ public sealed class SelfTest
         }
     }
 
+    /// <summary>"Bring in Claude Code &amp; Cursor" against a made-up profile — what it offers, then what
+    /// it did. The profile is scratch, so the run never reads the machine's real ~\.claude or ~\.cursor.</summary>
+    private async Task CaptureImport(Window owner, AppModel model)
+    {
+        var import = new ExternalImportWindow(model, new ExternalLocations(MakeExternalProfile()))
+        {
+            Owner = owner,
+            WindowStartupLocation = WindowStartupLocation.CenterOwner,
+            Height = 780,
+        };
+        try
+        {
+            import.Show();
+            await Settle(1500); // the scan runs off the UI thread
+            Capture(import, "import-external");
+            await import.ImportAsync();
+            await Settle(600);
+            Capture(import, "import-external-done");
+        }
+        catch (Exception error)
+        {
+            Fail("import-external", error);
+        }
+        finally
+        {
+            try { import.Close(); } catch (Exception) { }
+        }
+    }
+
+    private string MakeExternalProfile()
+    {
+        var profile = Path.Combine(Path.GetTempPath(), "dsh-self-test-profile");
+        if (Directory.Exists(profile)) Directory.Delete(profile, recursive: true);
+        void Write(string relative, string text)
+        {
+            var path = Path.Combine(profile, relative.Replace('/', Path.DirectorySeparatorChar));
+            Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+            File.WriteAllText(path, text);
+        }
+        Write(".claude/CLAUDE.md", "# About me\n\nI prefer small, reviewable changes and plain language.\nAlways run the tests before saying something works.\n");
+        Write(".claude/skills/release-notes/SKILL.md", "---\nname: release-notes\ndescription: Use when writing release notes from a list of merged pull requests.\n---\n\nGroup by area, lead with what users notice.\n");
+        Write(".claude/skills/db-migrations/SKILL.md", "---\nname: db-migrations\ndescription: Use when adding or changing a database migration.\n---\n\nNever edit a shipped migration.\n");
+        Write(".claude/skills/db-migrations/scripts/check.ps1", "Write-Host 'checking'\n");
+        Write(".claude/commands/review.md", "---\ndescription: Review the current branch\n---\nReview the diff against main.\n");
+        Write(".claude/rules/style.md", "---\npaths:\n  - \"src/**\"\n---\nKeep controllers thin.\n");
+        Write(".claude/agents/code-reviewer.md", "---\nname: code-reviewer\ndescription: Expert code reviewer. Use proactively after code changes.\ntools: Read, Grep, Glob\n---\nYou review code for bugs and unclear names. Be brief.\n");
+        var notes = $".claude/projects/{ClaudeProjectNames.Encode(Project)}/memory";
+        Write($"{notes}/MEMORY.md", "- [How we test](testing.md) — integration tests hit a real database\n");
+        Write($"{notes}/testing.md", "Integration tests must hit a real database, not a mock.\n");
+        Write(".cursor/skills/api-design/SKILL.md", "---\nname: api-design\ndescription: Use when designing or reviewing a REST API.\n---\n\nPrefer nouns; version in the path.\n");
+        Write(".cursor/commands/ship.md", "Ship the current branch: tests, changelog, tag.\n");
+        foreach (var builtIn in new[] { "create-rule", "create-skill", "statusline" })
+            Write($".cursor/skills-cursor/{builtIn}/SKILL.md", $"---\nname: {builtIn}\ndescription: Use when working on Cursor itself ({builtIn}).\n---\n\nBuilt into Cursor.\n");
+        Write(".cursor/mcp.json", "{\"mcpServers\":{\"figma\":{\"url\":\"https://example.invalid/mcp\"}}}");
+        return profile;
+    }
+
     /// <summary>A chat with one of everything the transcript can show.</summary>
     private static SessionVM FillChat(AppModel model)
     {
@@ -303,6 +378,30 @@ public sealed class SelfTest
         queue.Finish(blocked.Id, QueueTaskStatus.Blocked, "The DEPLOY_TOKEN credential is set to Never.");
         queue.Add("Refactor Stock into a repository", "Keep the public API; move persistence behind IStockStore.", cwd: model.Project);
         queue.Add("Update the README build section", cwd: model.Project);
+    }
+
+    /// <summary>Subagents in the states the plan panel draws: working on two servers, and one that finished.</summary>
+    private static void FillAgents(SessionVM chat)
+    {
+        var now = DateTimeOffset.Now;
+        chat.UpsertAgent(new AgentRunInfo("a1", "Find every caller of Stock.Remove", "explore", false, now.AddSeconds(-38))
+            { Server = "Spark 2", Activity = "grep: Remove\\(", Steps = 6 });
+        chat.UpsertAgent(new AgentRunInfo("a2", "Review the clamping change", "review", true, now.AddSeconds(-12))
+            { Server = "Spark 3", Activity = "read_file: src/Stock.cs", Steps = 2 });
+        chat.UpsertAgent(new AgentRunInfo("a3", "List the report queries", "explore", false, now.AddMinutes(-2))
+            {
+                Server = "Spark 2", Status = AgentRunStatus.Done, FinishedAt = now.AddSeconds(-70), Steps = 9,
+                Report = "Three queries read stock: ReportStock, LowStock and the nightly export.",
+            });
+    }
+
+    /// <summary>A few remembered notes: one pinned, one for this project only.</summary>
+    private static void FillMemories(AppModel model)
+    {
+        var memory = model.Host.Memory;
+        memory.Save(new MemoryDraft { Title = "Test command", Body = "Run the unit tests with dotnet test --no-build; the integration tests need the dev database up.", Kind = MemoryKinds.Procedure, Source = "user" });
+        memory.Save(new MemoryDraft { Title = "Style", Body = "The user prefers small, reviewable commits and plain language in summaries.", Kind = MemoryKinds.Preference, Source = "user", Pinned = true });
+        memory.Save(new MemoryDraft { Title = "Staging server", Body = "The staging server is called orion; deploy it with scripts/ship.ps1.", Kind = MemoryKinds.Fact, Project = model.Project, Source = "agent" });
     }
 
     /// <summary>Two credentials; returns the id of the one to show.</summary>

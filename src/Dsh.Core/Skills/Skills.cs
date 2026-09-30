@@ -213,6 +213,13 @@ public sealed record SkillLocations(string Home, string AppSupport)
     public string BuiltinSkills => Path.Combine(AppSupport, "skills-builtin");
     /// <summary>AI-generated and imported skills waiting for approval.</summary>
     public string Drafts => Path.Combine(AppSupport, "skill-drafts");
+    /// <summary>Your own instruction files (*.md): loaded into every prompt, in every project. Imported
+    /// from Claude Code's ~/.claude/CLAUDE.md, or written by hand.</summary>
+    public string UserInstructions => Path.Combine(AppSupport, "instructions");
+    /// <summary>Notes saved for one project, kept outside the project folder so they never land in a
+    /// repository: one folder per project, named the way Claude Code names it
+    /// (<see cref="ClaudeProjectNames.Encode"/>), each with a MEMORY.md index and the notes it lists.</summary>
+    public string ProjectNotes => Path.Combine(AppSupport, "project-notes");
 
     public static string ProjectSkills(string project) => Path.Combine(project, ".dsh", "skills");
 }

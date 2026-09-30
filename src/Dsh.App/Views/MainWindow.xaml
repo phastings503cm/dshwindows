@@ -44,6 +44,7 @@
                         <MenuItem Header="Toggle _File Tree" InputGestureText="Ctrl+B" Click="ToggleTree_Click" />
                         <MenuItem Header="Toggle _Terminal" InputGestureText="Ctrl+`" Click="ToggleTerminal_Click" />
                         <MenuItem Header="Toggle C_hat Panel" InputGestureText="Ctrl+Shift+C" Click="ToggleChatPanel_Click" />
+                        <MenuItem Header="Toggle _Plan Panel" InputGestureText="Ctrl+Shift+P" Click="TogglePlan_Click" />
                         <Separator />
                         <MenuItem Header="Go to _File…" InputGestureText="Ctrl+P" Click="GoToFile_Click" />
                         <MenuItem Header="Focus Chat _Input" InputGestureText="Ctrl+L" Click="FocusComposer_Click" />
@@ -57,9 +58,12 @@
                         <MenuItem Header="Credentials _Vault…" InputGestureText="Ctrl+Shift+K" Click="Vault_Click" />
                         <Separator />
                         <MenuItem Header="_Memory &amp; Skills…" InputGestureText="Ctrl+Shift+M" Click="Memory_Click" />
+                        <MenuItem Header="Remembered _Notes…" Click="Memories_Click" />
                         <MenuItem Header="Manage S_kills…" Click="Skills_Click" />
                         <MenuItem Header="_Generate a Skill…" Click="GenerateSkill_Click" />
                         <MenuItem Header="_Import Skills…" Click="ImportSkills_Click" />
+                        <MenuItem Header="Bring in from Claude Code &amp; C_ursor…" Click="ImportExternal_Click" />
+                        <MenuItem Header="Bring in from Open_Claw…" Click="ImportOpenClaw_Click" />
                         <Separator />
                         <MenuItem Header="_Reload Project Context" Click="ReloadContext_Click" />
                     </MenuItem>
@@ -122,7 +126,17 @@
                             <TextBlock x:Name="StopLabel" Text="Stop" />
                         </StackPanel>
                     </Button>
-                    <Button x:Name="VaultButton" Style="{StaticResource IconButton}" Content="{x:Static infra:Icons.Key}" Margin="4,0,0,0"
+                    <Button x:Name="PlanButton" Style="{StaticResource IconButton}" Margin="4,0,0,0"
+                            ToolTip="Plan (Ctrl+Shift+P) — what the agent is working through"
+                            AutomationProperties.Name="Plan" Click="TogglePlan_Click">
+                        <StackPanel Orientation="Horizontal">
+                            <TextBlock x:Name="PlanGlyph" Style="{StaticResource Glyph}" FontSize="14" Text="{x:Static infra:Icons.CheckList}" />
+                            <TextBlock x:Name="PlanCount" Style="{StaticResource MetaText}" Margin="5,0,0,0" VerticalAlignment="Center"
+                                       FontFamily="{Binding FontFamily, RelativeSource={RelativeSource AncestorType=Window}}"
+                                       Visibility="Collapsed" />
+                        </StackPanel>
+                    </Button>
+                    <Button x:Name="VaultButton" Style="{StaticResource IconButton}" Content="{x:Static infra:Icons.Key}" Margin="2,0,0,0"
                             ToolTip="Credentials vault (Ctrl+Shift+K) — API keys and passwords the agent can use without seeing them"
                             AutomationProperties.Name="Credentials vault" Click="Vault_Click" />
                     <Button x:Name="QueueButton" Style="{StaticResource IconButton}" Margin="2,0,0,0"
@@ -160,14 +174,20 @@
                 <ColumnDefinition Width="Auto" />
                 <ColumnDefinition Width="*" MinWidth="360" />
                 <ColumnDefinition Width="Auto" />
+                <ColumnDefinition x:Name="PlanColumn" Width="0" MaxWidth="520" />
+                <ColumnDefinition Width="Auto" />
                 <ColumnDefinition x:Name="QueueColumn" Width="0" MaxWidth="560" />
             </Grid.ColumnDefinitions>
             <views:SidebarView x:Name="Sidebar" Grid.Column="0" />
             <GridSplitter x:Name="SidebarSplitter" Grid.Column="1" Style="{StaticResource PaneSplitter}" DragCompleted="SidebarSplitter_DragCompleted" />
             <ContentControl x:Name="Detail" Grid.Column="2" Focusable="False" />
-            <GridSplitter x:Name="QueueSplitter" Grid.Column="3" Style="{StaticResource PaneSplitter}" Visibility="Collapsed"
-                          DragCompleted="QueueSplitter_DragCompleted" />
-            <ContentControl x:Name="QueueHost" Grid.Column="4" Focusable="False" />
+            <GridSplitter x:Name="PlanSplitter" Grid.Column="3" Style="{StaticResource PaneSplitter}" Visibility="Collapsed"
+                          DragCompleted="PlanSplitter_DragCompleted" />
+            <ContentControl x:Name="PlanHost" Grid.Column="4" Focusable="False" />
+            <!-- (A Thumb, not a GridSplitter: with the plan panel between, a GridSplitter would resize the plan and the queue.) -->
+            <Thumb x:Name="QueueSplitter" Grid.Column="5" Style="{StaticResource PaneThumb}" Visibility="Collapsed"
+                   DragDelta="QueueSplitter_DragDelta" DragCompleted="QueueSplitter_DragCompleted" />
+            <ContentControl x:Name="QueueHost" Grid.Column="6" Focusable="False" />
         </Grid>
 
         <!-- Banners float over the content. -->
@@ -204,6 +224,23 @@
                     <Button DockPanel.Dock="Right" Content="Download" Style="{DynamicResource AccentButtonStyle}" Margin="8,0,0,0" Padding="10,3"
                             Click="DownloadUpdate_Click" />
                     <TextBlock x:Name="UpdateText" TextWrapping="Wrap" VerticalAlignment="Center" />
+                </DockPanel>
+            </Border>
+            <!-- A one-time offer to bring in Claude Code and Cursor, when they are on this PC. -->
+            <Border x:Name="ImportCard" Style="{StaticResource Card}" Visibility="Collapsed" Padding="14,10" Margin="0,8,0,0"
+                    Background="{DynamicResource SolidBackgroundFillColorTertiaryBrush}"
+                    BorderBrush="{DynamicResource AccentFillColorDefaultBrush}">
+                <Border.Effect>
+                    <DropShadowEffect BlurRadius="16" ShadowDepth="2" Opacity="0.25" />
+                </Border.Effect>
+                <DockPanel>
+                    <TextBlock DockPanel.Dock="Left" Style="{StaticResource Glyph}" Text="{x:Static infra:Icons.Import}" Margin="0,0,10,0"
+                               Foreground="{DynamicResource AccentTextFillColorPrimaryBrush}" />
+                    <Button DockPanel.Dock="Right" Style="{StaticResource IconButton}" Content="{x:Static infra:Icons.Close}" FontSize="10"
+                            Click="DismissImport_Click" ToolTip="Not now" Margin="8,0,0,0" />
+                    <Button DockPanel.Dock="Right" Content="Bring In…" Style="{DynamicResource AccentButtonStyle}" Margin="8,0,0,0" Padding="10,3"
+                            Click="BringInFromCard_Click" />
+                    <TextBlock x:Name="ImportText" TextWrapping="Wrap" VerticalAlignment="Center" />
                 </DockPanel>
             </Border>
         </StackPanel>

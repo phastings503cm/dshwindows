@@ -30,6 +30,7 @@ public sealed class ModelsPage : UserControl
 {
     private readonly AppModel _model;
     private readonly StackPanel _list = new();
+    private readonly StackPanel _fleet = new();
     private readonly TextBlock _status = Ui.Secondary("");
 
     public ModelsPage(AppModel model)
@@ -48,6 +49,7 @@ public sealed class ModelsPage : UserControl
         _status.Margin = new Thickness(0, 8, 0, 4);
         page.Children.Add(_status);
         page.Children.Add(Ui.Section("Routes"));
+        page.Children.Add(_fleet);
         page.Children.Add(_list);
         Content = Ui.Scroll(page);
         Rebuild();
@@ -92,6 +94,52 @@ public sealed class ModelsPage : UserControl
                 change.ToolTip = "Pick another model or Region, or sign in with another AWS account, in the Bedrock guide.";
                 actions.Children.Add(change);
             }
+            StackPanel? subagents = null;
+            if (!active)
+            {
+                // A second server (another DGX Spark, say) can take the main model's side tasks. (On a line of its own: the
+                // buttons beside the name leave a long route name no room for more.)
+                subagents = new StackPanel { Orientation = Orientation.Horizontal };
+                var worker = new CheckBox
+                {
+                    Content = "Use for subagents",
+                    IsChecked = provider.SubagentWorker,
+                    VerticalAlignment = VerticalAlignment.Center,
+                    Margin = new Thickness(0, 0, 12, 0),
+                    ToolTip = "Use this server for subagents: side tasks the main model hands out run here, in parallel with the main model.",
+                };
+                worker.Click += (_, _) =>
+                {
+                    provider.SubagentWorker = worker.IsChecked == true;
+                    config.Persist();
+                    _model.Host.RefreshFleet();
+                    Rebuild();
+                };
+                subagents.Children.Add(worker);
+                if (provider.SubagentWorker)
+                {
+                    subagents.Children.Add(Ui.Secondary("at a time:", 12));
+                    var parallel = new ComboBox { Width = 54, Margin = new Thickness(6, 0, 0, 0), ToolTip = "How many subagents may work on this server at the same time" };
+                    for (var n = 1; n <= 8; n++) parallel.Items.Add(n);
+                    parallel.SelectedItem = Math.Clamp(provider.SubagentParallel ?? 2, 1, 8);
+                    parallel.SelectionChanged += (_, _) =>
+                    {
+                        if (parallel.SelectedItem is not int chosen) return;
+                        provider.SubagentParallel = chosen;
+                        config.Persist();
+                        _model.Host.RefreshFleet();
+                    };
+                    subagents.Children.Add(parallel);
+                    // A second model on the main model's own machine (a Spark serves one at a time) adds no worker: say so.
+                    if (_model.Host.WorkerRoutes.All(w => w.RouteId != provider.RouteId))
+                    {
+                        var same = Ui.Secondary("· the same server as the main model, so not used", 12);
+                        same.Margin = new Thickness(10, 0, 0, 0);
+                        same.ToolTip = "A server that is already the main model's runs one model at a time; a second route on it would only queue behind it.";
+                        subagents.Children.Add(same);
+                    }
+                }
+            }
             actions.Children.Add(Ui.Button("Edit…", () => Edit(provider)));
             var remove = new Button { Content = Icons.Delete, ToolTip = "Remove", Margin = new Thickness(6, 0, 0, 0) };
             remove.SetResourceReference(StyleProperty, "IconButton");
@@ -108,7 +156,7 @@ public sealed class ModelsPage : UserControl
                 ? $"{provider.Model} · {BedrockRegions.NameOf(provider.AwsRegion ?? BedrockRegions.Default)} · {(provider.AwsProfile is { } aws ? $"AWS profile {aws}" : "Bedrock API key")}"
                 : $"{provider.Model} · {provider.BaseUrl}";
             if (provider.ContextWindow is { } window) detail += $" · {window:N0} ctx";
-            var row = Ui.Row(provider.Name, detail, actions, Icons.ForProvider(provider.Kind));
+            var row = Ui.Row(provider.Name, detail, actions, Icons.ForProvider(provider.Kind), below: subagents);
             row.MouseLeftButtonDown += (_, e) =>
             {
                 if (e.ClickCount == 2) Edit(provider);
@@ -117,6 +165,39 @@ public sealed class ModelsPage : UserControl
             _list.Children.Add(row);
         }
         if (config.Providers.Count == 0) _list.Children.Add(Ui.Card(Ui.Secondary("No routes yet. Add a server or run the setup wizard.")));
+        RebuildFleet();
+    }
+
+    /// <summary>How the main model and the subagent servers are arranged.</summary>
+    private void RebuildFleet()
+    {
+        _fleet.Children.Clear();
+        var config = _model.Config;
+        var workers = _model.Host.WorkerRoutes;
+        var main = config.Providers.FirstOrDefault(p => p.RouteId == config.ActiveRoute);
+        if (main is null || config.Providers.Count < 2) return;
+        var text = new StackPanel();
+        if (workers.Count == 0)
+        {
+            text.Children.Add(Ui.Text("Several servers? Put them all to work", 13, FontWeights.SemiBold));
+            var tip = Ui.Secondary($"{main.Name} is the main model. Tick “Use for subagents” on another server — a second DGX Spark, say — and the main model hands side tasks to it, so they run in parallel instead of queueing.");
+            tip.Margin = new Thickness(0, 3, 0, 0);
+            text.Children.Add(tip);
+        }
+        else
+        {
+            text.Children.Add(Ui.Text($"{main.Name} is the main model · subagents run on {string.Join(", ", workers.Select(w => AgentHost.RouteLabel(w) + $" ({w.SubagentParallel ?? 2} at a time)"))}", 13, FontWeights.SemiBold));
+            var also = Ui.Check("When those are all busy, let subagents use the main server too", config.SubagentsUsePrimary, on =>
+            {
+                config.SubagentsUsePrimary = on;
+                _model.Host.RefreshFleet();
+            });
+            also.Margin = new Thickness(0, 6, 0, 0);
+            text.Children.Add(also);
+        }
+        var card = Ui.Card(text);
+        card.Margin = new Thickness(0, 0, 0, 10);
+        _fleet.Children.Add(card);
     }
 
     private void Edit(ProviderProfile provider)
@@ -308,8 +389,15 @@ public sealed class ProviderEditorWindow : Window
             .Select(line => line.Split(':', 2))
             .Where(parts => parts.Length == 2 && parts[0].Trim().Length > 0)
             .ToDictionary(parts => parts[0].Trim(), parts => parts[1].Trim());
-        return new ProviderProfile(SelectedKind, _name.Text.Trim(), _url.Text.Trim(), _modelName.Text.Trim())
+        // Everything the form doesn't show carries over (the pinned certificate, whether the route serves subagents, and how
+        // many at a time) — a fresh profile would silently drop them.
+        return _original with
         {
+            Kind = SelectedKind,
+            Name = _name.Text.Trim(),
+            BaseUrl = _url.Text.Trim(),
+            Model = _modelName.Text.Trim(),
+            ApiKey = null,
             Temperature = double.TryParse(_temperature.Text, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var t) ? t : null,
             MaxOutputTokens = int.TryParse(_maxTokens.Text, out var m) && m > 0 ? m : null,
             ContextWindow = int.TryParse(_context.Text.Replace(",", "").Replace("_", ""), out var c) && c > 0 ? c : null,
@@ -380,12 +468,17 @@ public sealed class ProviderEditorWindow : Window
             return;
         }
         var config = _model.Config;
-        if (_original.RouteId != profile.RouteId && config.Providers.Any(p => p.RouteId == _original.RouteId))
+        // (Asked before a renamed route is removed below.) A new route becomes the main model; editing an existing one leaves
+        // it the main model, a spare or a subagent server, as it was.
+        var existed = config.Providers.Any(p => p.RouteId == _original.RouteId);
+        var wasActive = _original.RouteId == config.ActiveRoute;
+        if (_original.RouteId != profile.RouteId && existed)
         {
             config.RemoveProvider(_original);
             try { SecretStore.Delete(SecretStore.ProviderTarget(_original.RouteId)); } catch (Exception) { }
         }
-        config.Activate(profile);
+        if (!existed || wasActive) config.Activate(profile);
+        else config.Store(profile);
         config.SetApiKey(_key.Password, profile);
         _model.Host.ResetRouteCache();
         DialogResult = true;

@@ -36,6 +36,20 @@ public sealed record ToolContext
     /// {{vault:NAME}} exactly like its parent.</summary>
     public CredentialVault? Vault { get; init; }
     public VaultGrants VaultGrants { get; init; } = new();
+    /// <summary>The model servers subagents run on (workers first, the primary as overflow). Null = a
+    /// subagent uses this run's own client.</summary>
+    public AgentFleet? Fleet { get; init; }
+    /// <summary>Every subagent this chat has started, for the UI. Null = not tracked.</summary>
+    public AgentRoster? Roster { get; init; }
+    /// <summary>The kinds of subagent available (null = the built-in ones).</summary>
+    public AgentCatalog? AgentTypes { get; init; }
+    /// <summary>How the parent retries a model that doesn't answer; subagents follow it (null = the standard policy).</summary>
+    public RetryPolicy? Retry { get; init; }
+    /// <summary>The parent's model settings, which a subagent on the same server shares (a subagent on another server
+    /// uses that server's — see <see cref="FleetTarget"/>).</summary>
+    public bool VisionEnabled { get; init; } = true;
+    public double? Temperature { get; init; }
+    public int? MaxOutputTokens { get; init; }
 }
 
 public enum FileChangeKind { Created, Modified, Deleted }
@@ -57,6 +71,11 @@ public sealed record ToolResult(string Output)
     /// <summary>Images the tool produced. Chat-completion tool messages are text-only, so the engine
     /// hands these to the model on a follow-up user message.</summary>
     public IReadOnlyList<MessageAttachment> Images { get; init; } = [];
+    /// <summary>A verdict for the /goal loop (<c>goal_complete</c> / <c>goal_blocked</c>): the engine
+    /// ends the run after this tool turn and hands the verdict to the harness, which stops looping.</summary>
+    public GoalStatus? Goal { get; init; }
+    /// <summary>The plan a planning run is proposing (exit_plan_mode); the UI shows it in the plan panel.</summary>
+    public string? Plan { get; init; }
 
     public static implicit operator ToolResult(string output) => new(output);
 }
@@ -94,13 +113,20 @@ public sealed class ToolRegistry
     /// <summary>A copy without the named tools (subagents lose agent).</summary>
     public ToolRegistry Removing(params string[] names) => new(_tools.Where(t => !names.Contains(t.Name)));
 
+    /// <summary>A copy with only the named tools (an agent type's allowlist).</summary>
+    public ToolRegistry Only(IEnumerable<string> names)
+    {
+        var keep = new HashSet<string>(names, StringComparer.Ordinal);
+        return new ToolRegistry(_tools.Where(t => keep.Contains(t.Name)));
+    }
+
     /// <summary>Tools for background subagents (the agent tool starts them with run_in_background).
     /// Added by the app next to a <see cref="Core.BackgroundAgents"/> pool.</summary>
     public static IReadOnlyList<IToolExecutor> BackgroundAgentTools() => [new AgentStatusTool(), new AgentStopTool()];
 
     /// <summary>The built-in tool set. The agent tool is only offered at the top level: subagents
     /// don't spawn subagents (keeps the permission surface and cost predictable).</summary>
-    public static ToolRegistry Standard(int depth = 0, AgentShell? shell = null)
+    public static ToolRegistry Standard(int depth = 0, AgentShell? shell = null, AgentCatalog? agents = null)
     {
         var tools = new List<IToolExecutor>
         {
@@ -108,7 +134,11 @@ public sealed class ToolRegistry
             new ReadManyFilesTool(), new GlobTool(), new GrepTool(),
             new RunShellCommandTool(shell), new WebFetchTool(), new TodoWriteTool(), new ExitPlanModeTool(),
         };
-        if (depth == 0) tools.Add(new AgentTool());
+        if (depth == 0)
+        {
+            tools.Add(new AgentTool(agents));
+            tools.Add(new DelegateTool(agents));
+        }
         return new ToolRegistry(tools);
     }
 }

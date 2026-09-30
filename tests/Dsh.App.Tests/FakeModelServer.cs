@@ -14,13 +14,19 @@ public abstract record FakeReply
     public sealed record Transport(bool Timeout = false) : FakeReply;
     /// <summary>Answer after a delay (lets a test stop a task mid-request).</summary>
     public sealed record Slow(TimeSpan Delay, string Content) : FakeReply;
+    /// <summary>Answer once the test lets it (so a test decides what happens while the model is still "talking").</summary>
+    public sealed record Gated(Task Gate, string Content) : FakeReply;
     /// <summary>Call one tool.</summary>
     public sealed record ToolCall(string Name, string Arguments) : FakeReply;
 }
 
-/// <summary>One chat request as the fake server saw it.</summary>
-public sealed record SeenRequest(IReadOnlyList<(string Role, string? Content)> Messages)
+/// <summary>One chat request as the fake server saw it. <paramref name="Host"/> is the server it was sent to
+/// (tests with two routes tell them apart by it).</summary>
+public sealed record SeenRequest(IReadOnlyList<(string Role, string? Content)> Messages, string Host = "", IReadOnlyList<string>? ToolNames = null)
 {
+    /// <summary>The tools the request offered the model.</summary>
+    public IReadOnlyList<string> Tools => ToolNames ?? [];
+
     public string LastUser => Messages.LastOrDefault(m => m.Role == "user").Content ?? "";
     public string AllUserText => string.Join("\n", Messages.Where(m => m.Role == "user").Select(m => m.Content ?? ""));
     /// <summary>The request answers a user message (not a tool result).</summary>
@@ -63,7 +69,16 @@ public sealed class FakeModelServer : HttpMessageHandler
 
         var body = request.Content is null ? "{}" : await request.Content.ReadAsStringAsync(cancellationToken);
         var messages = new List<(string, string?)>();
-        if (JsonNode.Parse(body)?["messages"] is JsonArray array)
+        var parsed = JsonNode.Parse(body);
+        var tools = new List<string>();
+        if (parsed?["tools"] is JsonArray toolArray)
+        {
+            foreach (var tool in toolArray)
+            {
+                if (tool?["function"]?["name"] is JsonValue name && name.TryGetValue<string>(out var toolName)) tools.Add(toolName);
+            }
+        }
+        if (parsed?["messages"] is JsonArray array)
         {
             foreach (var message in array)
             {
@@ -71,7 +86,7 @@ public sealed class FakeModelServer : HttpMessageHandler
                 messages.Add((message?["role"]?.GetValue<string>() ?? "", content));
             }
         }
-        var seen = new SeenRequest(messages);
+        var seen = new SeenRequest(messages, request.RequestUri?.Host ?? "", tools);
         int index;
         Func<SeenRequest, int, FakeReply> script;
         lock (_lock)
@@ -93,6 +108,9 @@ public sealed class FakeModelServer : HttpMessageHandler
             case FakeReply.Slow slow:
                 await Task.Delay(slow.Delay, cancellationToken);
                 return Respond(200, Sse(slow.Content));
+            case FakeReply.Gated gated:
+                await gated.Gate.WaitAsync(cancellationToken);
+                return Respond(200, Sse(gated.Content));
             case FakeReply.ToolCall call:
                 var delta = new JsonObject
                 {

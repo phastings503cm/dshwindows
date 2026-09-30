@@ -95,47 +95,52 @@ public sealed class EditTool : IToolExecutor
 
         try
         {
-            if (!File.Exists(path))
+            // Read, change and write back as one step: another agent editing this file waits its turn and then
+            // starts from what this edit left.
+            lock (FileText.LockFor(path))
             {
-                // New file from an edit: only the replacement text lands in it.
-                FileText.Write(path, newText, TextFileFormat.Default);
-                return Task.FromResult(new ToolResult($"Created {name} with the new block.")
+                if (!File.Exists(path))
                 {
-                    Files = [new FileChange(path, FileChangeKind.Created)],
+                    // New file from an edit: only the replacement text lands in it.
+                    FileText.Write(path, newText, TextFileFormat.Default);
+                    return Task.FromResult(new ToolResult($"Created {name} with the new block.")
+                    {
+                        Files = [new FileChange(path, FileChangeKind.Created)],
+                    });
+                }
+                if (FileText.Read(path) is not { } read)
+                    return Task.FromResult<ToolResult>($"Error: cannot edit {name}: it is not a UTF-8 text file.");
+
+                // The model sees files with LF line endings (read_file normalizes them), so a CRLF file
+                // is matched and edited in LF form and written back as CRLF.
+                var crlf = read.Format.UsesCrlf;
+                var existing = crlf ? read.Text.Replace("\r\n", "\n") : read.Text;
+                var needle = crlf ? oldText.Replace("\r\n", "\n") : oldText;
+                var replacement = crlf ? newText.Replace("\r\n", "\n") : newText;
+
+                var occurrences = TextUtil.CountOccurrences(existing, needle);
+                if (occurrences < 1)
+                    return Task.FromResult<ToolResult>($"Error: old_string not found in {name}. Read the file and copy the exact text (whitespace matters).");
+                if (occurrences > 1 && !replaceAll)
+                    return Task.FromResult<ToolResult>($"Error: old_string matches {occurrences} times. Include more surrounding lines to make it unique, or set replace_all=true.");
+
+                string updated;
+                if (replaceAll)
+                {
+                    updated = existing.Replace(needle, replacement, StringComparison.Ordinal);
+                }
+                else
+                {
+                    var at = existing.IndexOf(needle, StringComparison.Ordinal);
+                    updated = string.Concat(existing.AsSpan(0, at), replacement, existing.AsSpan(at + needle.Length));
+                }
+                FileText.Write(path, updated, read.Format);
+                var n = replaceAll ? occurrences : 1;
+                return Task.FromResult(new ToolResult($"Edited {name}: replaced {n} occurrence{(n == 1 ? "" : "s")}.")
+                {
+                    Files = [new FileChange(path, FileChangeKind.Modified)],
                 });
             }
-            if (FileText.Read(path) is not { } read)
-                return Task.FromResult<ToolResult>($"Error: cannot edit {name}: it is not a UTF-8 text file.");
-
-            // The model sees files with LF line endings (read_file normalizes them), so a CRLF file
-            // is matched and edited in LF form and written back as CRLF.
-            var crlf = read.Format.UsesCrlf;
-            var existing = crlf ? read.Text.Replace("\r\n", "\n") : read.Text;
-            var needle = crlf ? oldText.Replace("\r\n", "\n") : oldText;
-            var replacement = crlf ? newText.Replace("\r\n", "\n") : newText;
-
-            var occurrences = TextUtil.CountOccurrences(existing, needle);
-            if (occurrences < 1)
-                return Task.FromResult<ToolResult>($"Error: old_string not found in {name}. Read the file and copy the exact text (whitespace matters).");
-            if (occurrences > 1 && !replaceAll)
-                return Task.FromResult<ToolResult>($"Error: old_string matches {occurrences} times. Include more surrounding lines to make it unique, or set replace_all=true.");
-
-            string updated;
-            if (replaceAll)
-            {
-                updated = existing.Replace(needle, replacement, StringComparison.Ordinal);
-            }
-            else
-            {
-                var at = existing.IndexOf(needle, StringComparison.Ordinal);
-                updated = string.Concat(existing.AsSpan(0, at), replacement, existing.AsSpan(at + needle.Length));
-            }
-            FileText.Write(path, updated, read.Format);
-            var n = replaceAll ? occurrences : 1;
-            return Task.FromResult(new ToolResult($"Edited {name}: replaced {n} occurrence{(n == 1 ? "" : "s")}.")
-            {
-                Files = [new FileChange(path, FileChangeKind.Modified)],
-            });
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException)
         {

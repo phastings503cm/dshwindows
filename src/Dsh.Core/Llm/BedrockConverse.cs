@@ -572,7 +572,7 @@ internal sealed class ConverseReply(Func<string, string, LlmException> exception
                     int Count(string key) => JsonNumbers.TryGetInt(u[key], out var n) ? n : 0;
                     // Cached input is still input: the gauge wants the whole prompt.
                     _usage = new LlmUsage(Count("inputTokens") + Count("cacheReadInputTokens") + Count("cacheWriteInputTokens"),
-                                          Count("outputTokens"));
+                                          Count("outputTokens"), u["cacheReadInputTokens"] is null ? null : Count("cacheReadInputTokens"));
                 }
                 return null;
             default:

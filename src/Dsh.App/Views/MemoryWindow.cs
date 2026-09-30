@@ -5,6 +5,7 @@ using System.Windows.Input;
 using Dsh.App.Infrastructure;
 using Dsh.App.Model;
 using Dsh.App.Views.Dialogs;
+using Dsh.App.Views.Import;
 using Dsh.App.Views.Skills;
 using Dsh.Core;
 using ICSharpCode.AvalonEdit;
@@ -125,14 +126,20 @@ public sealed class MemoryWindow : Window
         {
             list.Children.Add(Ui.Card(Ui.Stack(
                 Ui.Text("No instruction files", 14, FontWeights.SemiBold),
-                Ui.Secondary("A file named AGENTS.md, QWEN.md, CLAUDE.md, DSH.md, or MEMORY.md in the project root is loaded into every prompt. Create the memory scaffold to get started."),
+                Ui.Secondary("A file named AGENTS.md, QWEN.md, CLAUDE.md, DSH.md, or MEMORY.md in the project root is loaded into every prompt. Create the memory scaffold to get started, or bring your instructions and notes over from Claude Code and Cursor."),
                 new Border { Height = 10 },
-                Ui.Button("Set Up Memory", SetUpMemory, accent: true))));
+                Ui.Buttons(Ui.Button("Set Up Memory", SetUpMemory, accent: true), Ui.Button("From Claude Code & Cursor…", BringIn)))));
         }
         foreach (var file in files)
         {
             var open = Ui.Button("Edit", () => _page.Content = Instructions(file));
-            var detail = $"{Formatting.Plural(file.LineCount, "line")}" + (file.LineCount > 100 ? " — long: this is loaded on every request; move detail into a skill" : "");
+            var source = file.Scope switch
+            {
+                InstructionScope.User => "Your instructions, used in every project · ",
+                InstructionScope.Notes => "Notes saved for this project (an index; the model reads the notes it lists) · ",
+                _ => "",
+            };
+            var detail = source + $"{Formatting.Plural(file.LineCount, "line")}" + (file.LineCount > 100 ? " — long: this is loaded on every request; move detail into a skill" : "");
             var row = Ui.Row(file.Label, detail, open, file.LineCount > 100 ? Icons.Warning : Icons.Document);
             row.MouseLeftButtonDown += (_, e) =>
             {
@@ -145,6 +152,9 @@ public sealed class MemoryWindow : Window
             var scaffold = Ui.LinkButton("Set Up Memory Scaffold", SetUpMemory);
             scaffold.HorizontalAlignment = HorizontalAlignment.Left;
             list.Children.Add(scaffold);
+            var bring = Ui.LinkButton("Bring in from Claude Code & Cursor…", BringIn);
+            bring.HorizontalAlignment = HorizontalAlignment.Left;
+            list.Children.Add(bring);
         }
         return Ui.Scroll(list, new Thickness(20, 4, 20, 8));
     }
@@ -194,6 +204,15 @@ public sealed class MemoryWindow : Window
         root.Children.Add(editor);
         Loaded += (_, _) => editor.Focus();
         return root;
+    }
+
+    /// <summary>Open the import over this window, then show what it added.</summary>
+    private void BringIn()
+    {
+        new ExternalImportWindow(_model) { Owner = this }.ShowDialog();
+        _model.Config.ExternalImportOffered = true;
+        _model.Host.RefreshProjectContext();
+        ShowTab();
     }
 
     private void SetUpMemory()

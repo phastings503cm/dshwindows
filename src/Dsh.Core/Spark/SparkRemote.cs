@@ -45,6 +45,8 @@ public sealed class KnownHosts
     private readonly string _path;
     private readonly Lock _lock = new();
     private Dictionary<string, Entry>? _entries;
+    /// <summary>The file exists but couldn't be read just now: what's in memory is not the whole truth, so it must not overwrite the file.</summary>
+    private bool _unreadable;
 
     public KnownHosts(string? path = null)
     {
@@ -82,24 +84,46 @@ public sealed class KnownHosts
         DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
     };
 
+    /// <summary>The pins as the file has them now. Several parts of the app keep their own instance (the setup guide,
+    /// the OpenClaw import): each must see what the others added, or the last to save would erase the rest — and with
+    /// a pin gone, a changed host key reads as a first contact. The file is a few hundred bytes and read a handful of
+    /// times a session, so it is read every time: a timestamp is not proof it hasn't changed (two saves inside one clock
+    /// tick — a millisecond or more, depending on the disk — carry the same one).</summary>
     private Dictionary<string, Entry> Load()
     {
-        if (_entries is not null) return _entries;
         try
         {
             _entries = File.Exists(_path)
                 ? JsonSerializer.Deserialize<Dictionary<string, Entry>>(File.ReadAllText(_path), Json) ?? []
                 : [];
+            _unreadable = false;
         }
-        catch (Exception ex) when (ex is JsonException or IOException or UnauthorizedAccessException)
+        catch (JsonException)
         {
+            // Damaged. Keep it where it can be looked at, and start over: the fingerprint is shown again on the next contact.
+            try
+            {
+                File.Copy(_path, _path + ".damaged", overwrite: true);
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+                // Nothing more to be done.
+            }
             _entries = [];
+            _unreadable = false;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            // Another program has it open, or it can't be read. Empty is not the truth: use what was known, and don't overwrite the file.
+            _entries ??= [];
+            _unreadable = true;
         }
         return _entries;
     }
 
     private void Save()
     {
+        if (_unreadable) return; // kept in memory for this session; the file is left as it was
         try
         {
             Directory.CreateDirectory(Path.GetDirectoryName(_path)!);

@@ -14,8 +14,9 @@ public static class JsonArgs
         {
             return JsonNode.Parse(json) as JsonObject ?? new JsonObject();
         }
-        catch (JsonException)
+        catch (Exception ex) when (ex is JsonException or ArgumentException or InvalidOperationException)
         {
+            // (Half a surrogate pair — a call cut off in the middle of an emoji — is an ArgumentException, not a JsonException.)
             return new JsonObject();
         }
     }

@@ -250,14 +250,27 @@ public static class SkillConverter
         if (skill.Kind == SkillKind.Skill)
         {
             SkillFiles.CopyTree(skill.Directory, directory);
-            if (name is not null && skill.Document() is { } renamed) // renamed on import
-            {
-                renamed["name"] = name;
-                SkillFiles.WriteText(Path.Combine(directory, "SKILL.md"), renamed.Render());
-            }
+            if (name is not null && SkillFileText(skill, name) is { } renamed) // renamed on import
+                SkillFiles.WriteText(Path.Combine(directory, "SKILL.md"), renamed);
             return;
         }
-        if (skill.Document() is not { } source) throw SkillException.Io($"Can't read {Path.GetFileName(skill.Path)}.");
+        var text = SkillFileText(skill, name) ?? throw SkillException.Io($"Can't read {Path.GetFileName(skill.Path)}.");
+        Directory.CreateDirectory(directory);
+        SkillFiles.WriteText(Path.Combine(directory, "SKILL.md"), text);
+    }
+
+    /// <summary>The SKILL.md text <see cref="WriteSkillFolder"/> writes for <paramref name="skill"/>
+    /// under <paramref name="name"/> — null when the file can't be read. Kept apart from the writing so
+    /// a preview ("is this already imported?") and the import itself can never disagree. (A skill
+    /// folder copied without a new name keeps its SKILL.md byte for byte, so callers pass the name.)</summary>
+    public static string? SkillFileText(Skill skill, string? name = null)
+    {
+        if (skill.Document() is not { } source) return null;
+        if (skill.Kind == SkillKind.Skill)
+        {
+            if (name is not null) source["name"] = name;
+            return source.Render();
+        }
         var doc = new SkillDocument(source.Body, hadFrontmatter: true);
         doc["name"] = name ?? SkillFiles.NonEmpty(SkillNaming.Slug(skill.Name), "skill");
         doc["description"] = skill.Description;
@@ -266,8 +279,7 @@ public static class SkillConverter
         if (skill.ArgumentHint is { } hint) doc["argument-hint"] = hint;
         if (skill.AllowedTools.Count > 0) doc.SetList("allowed-tools", skill.AllowedTools);
         if (skill.Kind == SkillKind.Command || !skill.ModelInvocable) doc["disable-model-invocation"] = "true";
-        Directory.CreateDirectory(directory);
-        SkillFiles.WriteText(Path.Combine(directory, "SKILL.md"), doc.Render());
+        return doc.Render();
     }
 
     /// <summary>Cursor .mdc text for a skill.</summary>
@@ -710,11 +722,16 @@ public static partial class SkillLint
         var lines = body.Split('\n').Length;
         if (lines > 500)
             Add(SkillIssueSeverity.Warning, $"{lines} lines is long — move reference material into files next to SKILL.md and say when to read them.");
-        if (SecretPattern().IsMatch(text))
+        if (ContainsSecret(text))
             Add(SkillIssueSeverity.Warning, "This looks like it contains a secret (key/token). Skills are shared as plain files — remove it.");
         return output.OrderByDescending(i => i.Severity).ToList();
     }
 
-    [GeneratedRegex(@"sk-[A-Za-z0-9]{20,}|AKIA[0-9A-Z]{16}|-----BEGIN [A-Z ]*PRIVATE KEY-----|gh[pousr]_[A-Za-z0-9]{30,}|xox[baprs]-[A-Za-z0-9-]{10,}")]
+    /// <summary>Whether <paramref name="text"/> looks like it holds a key, token or private key.</summary>
+    public static bool ContainsSecret(string text) => SecretPattern().IsMatch(text);
+
+    // API keys as they come: OpenAI/Anthropic (sk-, sk-proj-, sk-ant-api03-…), AWS, GitHub, Slack, Google, Hugging Face,
+    // GitLab, Stripe, and private key blocks. "sk-" must start a word, so "task-…" and "disk-…" prose doesn't match.
+    [GeneratedRegex(@"(?<![A-Za-z0-9])sk-[A-Za-z0-9_-]{20,}|(?:AKIA|ASIA)[0-9A-Z]{16}|-----BEGIN [A-Z ]*PRIVATE KEY-----|gh[pousr]_[A-Za-z0-9]{30,}|github_pat_[A-Za-z0-9_]{40,}|xox[baprs]-[A-Za-z0-9-]{10,}|AIza[0-9A-Za-z_-]{35}|(?<![A-Za-z0-9])hf_[A-Za-z0-9]{30,}|glpat-[A-Za-z0-9_-]{20,}|(?:sk|rk)_live_[A-Za-z0-9]{20,}")]
     private static partial Regex SecretPattern();
 }

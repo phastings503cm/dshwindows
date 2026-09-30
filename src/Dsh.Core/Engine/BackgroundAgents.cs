@@ -77,7 +77,7 @@ public sealed class BackgroundAgents
             _order.Add(job.Id);
             _cancellers[job.Id] = cts;
         }
-        Changed?.Invoke(job);
+        Listeners.Raise(Changed, job);
         _ = Task.Run(async () =>
         {
             (bool Ok, string Report) outcome;
@@ -151,6 +151,21 @@ public sealed class BackgroundAgents
         }
     }
 
+    /// <summary>Jobs that were taken for the main agent but never reached it (the request failed before the model saw
+    /// them): announce them again with the next message.</summary>
+    public void Requeue(IEnumerable<BackgroundAgentJob> jobs)
+    {
+        lock (_lock)
+        {
+            foreach (var job in jobs)
+            {
+                var current = _jobs.GetValueOrDefault(job.Id);
+                if (current is null || current.Status is BackgroundAgentStatus.Running or BackgroundAgentStatus.Stopped) continue;
+                if (!_unreported.Contains(job.Id)) _unreported.Add(job.Id);
+            }
+        }
+    }
+
     /// <summary>True when finished jobs are waiting to be handed to the main agent.</summary>
     public bool HasUnreported
     {
@@ -177,7 +192,7 @@ public sealed class BackgroundAgents
             if (_cancellers.Remove(id, out var cts)) cts.Dispose();
             if (status != BackgroundAgentStatus.Stopped) _unreported.Add(id);
         }
-        Changed?.Invoke(job);
+        Listeners.Raise(Changed, job);
     }
 
     /// <summary>The automatic message the main agent gets when jobs finish.</summary>

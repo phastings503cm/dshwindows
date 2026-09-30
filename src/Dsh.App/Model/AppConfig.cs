@@ -28,7 +28,10 @@ public sealed partial class AppConfig : ObservableObject
     private readonly string _path;
     private bool _loading;
     private bool _saveScheduled;
+    /// <summary>API keys read from Credential Manager. Guarded by its own lock: a subagent resolving its server's key runs
+    /// on a pool thread while the UI thread reads the active route's.</summary>
     private readonly Dictionary<string, string> _keyCache = new(StringComparer.Ordinal);
+    private readonly object _keyLock = new();
 
     public ObservableCollection<ProviderProfile> Providers { get; } = [];
     public ObservableCollection<string> RecentProjects { get; } = [];
@@ -54,6 +57,9 @@ public sealed partial class AppConfig : ObservableObject
     [ObservableProperty] private bool _checkForUpdates = true;
     [ObservableProperty] private bool _computerToolsEnabled = true;
     [ObservableProperty] private int _skillSourcesRaw = (int)SkillSources.All;
+    /// <summary>The one-time notice about bringing in Claude Code and Cursor has been shown or used, so it
+    /// doesn't come back.</summary>
+    [ObservableProperty] private bool _externalImportOffered;
 
     [ObservableProperty] private string _sparkUrl = "";
     [ObservableProperty] private string _sparkUser = "";
@@ -69,6 +75,17 @@ public sealed partial class AppConfig : ObservableObject
     /// <summary>The Task Queue panel is showing.</summary>
     [ObservableProperty] private bool _queuePanelOpen;
     [ObservableProperty] private double _queuePanelWidth = 360;
+
+    /// <summary>The Plan panel (what the agent is working through, top right) is showing.</summary>
+    [ObservableProperty] private bool _planPanelOpen;
+    [ObservableProperty] private double _planPanelWidth = 340;
+    /// <summary>Open the Plan panel by itself when the agent makes a plan.</summary>
+    [ObservableProperty] private bool _planPanelAutoOpen = true;
+    /// <summary>Remember things between chats: notes ride along with messages when relevant, and the agent
+    /// can save and look them up. Off switches all of it off.</summary>
+    [ObservableProperty] private bool _memoryEnabled = true;
+    /// <summary>When every subagent server (worker) is busy, let subagents also run on the main model server.</summary>
+    [ObservableProperty] private bool _subagentsUsePrimary = true;
 
     /// <summary>Skill ids (file paths) switched off everywhere.</summary>
     public HashSet<string> DisabledSkills { get; } = new(StringComparer.OrdinalIgnoreCase);
@@ -132,6 +149,16 @@ public sealed partial class AppConfig : ObservableObject
         OnPropertyChanged(nameof(ActiveProvider));
     }
 
+    /// <summary>Add or replace a route without changing which one is active (editing a spare or a subagent server must not make it the main model).</summary>
+    public void Store(ProviderProfile provider)
+    {
+        var copy = provider.DeepCopy();
+        copy.ApiKey = null;
+        var index = Providers.ToList().FindIndex(p => p.RouteId == copy.RouteId);
+        if (index >= 0) Providers[index] = copy; else Providers.Add(copy);
+        OnPropertyChanged(nameof(ActiveProvider));
+    }
+
     public void RemoveProvider(ProviderProfile provider)
     {
         var existing = Providers.FirstOrDefault(p => p.RouteId == provider.RouteId);
@@ -146,7 +173,7 @@ public sealed partial class AppConfig : ObservableObject
 
     public void SetApiKey(string key, ProviderProfile provider)
     {
-        _keyCache[provider.RouteId] = key;
+        lock (_keyLock) _keyCache[provider.RouteId] = key;
         try
         {
             SecretStore.Write(SecretStore.ProviderTarget(provider.RouteId), key);
@@ -160,7 +187,10 @@ public sealed partial class AppConfig : ObservableObject
 
     public string ApiKey(ProviderProfile provider)
     {
-        if (_keyCache.TryGetValue(provider.RouteId, out var cached)) return cached;
+        lock (_keyLock)
+        {
+            if (_keyCache.TryGetValue(provider.RouteId, out var cached)) return cached;
+        }
         string key;
         try
         {
@@ -170,8 +200,7 @@ public sealed partial class AppConfig : ObservableObject
         {
             key = "";
         }
-        _keyCache[provider.RouteId] = key;
-        return key;
+        lock (_keyLock) return _keyCache.TryAdd(provider.RouteId, key) ? key : _keyCache[provider.RouteId];
     }
 
     // MARK: - Projects
@@ -250,6 +279,7 @@ public sealed partial class AppConfig : ObservableObject
         public bool? CheckForUpdates { get; set; }
         public bool? ComputerToolsEnabled { get; set; }
         public int? SkillSources { get; set; }
+        public bool? ExternalImportOffered { get; set; }
         public List<string>? DisabledSkills { get; set; }
         public Dictionary<string, SessionSkillSelection>? SessionSkills { get; set; }
         public Dictionary<string, CodeState>? CodeStates { get; set; }
@@ -262,6 +292,11 @@ public sealed partial class AppConfig : ObservableObject
         public bool? QueueResumeOnLaunch { get; set; }
         public bool? QueuePanelOpen { get; set; }
         public double? QueuePanelWidth { get; set; }
+        public bool? PlanPanelOpen { get; set; }
+        public double? PlanPanelWidth { get; set; }
+        public bool? PlanPanelAutoOpen { get; set; }
+        public bool? MemoryEnabled { get; set; }
+        public bool? SubagentsUsePrimary { get; set; }
     }
 
     private void Load()
@@ -295,6 +330,7 @@ public sealed partial class AppConfig : ObservableObject
             CheckForUpdates = stored?.CheckForUpdates ?? true;
             ComputerToolsEnabled = stored?.ComputerToolsEnabled ?? true;
             SkillSourcesRaw = stored?.SkillSources ?? (int)SkillSources.All;
+            ExternalImportOffered = stored?.ExternalImportOffered ?? false;
             foreach (var id in stored?.DisabledSkills ?? []) DisabledSkills.Add(id);
             foreach (var (k, v) in stored?.SessionSkills ?? []) SessionSkills[k] = v;
             foreach (var (k, v) in stored?.CodeStates ?? []) CodeStates[k] = v;
@@ -307,6 +343,11 @@ public sealed partial class AppConfig : ObservableObject
             QueueResumeOnLaunch = stored?.QueueResumeOnLaunch ?? false;
             QueuePanelOpen = stored?.QueuePanelOpen ?? false;
             QueuePanelWidth = stored?.QueuePanelWidth ?? 360;
+            PlanPanelOpen = stored?.PlanPanelOpen ?? false;
+            PlanPanelWidth = stored?.PlanPanelWidth ?? 340;
+            PlanPanelAutoOpen = stored?.PlanPanelAutoOpen ?? true;
+            MemoryEnabled = stored?.MemoryEnabled ?? true;
+            SubagentsUsePrimary = stored?.SubagentsUsePrimary ?? true;
         }
         finally
         {
@@ -353,6 +394,7 @@ public sealed partial class AppConfig : ObservableObject
             CheckForUpdates = CheckForUpdates,
             ComputerToolsEnabled = ComputerToolsEnabled,
             SkillSources = SkillSourcesRaw,
+            ExternalImportOffered = ExternalImportOffered,
             DisabledSkills = DisabledSkills.OrderBy(s => s, StringComparer.Ordinal).ToList(),
             SessionSkills = new Dictionary<string, SessionSkillSelection>(SessionSkills),
             CodeStates = new Dictionary<string, CodeState>(CodeStates),
@@ -365,6 +407,11 @@ public sealed partial class AppConfig : ObservableObject
             QueueResumeOnLaunch = QueueResumeOnLaunch,
             QueuePanelOpen = QueuePanelOpen,
             QueuePanelWidth = QueuePanelWidth,
+            PlanPanelOpen = PlanPanelOpen,
+            PlanPanelWidth = PlanPanelWidth,
+            PlanPanelAutoOpen = PlanPanelAutoOpen,
+            MemoryEnabled = MemoryEnabled,
+            SubagentsUsePrimary = SubagentsUsePrimary,
         };
         try
         {

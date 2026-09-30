@@ -4,6 +4,7 @@ using System.Windows.Controls.Primitives;
 using Dsh.App.Infrastructure;
 using Dsh.App.Model;
 using Dsh.App.Views.Dialogs;
+using Dsh.App.Views.Import;
 using Dsh.Core;
 
 namespace Dsh.App.Views.Skills;
@@ -18,6 +19,8 @@ public sealed class SkillsManagerPage : UserControl
     private readonly TextBox _search = Ui.Field(placeholder: "Search skills");
     private readonly StackPanel _filters = new() { Orientation = Orientation.Horizontal };
     private readonly StackPanel _list = new();
+    /// <summary>"Claude Code and Cursor are on this PC": shown only when there is something new to bring in.</summary>
+    private readonly Border _bringIn = new() { Visibility = Visibility.Collapsed, Margin = new Thickness(0, 0, 0, 10) };
     private Filter _filter = Filter.All;
     private IReadOnlyList<Skill> _skills = [];
 
@@ -33,6 +36,7 @@ public sealed class SkillsManagerPage : UserControl
             "Skills from Claude Code, Cursor and Agent Skills are read in place.");
         intro.Margin = new Thickness(0, 6, 0, 12);
         header.Children.Add(intro);
+        header.Children.Add(_bringIn);
 
         var newMenu = Ui.Button("New ▾", () => { });
         newMenu.Click += (_, _) =>
@@ -76,6 +80,7 @@ public sealed class SkillsManagerPage : UserControl
             model.Host.RefreshDrafts();
             Reload();
         }));
+        footer.Children.Add(Ui.LinkButton("Bring in from Claude Code & Cursor…", ImportExternal));
         foreach (FrameworkElement child in footer.Children) child.VerticalAlignment = VerticalAlignment.Center;
         DockPanel.SetDock(footer, Dock.Bottom);
         page.Children.Add(footer);
@@ -87,7 +92,43 @@ public sealed class SkillsManagerPage : UserControl
         model.Host.PropertyChanged += OnHostChanged;
         Unloaded += (_, _) => model.Host.PropertyChanged -= OnHostChanged;
         Reload();
+        _ = OfferBringInAsync();
         if (action is { } requested) Dispatcher.BeginInvoke(() => Run(requested));
+    }
+
+    /// <summary>Look for Claude Code and Cursor in the background and, if they have something DSH
+    /// doesn't yet, put one button at the top of the page.</summary>
+    private async Task OfferBringInAsync()
+    {
+        _bringIn.Visibility = Visibility.Collapsed;
+        if (SelfTest.Current is not null) return; // the self-test renders a fixed page
+        var support = _model.Host.SkillLocations;
+        ExternalInventory inventory;
+        try
+        {
+            inventory = await Task.Run(() => ExternalScanner.Scan(ExternalLocations.Standard, support));
+        }
+        catch (Exception ex) when (ex is System.IO.IOException or UnauthorizedAccessException)
+        {
+            return;
+        }
+        if (inventory.Suggested == 0) return;
+
+        var ready = ExternalLabels.Summarize(inventory.Items.Where(i => i.SelectedByDefault));
+        var text = Ui.Stack(
+            Ui.Text("Claude Code and Cursor are on this PC", 13.5, FontWeights.SemiBold),
+            Ui.Secondary($"DSH can bring in {ready}. It takes one click, and their files stay as they are."));
+        var button = Ui.Button("Bring Them In…", ImportExternal, accent: true);
+        button.VerticalAlignment = VerticalAlignment.Center;
+        button.Margin = new Thickness(16, 0, 0, 0);
+        var row = new DockPanel();
+        DockPanel.SetDock(button, Dock.Right);
+        row.Children.Add(button);
+        row.Children.Add(text);
+        var card = Ui.Card(row);
+        card.SetResourceReference(Border.BorderBrushProperty, "AccentFillColorDefaultBrush");
+        _bringIn.Child = card;
+        _bringIn.Visibility = Visibility.Visible;
     }
 
     private void OnHostChanged(object? sender, System.ComponentModel.PropertyChangedEventArgs e)
@@ -148,7 +189,8 @@ public sealed class SkillsManagerPage : UserControl
             _list.Children.Add(Ui.Card(Ui.Stack(
                 Ui.Subtitle("No skills yet"),
                 Ui.Secondary("Write one, have the AI write one from what you want, or import from Claude Code or Cursor."),
-                Ui.Buttons(Ui.Button("Write with AI…", Generate, accent: true), Ui.Button("Import…", Import)))));
+                Ui.Buttons(Ui.Button("Write with AI…", Generate, accent: true), Ui.Button("From Claude Code & Cursor…", ImportExternal),
+                    Ui.Button("Import…", Import)))));
             return;
         }
 
@@ -355,6 +397,13 @@ public sealed class SkillsManagerPage : UserControl
     private void NewManual() => Edit(SkillEditorWindow.ForNew(_model, _model.Project is null ? SkillScope.User : SkillScope.Project));
     private void Generate() => Edit(new GenerateSkillWindow(_model));
     private void Import() => Edit(new ImportSkillsWindow(_model));
+
+    private void ImportExternal()
+    {
+        Edit(new ExternalImportWindow(_model));
+        _model.Config.ExternalImportOffered = true;
+        _ = OfferBringInAsync();
+    }
 
     private void Export(IReadOnlyCollection<string>? preselected)
     {

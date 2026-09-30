@@ -124,6 +124,12 @@ public sealed record ProviderProfile
     public string? AwsProfile { get; set; }
     /// <summary>Bedrock: the AWS Region to call (e.g. "us-east-1").</summary>
     public string? AwsRegion { get; set; }
+    /// <summary>Use this server for subagents while another route is the main agent — a second DGX Spark
+    /// takes the side tasks so they run in parallel with the main one. The active route is the primary and
+    /// never a worker.</summary>
+    public bool SubagentWorker { get; set; }
+    /// <summary>How many subagents may work on this server at once (null = 2 for a worker, 4 for the primary).</summary>
+    public int? SubagentParallel { get; set; }
 
     public ProviderProfile() { }
 
@@ -313,7 +319,22 @@ public sealed record LlmRequest(
     /// <summary>Thinking level for this request; null = the provider profile's default.</summary>
     ThinkingLevel? Thinking = null);
 
-public sealed record LlmUsage(int PromptTokens, int CompletionTokens);
+/// <summary>Token counts for one model call (or a whole run). <paramref name="CachedTokens"/> is how much
+/// of the prompt the server served from its prompt cache, when it says so (null = unknown).</summary>
+public sealed record LlmUsage(int PromptTokens, int CompletionTokens, int? CachedTokens = null)
+{
+    /// <summary>The share of the prompt that came from the cache, 0–1 (null when unknown).</summary>
+    public double? CacheHitRatio => CachedTokens is { } cached && PromptTokens > 0 ? Math.Clamp(cached / (double)PromptTokens, 0, 1) : null;
+
+    /// <summary>This usage plus <paramref name="other"/> (null-safe on either side).</summary>
+    public static LlmUsage? Sum(LlmUsage? a, LlmUsage? b)
+    {
+        if (a is null) return b;
+        if (b is null) return a;
+        return new LlmUsage(a.PromptTokens + b.PromptTokens, a.CompletionTokens + b.CompletionTokens,
+                            a.CachedTokens is null && b.CachedTokens is null ? null : (a.CachedTokens ?? 0) + (b.CachedTokens ?? 0));
+    }
+}
 
 /// <summary>What the engine consumes from a streaming client. The client accumulates partial
 /// tool_calls internally and hands the engine complete calls at the end.</summary>

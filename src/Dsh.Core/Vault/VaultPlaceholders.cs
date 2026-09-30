@@ -19,6 +19,8 @@ public static partial class VaultPlaceholders
     {
         "agent", "queue_task", "propose_skill", "todo_write", "use_skill",
         "vault_search", "agent_status", "agent_stop", "exit_plan_mode",
+        // Prose the harness shows, logs or stores: a goal verdict, a saved memory, a batch of subagent prompts.
+        "goal_complete", "goal_blocked", "memory_save", "memory_update", "memory_search", "memory_forget", "delegate",
     };
 
     /// <summary>Whether a call to <paramref name="toolName"/> gets its placeholders replaced by values.</summary>

@@ -106,7 +106,8 @@ public sealed class AgentToolTests : IDisposable
         var bigText = new string('a', 4_000);
         var turns = new List<Turn>();
         for (var i = 0; i < 12; i++)
-            turns.Add(new Turn(bigText, [new ToolCall($"t{i}", TodoWriteTool.ToolName, """{"todos":[]}""")]));
+            // (A different list each round: the same list sent eight times in a row is a loop, which the engine now ends.)
+            turns.Add(new Turn(bigText, [new ToolCall($"t{i}", TodoWriteTool.ToolName, $$"""{"todos":[{"content":"step {{i}}","status":"pending"}]}""")]));
         turns.Add(new Turn("final report"));
         // One client serves both the subagent's turns and its internal summarization calls (as a real
         // OpenAiClient would), telling them apart by shape rather than by call order.

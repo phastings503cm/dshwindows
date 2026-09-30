@@ -68,7 +68,8 @@ public sealed partial class AgentHost : ObservableObject
     private sealed record RouteInfo(string ServedModel, IReadOnlyList<string> ServedModels, int? Context, DateTimeOffset At);
 
     private sealed record EngineKey(string Profile, int Window, ThinkingLevel? Thinking, PermissionPreset Preset,
-                                    int Skills, bool ComputerTools, bool Vision, string Shell, long Vault);
+                                    int Skills, bool ComputerTools, bool Vision, string Shell, long Vault,
+                                    bool GoalMode, int Memory, string Agents);
 
     /// <summary>Everything about skills one turn needs: what exists, what's on, and the prompt text.</summary>
     private sealed record SkillState(IReadOnlyList<Skill> All, IReadOnlyList<Skill> Active, SkillPromptResult Result, int Signature);
@@ -76,8 +77,10 @@ public sealed partial class AgentHost : ObservableObject
     /// <param name="queueFile">Where the task queue is saved (default %APPDATA%\DSH\task-queue.json).</param>
     /// <param name="skillLocations">Where skills live (tests point it at a temp folder).</param>
     /// <param name="vault">The credentials vault (default: DPAPI-encrypted, under the data folder).</param>
+    /// <param name="memory">The long-term memory (default: under the data folder).</param>
     public AgentHost(AppConfig config, ConversationLog log, Dispatcher dispatcher, string? systemPrompt = null,
-                     string? queueFile = null, SkillLocations? skillLocations = null, CredentialVault? vault = null)
+                     string? queueFile = null, SkillLocations? skillLocations = null, CredentialVault? vault = null,
+                     MemoryStore? memory = null)
     {
         Config = config;
         Log = log;
@@ -105,6 +108,7 @@ public sealed partial class AgentHost : ObservableObject
         }
         RefreshDrafts();
         InitQueue();
+        InitAgents(memory);
         Vault.Changed += (_, _) => _dispatcher.BeginInvoke(() => VaultRevision = Vault.Revision);
     }
 
@@ -129,12 +133,18 @@ public sealed partial class AgentHost : ObservableObject
         "You are a capable coding agent running inside a native Windows app, working in the user's project folder.\n\n" +
         "Use the tools to read, write, and search files and to run shell commands. Prefer small, verifiable steps:\n" +
         "read before you edit, and check your work after you change something. When a task needs more than a\n" +
-        "couple of steps, track it with `todo_write` so the user can see the plan.\n\n" +
-        "Parallel and background work: for a well-scoped side task, launch a subagent with `agent` — with\n" +
-        "run_in_background: true it works while you continue (several can run at once); you're told when each\n" +
-        "finishes, and agent_status / agent_stop manage them. Long-running programs (dev servers, game engines,\n" +
-        "REPLs) go in `process_start`. Follow-up work that can happen later, unattended, goes on the task queue\n" +
-        "with `queue_task`.\n\n" +
+        "couple of steps, first lay the plan out with `todo_write` (short, imperative steps), mark the step you are\n" +
+        "on in_progress and each one completed the moment it is done — the user follows that list in the plan panel.\n\n" +
+        "Keep going until the job is done. Don't stop to ask whether you should continue, or for permission to take\n" +
+        "the obvious next step. Stop only when the work is finished, when you need something only the user can give,\n" +
+        "or when a decision is genuinely theirs.\n\n" +
+        "Parallel and background work: for a well-scoped side task, launch a subagent with `agent` — pick an\n" +
+        "`agent_type` (explore: read-only research; plan; review; worker: makes changes). To fan several independent\n" +
+        "tasks out at once use `delegate`; with several model servers configured they run on different machines.\n" +
+        "With run_in_background: true a subagent works while you continue (several can run at once); you're told\n" +
+        "when each finishes, and agent_status / agent_stop manage them. Long-running programs (dev servers, game\n" +
+        "engines, REPLs) go in `process_start`. Follow-up work that can happen later, unattended, goes on the task\n" +
+        "queue with `queue_task`.\n\n" +
         "Rules that matter:\n" +
         "- Never claim a command succeeded unless you ran it and saw the output.\n" +
         "- Prefer `edit` over `write_file` for changes to an existing file; rewriting a whole file loses work.\n" +
@@ -214,6 +224,7 @@ public sealed partial class AgentHost : ObservableObject
         _vaultGrants.Remove(id);
         _autoContinuations.Remove(id);
         _agentQueuedCount.Remove(id);
+        ForgetChatState(id);
         if (_backgroundPools.Remove(id, out var pool)) pool.StopAll();
         Queue.DetachSession(id);
         Config.SetSkillsFor(id, null);
@@ -278,6 +289,8 @@ public sealed partial class AgentHost : ObservableObject
                     break;
             }
         }
+        // A goal that paused for an answer before the app closed is still waiting for it.
+        if (vm.BlockedGoal is null && PausedGoalIn(vm.Entries) is { } paused) vm.BlockedGoal = paused;
         // A hydrated session has no live engine; rebuild the model transcript so a follow-up turn
         // keeps the conversation rather than starting over.
         if (!_transcripts.ContainsKey(vm.Id)) _transcripts[vm.Id] = ReplayMessages(vm.Entries);
@@ -340,12 +353,18 @@ public sealed partial class AgentHost : ObservableObject
         // chat window.
         var context = ProjectContext is { } pc && SamePath(pc.Root, workspace)
             ? pc
-            : (vm.WorkspacePath is null ? null : Dsh.Core.ProjectContext.Load(workspace, SkillLocations, Config.SkillSources));
+            : (vm.WorkspacePath is null
+                ? Dsh.Core.ProjectContext.UserOnly(SkillLocations) // no folder: still your own instructions
+                : Dsh.Core.ProjectContext.Load(workspace, SkillLocations, Config.SkillSources));
+        // A big MEMORY.md would take the window over: keep its opening and make the rest searchable.
+        if (context is not null && Config.MemoryEnabled) context = MemoryInstructions.Slim(context, Memory);
         var environment = Dsh.Core.ProjectContext.EnvironmentBlock(workspace, profile.Model, vm.Preset, shell);
         var prompt = _basePrompt + "\n\n" + (context?.PromptSupplement(environment, includeSkills: false) ?? environment);
         // Skills: always-on rules, the ones the user selected for this chat, and a catalog the
         // model can load from with use_skill.
         if (skillState.Result.Text.Length > 0) prompt += "\n\n" + skillState.Result.Text;
+        // Long-term memory: how to use it, and the few pinned notes (searched notes ride with each message).
+        if (MemoryPromptFor(workspace, vm.Preset != PermissionPreset.Plan) is { Length: > 0 } memorySection) prompt += "\n\n" + memorySection;
         // The credentials the agent may use, by name — never a value.
         if (VaultPrompt.Section(Vault.All, shell.Kind) is { Length: > 0 } vaultSection) prompt += "\n\n" + vaultSection;
         if (vm.Preset == PermissionPreset.Plan)
@@ -357,12 +376,25 @@ public sealed partial class AgentHost : ObservableObject
         // windows, UI trees, clicks, keystrokes — is off with the computer-tools switch; each first use
         // in a chat still asks (the engine's gate). Both count as built-ins, so a plugin can't take
         // over their names.
-        var builtins = ToolRegistry.Standard(0, shell).Adding(ExtraTools.Processes());
+        var agents = CatalogFor(vm);
+        var builtins = ToolRegistry.Standard(0, shell, agents).Adding(ExtraTools.Processes());
         if (Config.ComputerToolsEnabled) builtins = builtins.Adding(ExtraTools.Machine());
         var extra = new List<IToolExecutor>(PluginLoader.Tools(Plugins, builtins.Names));
         if (skillState.Active.Count > 0) extra.Add(new UseSkillTool(skillState.Active));
         extra.Add(new VaultSearchTool(Vault));
         extra.AddRange(ToolRegistry.BackgroundAgentTools());
+        if (Config.MemoryEnabled)
+        {
+            // Plan only mode changes nothing — including what is remembered — so there the agent can only look things up.
+            if (vm.Preset == PermissionPreset.Plan) extra.Add(new MemorySearchTool(Memory));
+            else extra.AddRange(MemoryTools.All(Memory));
+        }
+        // While a /goal runs, the model tells the harness it is done (or stuck) with a tool call.
+        if (vm.Goal is not null)
+        {
+            extra.Add(new GoalCompleteTool());
+            extra.Add(new GoalBlockedTool());
+        }
         if (vm.Preset != PermissionPreset.Plan)
         {
             extra.Add(new QueueAddTool((title, details, front, start) =>
@@ -382,6 +414,10 @@ public sealed partial class AgentHost : ObservableObject
                 VisionEnabled = VisionOn(profile),
                 Shell = shell,
                 Retry = RetryPolicy,
+                // The step limit is a checkpoint, not a stop: nobody has to type "continue". Twelve of them (360 steps in one
+                // turn) is the backstop for a run that explores for ever with ever-different calls.
+                ContinueAfterLimit = true,
+                MaxCheckpoints = 12,
             },
             workspace, policy,
             (id, name, detail) => _dispatcher.InvokeAsync(() => AskGateAsync(sessionId, id, name, detail)).Task.Unwrap())
@@ -394,6 +430,10 @@ public sealed partial class AgentHost : ObservableObject
             Vault = Vault,
             VaultGrants = VaultGrantsFor(sessionId),
             BackgroundAgents = BackgroundPool(sessionId),
+            Fleet = Fleet,
+            Roster = RosterFor(sessionId),
+            AgentTypes = agents,
+            Cache = CacheFor(sessionId),
         };
         _engines[sessionId] = engine;
         return engine;
@@ -470,7 +510,6 @@ public sealed partial class AgentHost : ObservableObject
             vm.Note("The agent is still working; send again when it is done.");
             return;
         }
-        _autoContinuations[sessionId] = 0;
         if (attachments.Count == 0 && SlashCommand.Parse(text) is { } command)
         {
             RunCommand(command, vm);
@@ -485,6 +524,7 @@ public sealed partial class AgentHost : ObservableObject
                 return;
             }
             var display = "/" + skill.Slug + (args.Length == 0 ? "" : " " + args);
+            UserSpoke(sessionId);
             StartRun(vm, ct => RunTurnAsync(vm, display, [], goal: null, modelText: expanded, ct));
             return;
         }
@@ -493,7 +533,23 @@ public sealed partial class AgentHost : ObservableObject
             vm.Note("The Spark is switching models right now — send again once it says it's ready (usually a few minutes).");
             return;
         }
+        // A goal that paused because the agent needed the user: this message is the answer, so the goal
+        // carries on with it — no second /goal to type.
+        UserSpoke(sessionId);
+        if (vm.BlockedGoal is { } blocked)
+        {
+            StartRun(vm, ct => RunTurnAsync(vm, text, attachments, goal: blocked, modelText: null, ct, resumingGoal: true, reply: text));
+            return;
+        }
         StartRun(vm, ct => RunTurnAsync(vm, text, attachments, goal: null, modelText: null, ct));
+    }
+
+    /// <summary>The user sent something the chat took up: the automatic continuations start counting again, and a Stop no
+    /// longer holds the chat back. (A message that was refused — the Spark is switching models — changes neither.)</summary>
+    private void UserSpoke(string sessionId)
+    {
+        _autoContinuations[sessionId] = 0;
+        _stoppedChats.Remove(sessionId);
     }
 
     /// <summary>Start background work for a session, cancellable with Stop.</summary>
@@ -507,15 +563,29 @@ public sealed partial class AgentHost : ObservableObject
 
     private async Task RunGuardedAsync(string sessionId, CancellationTokenSource cts, Func<CancellationToken, Task> work)
     {
+        var stopped = false;
+        _failedRuns.Remove(sessionId);
         try
         {
             await work(cts.Token);
         }
         finally
         {
+            stopped = cts.IsCancellationRequested;
             if (_runs.TryGetValue(sessionId, out var current) && ReferenceEquals(current, cts)) _runs.Remove(sessionId);
             cts.Dispose();
         }
+        // A background agent that finished while this run was still going had nobody to report to (its event was ignored
+        // because the chat was busy): now that the chat is idle, hand it over. Not after a Stop (which never wakes the chat
+        // back up) nor a run that just reported a failure (the next request would most likely fail the same way).
+        var failed = _failedRuns.Remove(sessionId);
+        if (!stopped && !failed && Session(sessionId) is { } vm) ContinueAfterBackgroundAgents(vm);
+    }
+
+    /// <summary>The Spark finished switching models: chats whose background agents reported while it was busy carry on now.</summary>
+    public void ResumeAfterServerSwitch()
+    {
+        foreach (var vm in Sessions.ToList()) ContinueAfterBackgroundAgents(vm);
     }
 
     // MARK: - Slash commands
@@ -586,7 +656,34 @@ public sealed partial class AgentHost : ObservableObject
                 StartRun(vm, ct => CompactNowAsync(vm, compact.Focus, ct));
                 break;
 
+            case SlashCommand.Remember remember:
+                RememberCommand(remember.Text, vm);
+                break;
+
+            case SlashCommand.Memory memory:
+                MemoryCommand(memory.Query, vm);
+                break;
+
+            case SlashCommand.Agents:
+                AgentsCommand(vm);
+                break;
+
             case SlashCommand.Goal goal:
+                if (goal.Text.Trim().ToLowerInvariant() is "stop" or "cancel" or "off" or "clear" or "drop" or "forget")
+                {
+                    // Give a goal up for good: one that paused for an answer, or one Stop left unfinished. (Needs no server, so it
+                    // works while the Spark is switching too.)
+                    var dropped = vm.BlockedGoal ?? vm.LastGoal ?? LastGoalIn(vm.Entries);
+                    vm.BlockedGoal = null;
+                    vm.LastGoal = null;
+                    var text = dropped is null
+                        ? "There is no goal to drop."
+                        : $"Dropped the goal “{TextUtil.Prefix(dropped, 80)}”. What you send next is an ordinary message.";
+                    vm.Note(text);
+                    if (dropped is not null) Log.RecordItem(vm.Id, "notice", text);
+                    UserSpoke(vm.Id);
+                    return;
+                }
                 if (IsServerSwitching?.Invoke() == true)
                 {
                     vm.Note("The Spark is switching models right now — send again once it says it's ready.");
@@ -602,9 +699,12 @@ public sealed partial class AgentHost : ObservableObject
                                 "declares the goal complete (or needs you). Stop it any time with Ctrl+.");
                         return;
                     }
+                    UserSpoke(vm.Id);
                     StartRun(vm, ct => RunTurnAsync(vm, previous, [], goal: previous, modelText: null, ct, resumingGoal: true));
                     return;
                 }
+                vm.BlockedGoal = null;
+                UserSpoke(vm.Id);
                 StartRun(vm, ct => RunTurnAsync(vm, goal.Text, [], goal: goal.Text, modelText: null, ct));
                 break;
 
@@ -697,19 +797,22 @@ public sealed partial class AgentHost : ObservableObject
     // MARK: - Turns
 
     private async Task RunTurnAsync(SessionVM vm, string text, IReadOnlyList<MessageAttachment> attachments,
-                                    string? goal, string? modelText, CancellationToken ct, bool resumingGoal = false)
+                                    string? goal, string? modelText, CancellationToken ct, bool resumingGoal = false,
+                                    string? reply = null, bool recall = true)
     {
         var sessionId = vm.Id;
         vm.Running = true;
         vm.Stopping = false;
         try
         {
-            if (goal is not null) await RunGoalAsync(vm, goal, resumingGoal, ct);
-            else await TurnAsync(vm, modelText ?? text, text, attachments, ct);
+            if (goal is not null) await RunGoalAsync(vm, goal, resumingGoal, ct, reply, attachments);
+            else await TurnAsync(vm, modelText ?? text, text, attachments, ct, recall ? text : null);
         }
         catch (OperationCanceledException)
         {
             vm.EndStreaming();
+            // A deliberate Stop is not a pause for an answer.
+            vm.BlockedGoal = null;
             var note = goal is not null ? "Stopped. The goal was not finished — send `/goal` to pick it back up." : "Stopped.";
             vm.Note(note);
             Log.RecordItem(sessionId, "notice", note);
@@ -748,6 +851,7 @@ public sealed partial class AgentHost : ObservableObject
 
     private void ReportFailure(SessionVM vm, string message)
     {
+        _failedRuns.Add(vm.Id);
         vm.EndStreaming();
         vm.Note(message, MessageRole.Error);
         Log.RecordItem(vm.Id, "error", message, isError: true);
@@ -755,8 +859,11 @@ public sealed partial class AgentHost : ObservableObject
     }
 
     /// <summary>One user message → one engine run (which may take many tool steps).</summary>
+    /// <param name="recallQuery">What to look up in long-term memory for this turn (the user's message, or a
+    /// goal); null for automatic messages, which never trigger a lookup.</param>
     private async Task<RunResult> TurnAsync(SessionVM vm, string modelText, string displayText,
-                                            IReadOnlyList<MessageAttachment> attachments, CancellationToken ct)
+                                            IReadOnlyList<MessageAttachment> attachments, CancellationToken ct,
+                                            string? recallQuery = null)
     {
         var sessionId = vm.Id;
         // A chat whose timeline was released (an archived queue chat) or never loaded: bring it back
@@ -767,6 +874,10 @@ public sealed partial class AgentHost : ObservableObject
         if (!_transcripts.ContainsKey(sessionId)) _transcripts[sessionId] = ReplayMessages(vm.Entries);
         var userEntryId = vm.AppendMessage(MessageRole.User, displayText);
         Log.RecordItem(sessionId, "user", displayText);
+        // A plan proposed earlier in Plan only mode is old news once the chat works in another mode.
+        if (vm.Preset != PermissionPreset.Plan) vm.ProposedPlan = null;
+        // Notes that bear on this message ride along with it (a few, only when relevant — never a dump).
+        if (recallQuery is not null && RecallBlockFor(vm, recallQuery) is { } recalled) modelText = recalled + "\n\n" + modelText;
         if (vm.Title == "New chat")
         {
             var first = displayText.Split('\n').FirstOrDefault() ?? displayText;
@@ -783,7 +894,8 @@ public sealed partial class AgentHost : ObservableObject
         var skillState = BuildSkillState(vm);
         var shell = Config.ResolvedAgentShell;
         var key = new EngineKey(ProfileKey(profile), window, thinking, vm.Preset, skillState.Signature,
-                                Config.ComputerToolsEnabled, VisionOn(profile), shell.Executable, Vault.Revision);
+                                Config.ComputerToolsEnabled, VisionOn(profile), shell.Executable, Vault.Revision,
+                                vm.Goal is not null, MemorySignature(vm), AgentsStampFor(vm));
         if (_engineKeys.TryGetValue(sessionId, out var previous) && !string.Equals(ModelOf(previous.Profile), profile.Model, StringComparison.Ordinal))
             vm.Note($"The server is now serving `{profile.Model}` (was `{ModelOf(previous.Profile)}`) — switched to it, {Fmt.N(window)}-token window.");
         if (!_engines.TryGetValue(sessionId, out var engine) || _engineKeys.GetValueOrDefault(sessionId) != key)
@@ -809,7 +921,12 @@ public sealed partial class AgentHost : ObservableObject
             // memory matches the files on disk and the timeline, instead of rolling back to before
             // the run.
             if (progress.Salvaged is { } salvaged) _transcripts[sessionId] = salvaged.ToList();
-            else MarkUndelivered(vm, userEntryId); // the model never saw this message
+            else
+            {
+                MarkUndelivered(vm, userEntryId); // the model never saw this message...
+                // ...nor the reports of the background agents that came with it: they wait for the next one.
+                if (progress.TakenReports.Count > 0 && _backgroundPools.TryGetValue(sessionId, out var pool)) pool.Requeue(progress.TakenReports);
+            }
             vm.Retry = null;
             throw;
         }
@@ -820,10 +937,26 @@ public sealed partial class AgentHost : ObservableObject
         // character-based estimate of the whole request.
         vm.ContextUsed = result.LastPromptTokens ?? TokenEstimate.Request(engine.SystemPrompt, result.Messages);
         if (result.DeniedCount > 0) vm.Note($"{result.DeniedCount} tool call(s) were denied.");
+        // A run that kept repeating one action stops itself (a goal handles that in its own loop).
+        if (result.Stalled && vm.Goal is null)
+        {
+            vm.Note("⚠️ " + result.LastReplyText, MessageRole.Error);
+            Log.RecordItem(sessionId, "error", result.LastReplyText, isError: true);
+        }
+        // The only limit left: hundreds of steps in one turn, none of them the same. (A /goal simply goes on in its next round.)
         if (result.HitIterationLimit && vm.Goal is null)
-            vm.Note($"Paused after {engine.Config.MaxIterations} steps. Say “continue” to keep going, or use `/goal` for long tasks.");
+        {
+            var steps = engine.Config.MaxIterations * Math.Max(1, engine.Config.MaxCheckpoints);
+            var text = $"⏸ Stopped after {steps} steps in one turn without finishing — a safety limit, so a run can't spend for ever. Send a message (“keep going” will do) to carry on.";
+            vm.Note(text);
+            Log.RecordItem(sessionId, "notice", text);
+        }
         return result;
     }
+
+    /// <summary>Changes when the memory part of the system prompt would (memory on/off, a pinned note edited),
+    /// so the engine is rebuilt exactly then and the server's prompt cache stays warm the rest of the time.</summary>
+    private int MemorySignature(SessionVM vm) => MemoryPromptFor(vm.WorkspacePath, vm.Preset != PermissionPreset.Plan).GetHashCode();
 
     /// <summary>Every model client the host makes goes through here, so tests can swap the network.</summary>
     private IProviderClient MakeClient(ProviderProfile profile) => ProviderClients.Create(profile, HttpHandlerForTesting);
@@ -891,6 +1024,17 @@ public sealed partial class AgentHost : ObservableObject
                 if (vm.StreamingId is null && m.Text.Length > 0) vm.AppendMessage(MessageRole.Assistant, m.Text);
                 if (m.Text.Length > 0) Log.RecordItem(sessionId, "assistant", m.Text);
                 vm.EndStreaming();
+                // A plan written in prose ("Here's my plan: 1. … 2. …") shows in the plan panel too, unless
+                // the agent is keeping a live todo list that is still in progress.
+                if (m.Calls.Count > 0 || m.Text.Length > 0)
+                {
+                    var steps = PlanExtractor.FromAssistantText(m.Text);
+                    if (steps.Count >= PlanExtractor.MinSteps && (vm.Todos.Count == 0 || vm.Todos.All(t => t.Status == TodoStatus.Completed)))
+                    {
+                        vm.Outline = steps;
+                        AutoOpenPlan(vm);
+                    }
+                }
                 break;
 
             case EngineEvent.ToolStarted t:
@@ -929,6 +1073,12 @@ public sealed partial class AgentHost : ObservableObject
 
             case EngineEvent.Todos todos:
                 vm.SetTodos(todos.Items);
+                AutoOpenPlan(vm);
+                break;
+
+            case EngineEvent.PlanProposed proposed:
+                vm.ProposedPlan = proposed.Text;
+                AutoOpenPlan(vm);
                 break;
 
             case EngineEvent.Failed failed:
@@ -1146,6 +1296,7 @@ public sealed partial class AgentHost : ObservableObject
 
     public void StopSession(string id)
     {
+        _stoppedChats.Add(id);
         if (Session(id) is { } vm && vm.Running) vm.Stopping = true;
         ResolveAllGates(id, false);
         if (_runs.TryGetValue(id, out var cts)) cts.Cancel();
@@ -1259,6 +1410,8 @@ public sealed partial class AgentHost : ObservableObject
         _probedContext.Clear();
         _engines.Clear();
         _engineKeys.Clear();
+        ResetWorkerProbes();
+        RefreshFleet();
         ContextInfoChanged?.Invoke();
         EnsureContextProbe();
     }
@@ -1323,6 +1476,10 @@ public sealed partial class AgentHost : ObservableObject
     {
         if (Session(sessionId) is not { } vm) return;
         _transcripts[sessionId] = newMessages;
+        // What was recalled may have been summarised away: it may be recalled again. So may what was read ("that text
+        // is still above" must not be said of text that is now only in the summary).
+        if (_recalls.TryGetValue(sessionId, out var recalled)) recalled.Reset();
+        if (_caches.TryGetValue(sessionId, out var cache)) cache.NoteCompaction();
         // Reset the gauge: the model now carries a small context.
         var prompt = _systemPrompts.GetValueOrDefault(sessionId) ?? _basePrompt;
         vm.ContextUsed = TokenEstimate.Request(prompt, newMessages);

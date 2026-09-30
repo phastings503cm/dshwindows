@@ -1,4 +1,5 @@
 using System.ComponentModel;
+using System.IO;
 using System.Runtime.InteropServices;
 using System.Windows;
 using System.Windows.Controls;
@@ -11,6 +12,7 @@ using Dsh.App.Model;
 using Dsh.App.Views.Chat;
 using Dsh.App.Views.Code;
 using Dsh.App.Views.Dialogs;
+using Dsh.App.Views.Import;
 using Dsh.App.Views.Settings;
 using Dsh.App.Views.Skills;
 using Dsh.App.Views.Wizard;
@@ -31,6 +33,7 @@ public partial class MainWindow : Window
     private SettingsWindow? _settings;
     private VaultWindow? _vault;
     private readonly QueuePanel _queuePanel;
+    private readonly PlanPanel _planPanel;
 
     public MainWindow(AppModel model)
     {
@@ -45,9 +48,12 @@ public partial class MainWindow : Window
         _queuePanel = new QueuePanel(model);
         _queuePanel.CloseRequested += () => SetQueuePanel(false);
         QueueHost.Content = _queuePanel;
+        _planPanel = new PlanPanel(model);
+        _planPanel.CloseRequested += () => SetPlanPanel(false);
+        PlanHost.Content = _planPanel;
 
         RestorePlacement();
-        SidebarColumn.Width = new GridLength(Math.Clamp(model.Config.SidebarWidth, 200, 440));
+        SidebarColumn.Width = new GridLength(PanelLayout.Clamp(model.Config.SidebarWidth, 200, 440));
 
         model.PropertyChanged += OnModelChanged;
         model.Host.PropertyChanged += OnHostChanged;
@@ -63,6 +69,11 @@ public partial class MainWindow : Window
         model.WizardRequested += ShowWizard;
         model.BedrockGuideRequested += ShowBedrockGuide;
         model.MemoryRequested += ShowMemory;
+        model.ExternalImportRequested += ShowExternalImport;
+        model.MemoriesRequested += ShowMemories;
+        model.OpenClawImportRequested += ShowOpenClawImport;
+        model.Host.OpenMemoryManagerRequested += ShowMemories;
+        model.Host.PlanAppeared += OnPlanAppeared;
         model.ImageRequested += path => ImageViewerWindow.Show(this, path);
 
         RegisterShortcuts();
@@ -74,7 +85,11 @@ public partial class MainWindow : Window
         UpdateBanner();
         UpdateRunning();
         UpdateQueueButton();
+        WatchSelected(); // the chat that is open at launch too, not only the ones selected later
         SetQueuePanel(model.Config.QueuePanelOpen);
+        SetPlanPanel(model.Config.PlanPanelOpen);
+        UpdatePlanButton();
+        Body.SizeChanged += (_, _) => FitPanels();
         Closing += OnClosing;
     }
 
@@ -107,6 +122,7 @@ public partial class MainWindow : Window
                 UpdateDetail();
                 UpdatePreset();
                 UpdateRunning();
+                UpdatePlanButton();
                 break;
             case nameof(AgentHost.Banner):
             case nameof(AgentHost.AwsSignInProfile):
@@ -134,6 +150,10 @@ public partial class MainWindow : Window
             case nameof(AppConfig.Preset):
                 UpdatePreset();
                 break;
+            case nameof(AppConfig.ExternalImportOffered):
+                // Taken up from Settings or Memory & Skills as well as from the card itself.
+                if (Model.Config.ExternalImportOffered) ImportCard.Visibility = Visibility.Collapsed;
+                break;
         }
     }
 
@@ -149,6 +169,7 @@ public partial class MainWindow : Window
         if (e.PropertyName is nameof(SessionVM.Running) or nameof(SessionVM.Stopping)) UpdateRunning();
         if (e.PropertyName is nameof(SessionVM.Preset)) UpdatePreset();
         if (e.PropertyName is nameof(SessionVM.Title)) UpdateTitle();
+        if (e.PropertyName is nameof(SessionVM.Todos) or nameof(SessionVM.Outline) or nameof(SessionVM.Running)) UpdatePlanButton();
     }
 
     private void UpdateMode()
@@ -242,10 +263,62 @@ public partial class MainWindow : Window
     private void SetQueuePanel(bool open)
     {
         Model.Config.QueuePanelOpen = open;
+        // Too narrow a window for both: the one you just asked for wins (the plan is set aside, and returns when the queue closes).
+        var setPlanAside = open && PlanShown && Body.ActualWidth > 0 && RoomForPanels() < PanelLayout.PlanMin + PanelLayout.QueueMin;
         _queuePanel.Visibility = open ? Visibility.Visible : Visibility.Collapsed;
         QueueSplitter.Visibility = open ? Visibility.Visible : Visibility.Collapsed;
-        QueueColumn.MinWidth = open ? 300 : 0;
-        QueueColumn.Width = open ? new GridLength(Math.Clamp(Model.Config.QueuePanelWidth, 300, 560)) : new GridLength(0);
+        QueueColumn.MinWidth = open ? PanelLayout.QueueMin : 0;
+        QueueColumn.Width = new GridLength(open ? PanelLayout.Clamp(Model.Config.QueuePanelWidth, PanelLayout.QueueMin, PanelLayout.QueueMax) : 0);
+        if (setPlanAside)
+        {
+            // (After the queue is shown, so putting the plan away is not undone at once for want of a queue to make room for.)
+            _planHeldBack = true;
+            SetPlanPanel(false, remember: false);
+        }
+        FitPanels();
+    }
+
+    // MARK: - Room for the panels
+
+    private const double ChatMinWidth = 360;
+    private const double SplitterWidth = 5;
+
+    /// <summary>The plan panel is open as far as the user is concerned but hidden because the window has no room for it and the queue.</summary>
+    private bool _planHeldBack;
+
+    private bool PlanShown => _planPanel.Visibility == Visibility.Visible;
+    private bool QueueShown => _queuePanel.Visibility == Visibility.Visible;
+
+    /// <summary>The sidebar's width as it is now or is about to be (its column only reports the new width after the next
+    /// layout pass).</summary>
+    private double SidebarNow => Sidebar.Visibility == Visibility.Visible ? Math.Clamp(SidebarColumn.Width.Value, 200, 440) : 0;
+
+    /// <summary>How wide the panels on the right can be together: what the body has left after the sidebar, the chat's own
+    /// minimum and the splitters.</summary>
+    private double RoomForPanels() => Body.ActualWidth - SidebarNow - 3 * SplitterWidth - ChatMinWidth;
+
+    /// <summary>Give the open panels the width they were last given, or less if the window has no room for it (the plan
+    /// first, then the queue), and close the plan when the two won't fit side by side at all. Runs when a panel opens, the
+    /// sidebar appears and the window changes size — and panels squeezed earlier grow back when there is room again.</summary>
+    private void FitPanels()
+    {
+        if (Body.ActualWidth <= 0) return; // not laid out yet: the first size change fits them
+        // A plan set aside for room comes back when the window has room for it again (or the queue is out of the way).
+        if (_planHeldBack && !PlanShown && (!QueueShown || RoomForPanels() >= PanelLayout.PlanMin + PanelLayout.QueueMin))
+        {
+            _planHeldBack = false;
+            SetPlanPanel(true, remember: false);
+            return;
+        }
+        var fit = PanelLayout.Fit(RoomForPanels(), Model.Config.PlanPanelWidth, Model.Config.QueuePanelWidth, PlanShown, QueueShown);
+        if (fit.ClosePlan)
+        {
+            _planHeldBack = true;
+            SetPlanPanel(false, remember: false); // fits what is left (the queue alone) on the way out
+            return;
+        }
+        if (PlanShown) PlanColumn.Width = new GridLength(fit.Plan);
+        if (QueueShown) QueueColumn.Width = new GridLength(fit.Queue);
     }
 
     private void ToggleQueuePanel() => SetQueuePanel(_queuePanel.Visibility != Visibility.Visible);
@@ -253,8 +326,76 @@ public partial class MainWindow : Window
     /// <summary>Show or hide the task queue panel (the self-test drives it).</summary>
     public void ShowQueuePanel(bool open) => SetQueuePanel(open);
 
-    private void QueueSplitter_DragCompleted(object sender, DragCompletedEventArgs e) =>
-        Model.Config.QueuePanelWidth = QueueColumn.ActualWidth;
+    /// <summary>The panel is on the right, so dragging left makes it wider and the chat gives way (never past its minimum).</summary>
+    private void QueueSplitter_DragDelta(object sender, DragDeltaEventArgs e)
+    {
+        var most = Math.Max(QueueColumn.MinWidth, Math.Min(QueueColumn.MaxWidth, RoomForPanels() - (PlanShown ? PlanColumn.ActualWidth : 0)));
+        QueueColumn.Width = new GridLength(Math.Clamp(QueueColumn.ActualWidth - e.HorizontalChange, QueueColumn.MinWidth, most));
+    }
+
+    private void QueueSplitter_DragCompleted(object sender, DragCompletedEventArgs e)
+    {
+        if (e.HorizontalChange != 0) Model.Config.QueuePanelWidth = QueueColumn.ActualWidth; // (a click that moved nothing keeps the width it wanted)
+    }
+
+    // MARK: - Plan panel
+
+    /// <summary>Show or hide the plan panel on the right.</summary>
+    private void SetPlanPanel(bool open) => SetPlanPanel(open, remember: true);
+
+    /// <param name="remember">False when the window, not the user, decided: the plan is set aside for lack of room and comes
+    /// back when there is room again, so the open/closed choice that is saved stays the user's.</param>
+    private void SetPlanPanel(bool open, bool remember)
+    {
+        if (remember)
+        {
+            Model.Config.PlanPanelOpen = open;
+            _planHeldBack = false;
+        }
+        if (open && QueueShown && Body.ActualWidth > 0 && RoomForPanels() < PanelLayout.PlanMin + PanelLayout.QueueMin) SetQueuePanel(false);
+        _planPanel.Visibility = open ? Visibility.Visible : Visibility.Collapsed;
+        PlanSplitter.Visibility = open ? Visibility.Visible : Visibility.Collapsed;
+        PlanColumn.MinWidth = open ? PanelLayout.PlanMin : 0;
+        PlanColumn.Width = new GridLength(open ? PanelLayout.Clamp(Model.Config.PlanPanelWidth, PanelLayout.PlanMin, PanelLayout.PlanMax) : 0);
+        FitPanels();
+        UpdatePlanButton();
+    }
+
+    private void TogglePlanPanel() => SetPlanPanel(_planPanel.Visibility != Visibility.Visible);
+
+    /// <summary>Show or hide the plan panel (the self-test drives it).</summary>
+    public void ShowPlanPanel(bool open) => SetPlanPanel(open);
+
+    private void PlanSplitter_DragCompleted(object sender, DragCompletedEventArgs e)
+    {
+        if (e.HorizontalChange != 0) Model.Config.PlanPanelWidth = PlanColumn.ActualWidth;
+    }
+
+    /// <summary>The agent made a plan in the chat you're looking at: show it (once per chat), unless you've
+    /// turned that off.</summary>
+    private void OnPlanAppeared(SessionVM session)
+    {
+        if (session.Id != Model.Host.SelectedId || PlanShown) return;
+        // Opening by itself never takes the room of a panel you opened: the plan waits (its button still counts the steps).
+        if (QueueShown && Body.ActualWidth > 0 && RoomForPanels() < PanelLayout.PlanMin + PanelLayout.QueueMin) return;
+        SetPlanPanel(true, remember: false); // (the window's doing, not the user's choice: it is not saved as one)
+    }
+
+    /// <summary>The button's little counter: how far the open chat's plan has got ("3/7").</summary>
+    private void UpdatePlanButton()
+    {
+        var session = Model.Host.Selected;
+        var steps = session is null ? 0 : session.Outline.Count > 0 ? session.Outline.Count : session.Todos.Count;
+        var done = session is null || session.Outline.Count > 0 ? 0 : session.Todos.Count(t => t.Status == TodoStatus.Completed);
+        PlanCount.Text = steps > 0 ? $"{done}/{steps}" : "";
+        PlanCount.Visibility = steps > 0 ? Visibility.Visible : Visibility.Collapsed;
+        var working = session is { Running: true } && steps > 0 && done < steps;
+        PlanGlyph.SetResourceReference(TextBlock.ForegroundProperty, working || _planPanel.Visibility == Visibility.Visible
+            ? "AccentTextFillColorPrimaryBrush" : "TextFillColorPrimaryBrush");
+        PlanButton.ToolTip = steps > 0
+            ? $"Plan: {done} of {steps} steps done (Ctrl+Shift+P)"
+            : "Plan (Ctrl+Shift+P) — what the agent is working through";
+    }
 
     private void UpdateBanner()
     {
@@ -418,6 +559,7 @@ public partial class MainWindow : Window
         Bind(Key.OemPeriod, ModifierKeys.Control | ModifierKeys.Shift, Model.StopAll);
         Bind(Key.M, ModifierKeys.Control | ModifierKeys.Shift, ShowMemory);
         Bind(Key.Q, ModifierKeys.Control | ModifierKeys.Shift, ToggleQueuePanel);
+        Bind(Key.P, ModifierKeys.Control | ModifierKeys.Shift, TogglePlanPanel);
         Bind(Key.K, ModifierKeys.Control | ModifierKeys.Shift, ShowVault);
         Bind(Key.D1, ModifierKeys.Control, () => Model.Mode = WorkspaceMode.Chat);
         Bind(Key.D2, ModifierKeys.Control, () => Model.Mode = WorkspaceMode.Code);
@@ -454,7 +596,8 @@ public partial class MainWindow : Window
         Sidebar.Visibility = visible ? Visibility.Collapsed : Visibility.Visible;
         SidebarSplitter.Visibility = Sidebar.Visibility;
         SidebarColumn.MinWidth = visible ? 0 : 200;
-        SidebarColumn.Width = visible ? new GridLength(0) : new GridLength(Math.Clamp(Model.Config.SidebarWidth, 200, 440));
+        SidebarColumn.Width = visible ? new GridLength(0) : new GridLength(PanelLayout.Clamp(Model.Config.SidebarWidth, 200, 440));
+        FitPanels(); // a sidebar that comes back takes room from the panels; one that goes gives it back
     }
 
     private void ToggleChatPanel()
@@ -509,6 +652,7 @@ public partial class MainWindow : Window
         "Ctrl+W\tClose editor",
         "Ctrl+Shift+M\tMemory & skills",
         "Ctrl+Shift+Q\tTask queue",
+        "Ctrl+Shift+P\tPlan panel (what the agent is working through)",
         "Ctrl+Shift+K\tCredentials vault",
         "Ctrl+,\tSettings",
         "",
@@ -523,6 +667,7 @@ public partial class MainWindow : Window
         wizard.ShowDialog();
         UpdateModelLabel();
         UpdateBanner();
+        _ = OfferExternalImportAsync();
     }
 
     public void ShowBedrockGuide(Dsh.App.Views.Guide.BedrockPage page, ProviderProfile? route)
@@ -566,6 +711,59 @@ public partial class MainWindow : Window
         window.ShowDialog();
     }
 
+    private MemoriesWindow? _memories;
+
+    /// <summary>The remembered notes: search, add, edit, pin, delete.</summary>
+    public void ShowMemories()
+    {
+        if (_memories is { IsLoaded: true })
+        {
+            _memories.Activate();
+            return;
+        }
+        _memories = new MemoriesWindow(Model) { Owner = OwnedWindows.OfType<Window>().FirstOrDefault(w => w.IsActive) ?? this };
+        _memories.Closed += (_, _) => _memories = null;
+        _memories.Show();
+    }
+
+    /// <summary>"Bring in from OpenClaw": skills, memory, keys and model servers from an OpenClaw install on this
+    /// PC or on another machine.</summary>
+    public void ShowOpenClawImport()
+    {
+        var owner = OwnedWindows.OfType<Window>().FirstOrDefault(w => w.IsActive) ?? this;
+        new OpenClawImportWindow(Model) { Owner = owner }.ShowDialog();
+    }
+
+    /// <summary>"Bring in Claude Code &amp; Cursor". Opened over whatever window is in front, so it works
+    /// from Settings and from Memory &amp; Skills alike.</summary>
+    public void ShowExternalImport()
+    {
+        ImportCard.Visibility = Visibility.Collapsed;
+        var owner = OwnedWindows.OfType<Window>().FirstOrDefault(w => w.IsActive) ?? this;
+        new ExternalImportWindow(Model) { Owner = owner }.ShowDialog();
+        Model.Config.ExternalImportOffered = true;
+    }
+
+    /// <summary>A quiet, one-time offer: when Claude Code or Cursor is on this PC and has something DSH
+    /// doesn't, say so once, with a button. Dismissing it or opening the import ends the offer for good.</summary>
+    public async Task OfferExternalImportAsync()
+    {
+        if (Model.Config.ExternalImportOffered || SelfTest.Current is not null) return;
+        var support = Model.Host.SkillLocations;
+        ExternalInventory inventory;
+        try
+        {
+            inventory = await Task.Run(() => ExternalScanner.Scan(ExternalLocations.Standard, support));
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            return;
+        }
+        if (Model.Config.ExternalImportOffered || inventory.Suggested == 0) return;
+        ImportText.Text = $"Claude Code and Cursor are on this PC. Bring {ExternalLabels.Summarize(inventory.Items.Where(i => i.SelectedByDefault))} into DSH?";
+        ImportCard.Visibility = Visibility.Visible;
+    }
+
     /// <summary>Bring the window forward when a second launch hands us a folder.</summary>
     public void BringToFront()
     {
@@ -601,10 +799,20 @@ public partial class MainWindow : Window
     private void Memory_Click(object sender, RoutedEventArgs e) => ShowMemory();
     private void Vault_Click(object sender, RoutedEventArgs e) => ShowVault();
     private void ToggleQueue_Click(object sender, RoutedEventArgs e) => ToggleQueuePanel();
+    private void TogglePlan_Click(object sender, RoutedEventArgs e) => TogglePlanPanel();
+    private void Memories_Click(object sender, RoutedEventArgs e) => ShowMemories();
+    private void ImportOpenClaw_Click(object sender, RoutedEventArgs e) => ShowOpenClawImport();
     private void QueueLog_Click(object sender, RoutedEventArgs e) => new QueueLogWindow(Model.Host) { Owner = this }.Show();
     private void Skills_Click(object sender, RoutedEventArgs e) => ShowSettings(SettingsTab.Skills);
     private void GenerateSkill_Click(object sender, RoutedEventArgs e) => ShowSettings(SettingsTab.Skills, SkillsAction.Generate);
     private void ImportSkills_Click(object sender, RoutedEventArgs e) => ShowSettings(SettingsTab.Skills, SkillsAction.Import);
+    private void ImportExternal_Click(object sender, RoutedEventArgs e) => ShowExternalImport();
+    private void BringInFromCard_Click(object sender, RoutedEventArgs e) => ShowExternalImport();
+    private void DismissImport_Click(object sender, RoutedEventArgs e)
+    {
+        ImportCard.Visibility = Visibility.Collapsed;
+        Model.Config.ExternalImportOffered = true;
+    }
     private void ReloadContext_Click(object sender, RoutedEventArgs e) => Model.Host.RefreshProjectContext();
     private void Wizard_Click(object sender, RoutedEventArgs e)
     {
@@ -677,8 +885,12 @@ public partial class MainWindow : Window
         "and works in your project folder with file, search, and shell tools, asking before anything risky.\n\n" +
         $"Data folder: {AppPaths.Root}\n{UpdateChecker.ReleasesPage.Replace("/latest", "")}");
 
-    private void SidebarSplitter_DragCompleted(object sender, DragCompletedEventArgs e) =>
+    private void SidebarSplitter_DragCompleted(object sender, DragCompletedEventArgs e)
+    {
+        if (e.HorizontalChange == 0) return;
         Model.Config.SidebarWidth = SidebarColumn.ActualWidth;
+        FitPanels();
+    }
 
     // MARK: - Placement and closing
 

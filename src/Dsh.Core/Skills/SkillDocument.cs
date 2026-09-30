@@ -177,7 +177,8 @@ public sealed class SkillDocument : IEquatable<SkillDocument>
                 doc.Assign(key, BlockScalar(cont, folded: rest.StartsWith('>')));
                 continue;
             }
-            var nonBlank = cont.Where(l => l.Trim().Length > 0).ToList();
+            // (A comment line inside an indented block is neither an item nor text: `- Read` / `# - Bash` is the list [Read].)
+            var nonBlank = cont.Where(l => l.Trim().Length > 0 && !l.TrimStart().StartsWith('#')).ToList();
             if (rest.Length == 0)
             {
                 var items = nonBlank.Select(l => l.Trim()).ToList();

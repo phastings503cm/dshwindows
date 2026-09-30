@@ -174,4 +174,63 @@ public sealed class FileToolsTests : IDisposable
         Assert.Equal([new TodoItem("1", "plan", TodoStatus.Completed), new TodoItem("3", "ship", TodoStatus.InProgress)], result.Todos);
         Assert.Equal("Task list cleared.", await _tools.Output(new TodoWriteTool(), """{"todos":[]}"""));
     }
+
+    // MARK: edits from several agents at once
+
+    [Fact]
+    public async Task ManyEditsToOneFileAtTheSameTimeAllLand()
+    {
+        // Subagents run side by side: two of them editing one file must not both start from the same text.
+        const int edits = 24;
+        Root.Write("shared.txt", string.Join("\n", Enumerable.Range(0, edits).Select(i => $"slot-{i:00}: open")));
+        var context = _tools.Context;
+        var tasks = Enumerable.Range(0, edits).Select(i => Task.Run(() => new EditTool().ExecuteAsync(
+            $$"""{"file_path":"shared.txt","old_string":"slot-{{i:00}}: open","new_string":"slot-{{i:00}}: taken"}""", context, default)));
+        var results = await Task.WhenAll(tasks);
+
+        Assert.All(results, r => Assert.StartsWith("Edited shared.txt", r.Output));
+        var text = File.ReadAllText(Path.Combine(Root.Path, "shared.txt"));
+        Assert.DoesNotContain("open", text);
+        Assert.Equal(edits, text.Split("taken").Length - 1);
+        // And nobody left a temp file behind.
+        Assert.DoesNotContain(Directory.GetFiles(Root.Path), f => f.EndsWith(".dsh-tmp", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void ATempFileLeftByAWriteThatDiedIsReusedNotAccumulated()
+    {
+        // A write that was killed between writing its temp file and moving it leaves that file behind; the next write of the
+        // same path uses the same name, so it replaces it — orphans do not pile up.
+        Root.Write("a.txt", "old");
+        var path = Path.Combine(Root.Path, "a.txt");
+        File.WriteAllText(path + ".dsh-tmp", "half a write");
+
+        FileText.Write(path, "new text", new TextFileFormat(false, false));
+
+        Assert.Equal("new text", File.ReadAllText(path));
+        Assert.DoesNotContain(Directory.GetFiles(Root.Path), f => f.EndsWith(".dsh-tmp", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void TheLocksDoNotGrowWithTheNumberOfFiles()
+    {
+        // The same lock for the same file, however it is spelled; and a fixed number of them for any number of files.
+        var a = FileText.LockFor(Path.Combine(Root.Path, "a.txt"));
+        Assert.Same(a, FileText.LockFor(Path.Combine(Root.Path, "sub", "..", "a.txt")));
+        var distinct = Enumerable.Range(0, 5_000).Select(i => FileText.LockFor(Path.Combine(Root.Path, $"f{i}.txt"))).Distinct().Count();
+        Assert.InRange(distinct, 2, 64);
+    }
+
+    [Fact]
+    public void AWriteThatCannotBeFinishedLeavesNoTempFileBehind()
+    {
+        // The target is a folder: the new text is written to its own temp name, the move over it fails, and the temp goes.
+        var folder = Path.Combine(Root.Path, "taken");
+        Directory.CreateDirectory(folder);
+
+        Assert.ThrowsAny<Exception>(() => FileText.Write(folder, "text", new TextFileFormat(false, false)));
+
+        Assert.DoesNotContain(Directory.GetFiles(Root.Path), f => f.EndsWith(".dsh-tmp", StringComparison.Ordinal));
+        Assert.True(Directory.Exists(folder));
+    }
 }

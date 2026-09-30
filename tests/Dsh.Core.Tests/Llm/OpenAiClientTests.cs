@@ -25,6 +25,53 @@ public sealed class OpenAiClientTests
         Assert.Equal("user", Str(messages[1]!["role"]));
     }
 
+    /// <summary>A long run compacted from the inside has no user turn left — only the summary (a system message),
+    /// then the assistant's calls and the tool results. Chat templates that require a question (Qwen's) reject that.</summary>
+    [Fact]
+    public void ARequestWithNoUserTurnGetsOne()
+    {
+        var call = new ToolCall("c1", "read_file", """{"file_path":"a.txt"}""");
+        var messages = WireMessages(new LlmRequest("sys",
+            [LlmMessage.SystemText("[Earlier conversation, compacted] ..."), LlmMessage.Assistant("", [call]), LlmMessage.ToolOutput("c1", "read_file", "1 | x")],
+            [], "test-model"));
+
+        Assert.Equal(new[] { "system", "user", "assistant", "tool" }, messages.Select(m => Str(m!["role"])));
+        Assert.Contains("summarised", Str(messages[1]!["content"]));
+    }
+
+    [Fact]
+    public void ARequestThatHasAUserTurnIsLeftAlone()
+    {
+        var messages = WireMessages(new LlmRequest("sys", [LlmMessage.User("hi"), LlmMessage.Assistant("hello")], [], "test-model"));
+        Assert.Equal(new[] { "system", "user", "assistant" }, messages.Select(m => Str(m!["role"])));
+        Assert.Equal("hi", Str(messages[1]!["content"]));
+    }
+
+    /// <summary>vLLM parses every assistant tool call's arguments before applying the chat template, so one broken
+    /// call in the history fails every later request of the conversation.</summary>
+    [Theory]
+    [InlineData("""{"file_path":"a.txt","content":"cut off""")]
+    [InlineData("")]
+    [InlineData("not json at all")]
+    [InlineData("[1,2]")]
+    public void BrokenToolCallArgumentsGoOutAsAnEmptyObject(string arguments)
+    {
+        var call = new ToolCall("c1", "write_file", arguments);
+        var messages = WireMessages(new LlmRequest("sys", [LlmMessage.User("go"), LlmMessage.Assistant("", [call]), LlmMessage.ToolOutput("c1", "write_file", "x")], [], "test-model"));
+
+        var sent = Str(messages[2]!["tool_calls"]![0]!["function"]!["arguments"]);
+        Assert.Equal("{}", sent);
+    }
+
+    [Fact]
+    public void WellFormedToolCallArgumentsAreSentAsWritten()
+    {
+        var call = new ToolCall("c1", "read_file", """{ "file_path": "a.txt" }""");
+        var messages = WireMessages(new LlmRequest("sys", [LlmMessage.User("go"), LlmMessage.Assistant("", [call]), LlmMessage.ToolOutput("c1", "read_file", "x")], [], "test-model"));
+
+        Assert.Equal("""{ "file_path": "a.txt" }""", Str(messages[2]!["tool_calls"]![0]!["function"]!["arguments"]));
+    }
+
     /// <summary>Regression: compaction inserts a system-role continuity note mid-transcript. A second
     /// system message anywhere but index 0 makes strict servers (SGLang on a DGX Spark) reply 400, so
     /// the prompt and every inline system message collapse into one leading system message.</summary>

@@ -27,13 +27,19 @@ public abstract record SlashCommand
     public sealed record Skill(string? Argument) : SlashCommand;
     /// <summary>Start (or report) the unattended task queue.</summary>
     public sealed record Queue : SlashCommand;
+    /// <summary>"/remember the staging server is orion": save a note to long-term memory.</summary>
+    public sealed record Remember(string Text) : SlashCommand;
+    /// <summary>"/memory" opens the memory manager; "/memory deploy" searches it.</summary>
+    public sealed record Memory(string? Query) : SlashCommand;
+    /// <summary>List the kinds of subagent, the model servers they run on, and what is running.</summary>
+    public sealed record Agents : SlashCommand;
     public sealed record Help : SlashCommand;
 
     public sealed record Info(string Usage, string Summary);
 
     public static IReadOnlyList<Info> Catalog { get; } =
     [
-        new("/goal <task>", "Keep working, round after round, until the model says GOAL_COMPLETE (bare /goal resumes)"),
+        new("/goal <task>", "Keep working, round after round, until the model signals the goal is complete — no \"continue\" needed (bare /goal resumes; /goal stop drops it)"),
         new("/compact [focus]", "Summarize the conversation now to free up context"),
         new("/think off|low|medium|high|max|default", "Set how hard the model thinks in this chat"),
         new("/context", "Show the model's context window and how much is used"),
@@ -41,6 +47,9 @@ public abstract record SlashCommand
         new("/skills", "List skills and what is selected for this chat"),
         new("/skill <name>|new <what>", "Select/deselect a skill for this chat, or have the model write a new one"),
         new("/queue", "Start the task queue — it works queued tasks one at a time, unattended"),
+        new("/remember <note>", "Save a note to long-term memory (searched automatically when it's relevant)"),
+        new("/memory [search]", "Open the memory manager, or search what is remembered"),
+        new("/agents", "Show the subagent types, the model servers they run on, and what is running now"),
         new("/help", "List commands"),
     ];
 
@@ -63,6 +72,9 @@ public abstract record SlashCommand
             "/skills" => new Skills(),
             "/skill" => new Skill(arg),
             "/queue" => new Queue(),
+            "/remember" or "/note" => new Remember(rest),
+            "/memory" or "/memories" => new Memory(arg),
+            "/agents" or "/fleet" => new Agents(),
             "/help" or "/?" or "/commands" => new Help(),
             _ => null,
         };
@@ -74,7 +86,12 @@ public abstract record SlashCommand
 public abstract record GoalStatus
 {
     public sealed record Working : GoalStatus;
-    public sealed record Complete : GoalStatus;
+    /// <summary>The goal is done. <see cref="Summary"/> is what the model reported through the
+    /// <c>goal_complete</c> tool (null when it wrote the text marker instead).</summary>
+    public sealed record Complete : GoalStatus
+    {
+        public string? Summary { get; init; }
+    }
     public sealed record Blocked(string Reason) : GoalStatus;
 }
 
@@ -97,13 +114,18 @@ public static class GoalProtocol
         $"GOAL: {goal}\n\n" +
         "Work on this goal autonomously until it is completely done. Use your tools; plan with `todo_write` " +
         "for multi-step work; verify results (build, run, test, re-read files) instead of assuming.\n" +
-        "You will be prompted to continue after every reply, so it is fine to stop and resume in steps — " +
-        "but do not stop to ask for confirmation of things you can decide or check yourself.\n\n" +
-        "When — and only when — the goal is fully achieved and verified, finish your reply with a line " +
+        "The harness sends you back to work after every reply until you say you are finished, so it is fine to " +
+        "stop and resume in steps — but never stop to ask whether you should continue, or for confirmation of " +
+        "things you can decide or check yourself.\n\n" +
+        "When — and only when — the goal is fully achieved and verified, call the `goal_complete` tool with a " +
+        "short summary of what was done. If you cannot call tools, finish your reply with a line " +
         $"containing exactly:\n{CompleteMarker}\n" +
         "If you genuinely cannot proceed without the user (missing credentials, a decision only they can make, " +
-        $"or an external blocker), finish with a line:\n{BlockedMarker}: <what you need from the user>\n" +
-        "Never write either marker in any other situation. The loop only ends on one of these lines.";
+        "or an external blocker), call the `goal_blocked` tool with exactly what you need. Without tools, " +
+        $"finish with a line:\n{BlockedMarker}: <what you need from the user>\n" +
+        "Never signal either in any other situation.\n" +
+        "The loop only ends when you signal, so keep working until then.\n" +
+        "Do not ask whether to continue; the harness continues for you.";
 
     /// <summary>The unattended variant (task queue): the user is not at the keyboard, so "blocked" is
     /// reserved for true external walls — anything that can be decided by reading code, running a
@@ -113,6 +135,13 @@ public static class GoalProtocol
     /// <summary>Kickoff for a /goal picked back up in the same chat (a bare /goal after a stop, a
     /// block, or a failure).</summary>
     public static string Resume(string goal) => ResumePreface + Kickoff(goal);
+
+    /// <summary>Kickoff for a goal that stopped because the model needed the user, once the user has
+    /// replied: the reply is handed over and the work carries on without another <c>/goal</c>.</summary>
+    public static string ResumeWithReply(string goal, string reply) =>
+        "[Resuming] This goal paused because you needed the user. They have now replied:\n\n" +
+        $"<user_reply>\n{reply.Trim()}\n</user_reply>\n\n" +
+        "Carry on with the goal using their answer — do not start over.\n\n\n" + Kickoff(goal);
 
     /// <summary>Kickoff for a queue task picked back up in its own chat — after an app restart, a Stop,
     /// or a block the user has since answered. The model sees its earlier work above and continues
@@ -132,17 +161,20 @@ public static class GoalProtocol
         "need>` and stop — it will be picked back up later.";
 
     public static string ContinuationAuto(string goal, int round, bool hitIterationLimit,
-                                          string? error = null, bool markerMisplaced = false) =>
-        Continuation(goal, round, hitIterationLimit, error, markerMisplaced) +
+                                          string? error = null, bool markerMisplaced = false, bool stalled = false) =>
+        Continuation(goal, round, hitIterationLimit, error, markerMisplaced, stalled) +
         $"\nReminder: unattended run — decide and move on; only `{BlockedMarker}` stops it.";
 
     public static string Continuation(string goal, int round, bool hitIterationLimit,
-                                      string? error = null, bool markerMisplaced = false)
+                                      string? error = null, bool markerMisplaced = false, bool stalled = false)
     {
         string why;
         if (markerMisplaced)
             why = $"Your last reply mentioned {CompleteMarker}/{BlockedMarker} but not as its final line, so it did not count. " +
-                  $"If the goal is done, reply with a short summary ending in a line that contains only {CompleteMarker}.";
+                  $"If the goal is done, call the `goal_complete` tool (or reply with a short summary ending in a line that contains only {CompleteMarker}).";
+        else if (stalled)
+            why = "Your last round was stopped because you kept making the same call and getting the same result. " +
+                  "Take a genuinely different approach this time, or say exactly what is blocking you.";
         else if (error is not null)
             why = $"The previous round was cut short by an error ({TextUtil.Prefix(error, 300)}). Check what state things are in and carry on.";
         else if (hitIterationLimit)
@@ -152,8 +184,8 @@ public static class GoalProtocol
         return $"[Goal round {round}] {why}\n" +
                $"GOAL (unchanged): {goal}\n\n" +
                "Check what remains against the goal and continue. If everything is done, verify it one last time and " +
-               $"finish with a line containing exactly `{CompleteMarker}` — the loop keeps going until you write that line. " +
-               $"If you are blocked on the user, finish with `{BlockedMarker}: <what you need>`.";
+               $"call the `goal_complete` tool (or finish with a line containing exactly `{CompleteMarker}`) — the loop keeps going until you do. " +
+               $"If you are blocked on the user, call `goal_blocked` (or finish with `{BlockedMarker}: <what you need>`).";
     }
 
     /// <summary>Read the end marker from the model's reply. A marker counts only on a line of its own

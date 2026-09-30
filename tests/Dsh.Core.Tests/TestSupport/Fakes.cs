@@ -13,6 +13,9 @@ public sealed record Turn(string Text = "", IReadOnlyList<ToolCall>? Calls = nul
     /// <summary>Handed back on Done, as a provider that needs its signed reasoning again would.</summary>
     public string? ProviderState { get; init; }
 
+    /// <summary>The finish reason the stream ends with ("stop" unless a test scripts "length" etc.).</summary>
+    public string? Finish { get; init; }
+
     /// <summary>A turn with no text that only asks for tools.</summary>
     public static Turn Calling(params ToolCall[] calls) => new("", calls);
 }
@@ -64,7 +67,7 @@ public sealed class ScriptedClient : ILlmClient
             cancellationToken.ThrowIfCancellationRequested();
             yield return new LlmStreamEvent.Text(elements.GetTextElement());
         }
-        yield return new LlmStreamEvent.Done(turn.Calls ?? [], "stop", turn.Usage) { ProviderState = turn.ProviderState };
+        yield return new LlmStreamEvent.Done(turn.Calls ?? [], turn.Finish ?? "stop", turn.Usage) { ProviderState = turn.ProviderState };
     }
 
     public Task<IReadOnlyList<string>> ListModelsAsync(CancellationToken cancellationToken = default) =>

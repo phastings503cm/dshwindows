@@ -524,7 +524,7 @@ public sealed class OpenAiClient : IProviderClient
             && JsonNumbers.TryGetInt(u["completion_tokens"], out var c)
             && (p > 0 || c > 0))
         {
-            state.Usage = new LlmUsage(p, c);
+            state.Usage = new LlmUsage(p, c, CachedTokens(u));
         }
         if (obj["choices"] is not JsonArray { Count: > 0 } choices || choices[0] is not JsonObject first) return;
 
@@ -600,8 +600,20 @@ public sealed class OpenAiClient : IProviderClient
             && JsonNumbers.TryGetInt(u["prompt_tokens"], out var p)
             && JsonNumbers.TryGetInt(u["completion_tokens"], out var c))
         {
-            state.Usage = new LlmUsage(p, c);
+            state.Usage = new LlmUsage(p, c, CachedTokens(u));
         }
+    }
+
+    /// <summary>The prompt tokens the server says it served from its cache: OpenAI, vLLM and SGLang put
+    /// them in <c>usage.prompt_tokens_details.cached_tokens</c>; a few servers use <c>cached_tokens</c> or
+    /// <c>prompt_cache_hit_tokens</c> (DeepSeek) directly.</summary>
+    internal static int? CachedTokens(JsonObject usage)
+    {
+        if (usage["prompt_tokens_details"] is JsonObject details && JsonNumbers.TryGetInt(details["cached_tokens"], out var nested))
+            return nested;
+        if (JsonNumbers.TryGetInt(usage["cached_tokens"], out var flat)) return flat;
+        if (JsonNumbers.TryGetInt(usage["prompt_cache_hit_tokens"], out var hit)) return hit;
+        return null;
     }
 
     /// <summary>The status code and message of an error object, if <paramref name="obj"/> is one.</summary>
@@ -625,6 +637,14 @@ public sealed class OpenAiClient : IProviderClient
     }
 
     // MARK: Request body
+
+    private const string NoUserTurnNote = "(Earlier work in this conversation was summarised above. Carry on with the task.)";
+
+    /// <summary>A tool call's arguments as the wire wants them: a JSON object. Empty or broken text (a call the model
+    /// cut off or mangled) becomes <c>{}</c> — servers that hand the arguments to a chat template as a parsed object
+    /// (vLLM) fail the whole request on anything else, and would keep failing for the rest of the conversation.</summary>
+    internal static string SafeArguments(string arguments) =>
+        string.IsNullOrWhiteSpace(arguments) || !Engine.ValidArguments(arguments) ? "{}" : arguments;
 
     /// <summary>The chat-completions request body, as JSON text.</summary>
     public string MakeBody(LlmRequest request)
@@ -657,7 +677,7 @@ public sealed class OpenAiClient : IProviderClient
                             {
                                 ["id"] = call.Id,
                                 ["type"] = "function",
-                                ["function"] = new JsonObject { ["name"] = call.Name, ["arguments"] = call.Arguments },
+                                ["function"] = new JsonObject { ["name"] = call.Name, ["arguments"] = SafeArguments(call.Arguments) },
                             });
                         }
                         msg["tool_calls"] = arr;
@@ -674,6 +694,10 @@ public sealed class OpenAiClient : IProviderClient
                     break;
             }
         }
+        // Chat templates that look for the user's question (Qwen's, among others) refuse a request that has none — and
+        // that is what a long run looks like after compaction cuts inside it: the summary, then assistant and tool turns.
+        if (messages.Count > 0 && !messages.Any(m => m?["role"]?.GetValue<string>() == "user"))
+            messages.Insert(0, new JsonObject { ["role"] = "user", ["content"] = NoUserTurnNote });
         if (systemParts.Count > 0)
             messages.Insert(0, new JsonObject { ["role"] = "system", ["content"] = string.Join("\n\n", systemParts) });
 

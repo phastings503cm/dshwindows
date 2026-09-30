@@ -38,8 +38,14 @@ public sealed partial class AgentHost
     public const int QueueMaxErroredTasks = 3;
     /// <summary>How many tasks one chat's agent may queue (queue_task).</summary>
     public const int MaxAgentQueuedTasksPerChat = 20;
-    /// <summary>How many times in a row an idle chat picks itself up after background agents finish.</summary>
-    public const int MaxAutoContinuations = 3;
+    /// <summary>How many times in a row an idle chat picks itself up after background agents finish.
+    /// A guard against a model that keeps relaunching agents for ever, not a limit on real work: a chat that
+    /// coordinates subagents needs many hand-backs, and every message of the user's starts the count over.</summary>
+    public const int MaxAutoContinuations = 25;
+
+    /// <summary>Rounds in a row that may end because the agent kept repeating one action before a /goal gives
+    /// up on it and asks the user for a different direction.</summary>
+    public const int MaxStalledRounds = 3;
 
     /// <summary>Pause before goal round n+1 after n errors (or empty replies) in a row.</summary>
     public Func<int, TimeSpan> GoalErrorBackoff { get; set; } = n => RequestRetry.Backoff(n + 1);
@@ -54,6 +60,10 @@ public sealed partial class AgentHost
     private readonly Dictionary<string, BackgroundAgents> _backgroundPools = new();
     private readonly Dictionary<string, int> _autoContinuations = new();
     private readonly Dictionary<string, int> _agentQueuedCount = new();
+    /// <summary>Chats the user pressed Stop in and hasn't written to since: a background agent that finishes doesn't wake them.</summary>
+    private readonly HashSet<string> _stoppedChats = new();
+    /// <summary>Chats whose latest run ended by reporting a failure (its hand-back of finished agents is skipped).</summary>
+    private readonly HashSet<string> _failedRuns = new();
 
     /// <summary>Session id → the route a retry moved the run onto (see <see cref="RerouteForRetryAsync"/>).</summary>
     private readonly Dictionary<string, ProviderProfile> _retryRoute = new();
@@ -128,6 +138,7 @@ public sealed partial class AgentHost
         _engines.Remove(sessionId);
         _engineKeys.Remove(sessionId);
         _systemPrompts.Remove(sessionId);
+        if (_caches.TryGetValue(sessionId, out var cache)) cache.NoteCompaction(); // the text those reads pointed at is gone
         if (SelectedId != sessionId) ReleaseDisplay(vm);
     }
 
@@ -505,11 +516,15 @@ public sealed partial class AgentHost
 
     /// <summary>/goal: run rounds until the model writes GOAL_COMPLETE (or GOAL_BLOCKED), re-stating
     /// the goal every round so it survives compaction.</summary>
-    private async Task RunGoalAsync(SessionVM vm, string goal, bool resuming, CancellationToken ct)
+    private async Task RunGoalAsync(SessionVM vm, string goal, bool resuming, CancellationToken ct, string? reply = null,
+                                    IReadOnlyList<MessageAttachment>? attachments = null)
     {
         vm.LastGoal = goal;
-        var outcome = await GoalLoopAsync(vm, goal, auto: false, resuming, ct);
+        vm.BlockedGoal = null;
+        var outcome = await GoalLoopAsync(vm, goal, auto: false, resuming, ct, reply, attachments);
         if (outcome is GoalOutcome.Complete) vm.LastGoal = null;
+        // The agent needs the user: their next message is the answer, and the goal picks up from there.
+        if (outcome is GoalOutcome.Blocked) vm.BlockedGoal = goal;
         // Stopped between rounds: report it like a Stop mid-round.
         if (outcome is GoalOutcome.Stopped) throw new OperationCanceledException(ct);
     }
@@ -523,7 +538,8 @@ public sealed partial class AgentHost
     /// request the server rejects, an overflow compaction couldn't fix) are retried as a fresh round
     /// after a pause; only <see cref="GoalProtocol.MaxConsecutiveErrors"/> of them in a row end the
     /// goal (thrown).</summary>
-    private async Task<GoalOutcome> GoalLoopAsync(SessionVM vm, string goal, bool auto, bool resuming, CancellationToken ct)
+    private async Task<GoalOutcome> GoalLoopAsync(SessionVM vm, string goal, bool auto, bool resuming, CancellationToken ct,
+                                                  string? reply = null, IReadOnlyList<MessageAttachment>? attachments = null)
     {
         var started = DateTimeOffset.Now;
         vm.Goal = new GoalState(goal, 1, started);
@@ -537,6 +553,8 @@ public sealed partial class AgentHost
             var errorsInARow = 0;
             var emptyInARow = 0; // rounds with no reply at all
             var markerMisplaced = false;
+            var stalled = false;
+            var stalledInARow = 0;
             while (true)
             {
                 if (ct.IsCancellationRequested) return new GoalOutcome.Stopped();
@@ -548,6 +566,12 @@ public sealed partial class AgentHost
                         modelText = resuming ? GoalProtocol.ResumeAuto(goal) : GoalProtocol.KickoffAuto(goal);
                         displayText = resuming ? $"🚀 queue (resuming): {goal}" : $"🚀 queue: {goal}";
                     }
+                    else if (reply is not null)
+                    {
+                        // The user answered the agent's question: their words are the message.
+                        modelText = GoalProtocol.ResumeWithReply(goal, reply);
+                        displayText = reply;
+                    }
                     else
                     {
                         modelText = resuming ? GoalProtocol.Resume(goal) : GoalProtocol.Kickoff(goal);
@@ -557,33 +581,48 @@ public sealed partial class AgentHost
                 else
                 {
                     modelText = auto
-                        ? GoalProtocol.ContinuationAuto(goal, round, hitLimit, lastError, markerMisplaced)
-                        : GoalProtocol.Continuation(goal, round, hitLimit, lastError, markerMisplaced);
+                        ? GoalProtocol.ContinuationAuto(goal, round, hitLimit, lastError, markerMisplaced, stalled)
+                        : GoalProtocol.Continuation(goal, round, hitLimit, lastError, markerMisplaced, stalled);
                     displayText = lastError is null ? $"↻ round {round}: keep going" : $"↻ round {round}: recover and keep going";
                 }
 
                 try
                 {
-                    var result = await TurnAsync(vm, modelText, displayText, [], ct);
+                    // The first round looks up notes about the goal (or the user's answer); later ones don't.
+                    var result = await TurnAsync(vm, modelText, displayText, kickedOff ? [] : attachments ?? [], ct,
+                        kickedOff ? null : reply ?? goal);
                     if (auto && _queueSessions.TryGetValue(vm.Id, out var taskId))
                         Queue.RecordRound(taskId, round, result.Usage?.PromptTokens ?? 0, result.Usage?.CompletionTokens ?? 0);
                     kickedOff = true;
                     errorsInARow = 0;
                     lastError = null;
                     hitLimit = result.HitIterationLimit;
+                    stalled = result.Stalled;
+                    stalledInARow = stalled ? stalledInARow + 1 : 0;
                     // A run cut off by the step limit is mid-work whatever it said.
                     if (!result.HitIterationLimit)
                     {
-                        switch (GoalProtocol.Status(result.LastReplyText))
+                        // The model's own signal (goal_complete / goal_blocked) first; the text markers are the
+                        // fallback for models that don't call tools well.
+                        var status = result.Goal ?? (stalled ? new GoalStatus.Working() : GoalProtocol.Status(result.LastReplyText));
+                        switch (status)
                         {
-                            case GoalStatus.Complete:
-                                if (!auto) Notice($"✅ Goal complete after {round} round{(round == 1 ? "" : "s")}.");
+                            case GoalStatus.Complete done:
+                                if (!auto)
+                                    Notice($"✅ Goal complete after {round} round{(round == 1 ? "" : "s")}." + (done.Summary is { } summary ? "\n" + summary : ""));
                                 return new GoalOutcome.Complete();
                             case GoalStatus.Blocked blocked:
                                 if (!auto)
-                                    Notice($"⏸ Goal paused — the agent needs you: {blocked.Reason}\nReply, then send `/goal` to pick it back up.");
+                                    Notice($"⏸ Goal paused — the agent needs you: {blocked.Reason}\nReply here and it carries on by itself (or send `/goal stop` to drop it).");
                                 return new GoalOutcome.Blocked(blocked.Reason);
                         }
+                    }
+                    // Going in circles round after round: ask for a new direction rather than spin for ever.
+                    if (stalledInARow >= MaxStalledRounds)
+                    {
+                        const string why = "I kept repeating the same action without getting anywhere. Tell me what to try differently.";
+                        if (!auto) Notice($"⏸ Goal paused — the agent was going in circles.\nReply with a new direction and it carries on (or send `/goal stop` to drop it).");
+                        return new GoalOutcome.Blocked(why);
                     }
                     // Named the marker but not where it counts: ask for it plainly.
                     markerMisplaced = !result.HitIterationLimit && GoalProtocol.MentionsMarker(result.LastReplyText);
@@ -608,13 +647,17 @@ public sealed partial class AgentHost
                     if (ct.IsCancellationRequested) throw new OperationCanceledException(ct);
                     // The failed kickoff may still have reached the transcript (work was salvaged):
                     // carry on with continuations, not a restart.
-                    if (!kickedOff && _transcripts.GetValueOrDefault(vm.Id) is { } transcript
-                        && transcript.Any(m => m.Role == Dsh.Core.MessageRole.User && m.Content == modelText))
-                        kickedOff = true;
+                    if (!kickedOff && ReachedModel(vm.Id, modelText)) kickedOff = true;
                     markerMisplaced = false;
                     errorsInARow++;
                     var why = Describe(error);
-                    if (errorsInARow >= GoalProtocol.MaxConsecutiveErrors) throw;
+                    if (errorsInARow >= GoalProtocol.MaxConsecutiveErrors)
+                    {
+                        // The user's answer to a paused goal never reached the model: the goal is still waiting for it. (One that
+                        // did reach it is not — the goal failed after that, and a bare /goal picks it back up.)
+                        if (!kickedOff && reply is not null) vm.BlockedGoal = goal;
+                        throw;
+                    }
                     var wait = NonNegative(GoalErrorBackoff(errorsInARow));
                     Notice($"Round {round} failed: {why}\nThe goal carries on — trying again in {(int)wait.TotalSeconds}s " +
                            $"({errorsInARow} of {GoalProtocol.MaxConsecutiveErrors - 1} retries).", error: true);
@@ -667,8 +710,10 @@ public sealed partial class AgentHost
         foreach (var entry in entries.Reverse())
         {
             if (entry is not MessageEntryVM message) continue;
-            // The latest goal already finished: nothing to resume.
-            if (message.Role == MessageRole.Notice && message.Text.StartsWith("✅ Goal complete", StringComparison.Ordinal)) return null;
+            // The latest goal already finished, or was dropped on purpose: nothing to resume.
+            if (message.Role == MessageRole.Notice
+                && (message.Text.StartsWith("✅ Goal complete", StringComparison.Ordinal) || message.Text.StartsWith("Dropped the goal", StringComparison.Ordinal)))
+                return null;
             if (message.Role != MessageRole.User) continue;
             foreach (var prefix in new[] { "🎯 /goal (resuming) ", "🎯 /goal " })
             {
@@ -676,6 +721,24 @@ public sealed partial class AgentHost
                 var goal = message.Text[prefix.Length..].Trim();
                 return goal.Length == 0 ? null : goal;
             }
+        }
+        return null;
+    }
+
+    /// <summary>The goal a chat is paused on, read from its timeline (so it survives a restart): the newest goal notice is
+    /// "⏸ Goal paused", and nothing came after it — no completion, drop or Stop, and no message from the user (a message sent
+    /// while the goal is paused is its answer, so the pause is over even if the app closed before the goal finished).</summary>
+    public static string? PausedGoalIn(IReadOnlyList<ChatEntryVM> entries)
+    {
+        for (var i = entries.Count - 1; i >= 0; i--)
+        {
+            if (entries[i] is MessageEntryVM { Role: MessageRole.User }) return null;
+            if (entries[i] is not MessageEntryVM { Role: MessageRole.Notice or MessageRole.Error } message) continue;
+            if (message.Text.StartsWith("⏸ Goal paused", StringComparison.Ordinal)) return LastGoalIn(entries.Take(i));
+            if (message.Text.StartsWith("✅ Goal complete", StringComparison.Ordinal)
+                || message.Text.StartsWith("Dropped the goal", StringComparison.Ordinal)
+                || message.Text.StartsWith("Stopped.", StringComparison.Ordinal))
+                return null;
         }
         return null;
     }
@@ -746,35 +809,58 @@ public sealed partial class AgentHost
     /// itself: the main agent gets their reports and carries on.</summary>
     private void ContinueAfterBackgroundAgents(SessionVM vm)
     {
+        // Not while the chat is busy, waiting on the user (a paused goal, a Stop) or on a server that is switching models: the
+        // reports stay unread and go to the model with whatever happens next.
         if (vm.Running || _runs.ContainsKey(vm.Id) || _queueSessions.ContainsKey(vm.Id) || vm.RunningBackgroundJobs.Count > 0
-            || !_backgroundPools.TryGetValue(vm.Id, out var pool)
+            || vm.BlockedGoal is not null || _stoppedChats.Contains(vm.Id)
+            || !_backgroundPools.TryGetValue(vm.Id, out var pool) || !pool.HasUnreported
             || !pool.All.Any(j => j.Status is BackgroundAgentStatus.Done or BackgroundAgentStatus.Failed)
             || IsServerSwitching?.Invoke() == true) return;
         // At most a few automatic continuations in a row: a model that keeps relaunching agents must
-        // not loop unattended forever.
-        if (_autoContinuations.GetValueOrDefault(vm.Id) >= MaxAutoContinuations)
+        // not loop unattended forever. (Said once; the count starts over with the user's next message.)
+        var continued = _autoContinuations.GetValueOrDefault(vm.Id);
+        if (continued >= MaxAutoContinuations)
         {
-            vm.Note("Background agents finished — reply to continue.");
+            if (continued == MaxAutoContinuations)
+            {
+                _autoContinuations[vm.Id] = continued + 1;
+                vm.Note("Background agents finished — reply to continue.");
+            }
             return;
         }
-        // Only when there's something the agent hasn't seen yet.
-        var unseen = pool.TakeUnreported();
-        if (unseen.Count == 0) return;
-        _autoContinuations[vm.Id] = _autoContinuations.GetValueOrDefault(vm.Id) + 1;
-        var modelText = "(Automatic — not from the user.) Your background agents finished:\n\n"
-                        + BackgroundAgents.Notice(unseen) + "\n\nContinue the task with their results.";
-        StartRun(vm, ct => RunTurnAsync(vm, "🤖 Background agents finished — continuing", [], goal: null, modelText: modelText, ct));
+        _autoContinuations[vm.Id] = continued + 1;
+        // (The engine hands the reports over itself, at the start of the run: taken there they are put back if the run ends before
+        // the model has replied, whatever ended it — a failure, a Stop.)
+        const string modelText = "(Automatic — not from the user.) Your background agents finished. Their reports follow; continue the task with them.";
+        StartRun(vm, ct => RunTurnAsync(vm, "🤖 Background agents finished — continuing", [], goal: null, modelText: modelText, ct, recall: false));
     }
+
+    /// <summary>Whether a message's text is in the chat's model transcript (a turn that failed part-way may or may not have got it there).</summary>
+    private bool ReachedModel(string sessionId, string modelText) =>
+        _transcripts.GetValueOrDefault(sessionId) is { } transcript
+        && transcript.Any(m => m.Role == Dsh.Core.MessageRole.User && m.Content?.Contains(modelText, StringComparison.Ordinal) == true);
 
     public void StopBackgroundAgent(string sessionId, string id)
     {
-        if (_backgroundPools.TryGetValue(sessionId, out var pool)) pool.Stop(id);
+        if (_backgroundPools.TryGetValue(sessionId, out var pool) && pool.Stop(id)) HearFinishedAgentsSoon(sessionId);
     }
 
     public void StopBackgroundAgents(string sessionId)
     {
-        if (_backgroundPools.TryGetValue(sessionId, out var pool)) pool.StopAll();
+        if (_backgroundPools.TryGetValue(sessionId, out var pool))
+        {
+            pool.StopAll();
+            HearFinishedAgentsSoon(sessionId);
+        }
     }
+
+    /// <summary>Stopping an agent by hand ends the wait that kept the chat from hearing the others' reports: look again once the
+    /// stop has been announced (a Stopped event itself never wakes a chat).</summary>
+    private void HearFinishedAgentsSoon(string sessionId) =>
+        _dispatcher.BeginInvoke(() =>
+        {
+            if (Session(sessionId) is { } vm) ContinueAfterBackgroundAgents(vm);
+        });
 
     /// <summary>queue_task: the agent adds a background task to the queue.</summary>
     private string AgentQueueTask(string title, string details, bool front, bool start, string sessionId)

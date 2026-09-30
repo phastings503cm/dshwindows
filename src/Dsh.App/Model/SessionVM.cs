@@ -125,6 +125,16 @@ public sealed partial class SessionVM : ObservableObject
     [ObservableProperty] private RetryState? _retry;
     /// <summary>The last /goal of this chat, so a bare /goal picks it back up.</summary>
     [ObservableProperty] private string? _lastGoal;
+    /// <summary>The goal a /goal run paused on because the agent needed the user. The user's next ordinary
+    /// message is the answer, and the goal carries on with it — no second /goal needed.</summary>
+    [ObservableProperty] private string? _blockedGoal;
+    /// <summary>The plan the agent proposed with exit_plan_mode (Plan-only chats), shown in the plan panel.</summary>
+    [ObservableProperty] private string? _proposedPlan;
+    /// <summary>Steps read from a plan the agent wrote in a message ("Here's my plan: 1. … 2. …"), for when
+    /// it planned in prose instead of with todo_write. Newest plan wins.</summary>
+    [ObservableProperty] private IReadOnlyList<string> _outline = [];
+    /// <summary>Every subagent this chat has started, waiting or working or finished (the plan panel's Agents section).</summary>
+    public ObservableCollection<AgentRunInfo> Agents { get; } = [];
     /// <summary>Background subagents this chat launched (the bar above the composer).</summary>
     public ObservableCollection<BackgroundAgentJob> BackgroundJobs { get; } = [];
     public IReadOnlyList<BackgroundAgentJob> RunningBackgroundJobs =>
@@ -227,6 +237,28 @@ public sealed partial class SessionVM : ObservableObject
         OnPropertyChanged(nameof(RunningBackgroundJobs));
     }
 
+    /// <summary>Add or refresh a subagent run's row.</summary>
+    public void UpsertAgent(AgentRunInfo run)
+    {
+        for (var i = 0; i < Agents.Count; i++)
+        {
+            if (Agents[i].Id != run.Id) continue;
+            Agents[i] = run;
+            return;
+        }
+        Agents.Add(run);
+        // Reports are kept in full: a long-lived chat that fans out a lot must not carry them all for ever.
+        while (Agents.Count > MaxAgentRows && Agents.FirstOrDefault(a => !a.IsRunning) is { } oldest) Agents.Remove(oldest);
+    }
+
+    private const int MaxAgentRows = 40;
+
+    /// <summary>Forget the subagent runs that are over.</summary>
+    public void ClearFinishedAgents()
+    {
+        foreach (var done in Agents.Where(a => !a.IsRunning).ToList()) Agents.Remove(done);
+    }
+
     /// <summary>Close the streaming bubble so the next text starts a fresh one (a tool call in
     /// between is what makes this matter). An empty bubble left by a tool-only turn is dropped.</summary>
     public void EndStreaming()
@@ -285,6 +317,8 @@ public sealed partial class SessionVM : ObservableObject
     public void SetTodos(IReadOnlyList<TodoItem> items)
     {
         Todos = items;
+        // A live todo list supersedes a plan read out of a message.
+        if (items.Count > 0 && Outline.Count > 0) Outline = [];
         // Keep one todo card, at the point the list last changed.
         foreach (var old in Entries.OfType<TodosEntryVM>().ToList()) Entries.Remove(old);
         if (items.Count == 0) return;

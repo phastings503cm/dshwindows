@@ -58,7 +58,8 @@ public sealed class QueueRunnerTests : IDisposable
         var host = new AgentHost(config, new ConversationLog(Path.Combine(_dir, "log")), Dispatcher.CurrentDispatcher,
             queueFile: Path.Combine(_dir, "task-queue.json"),
             skillLocations: new SkillLocations(_dir, Path.Combine(_dir, "support")),
-            vault: new CredentialVault(Path.Combine(_dir, "vault"), new MemoryBlobStore()))
+            vault: new CredentialVault(Path.Combine(_dir, "vault"), new MemoryBlobStore()),
+            memory: new MemoryStore(Path.Combine(_dir, "memory")))
         {
             HttpHandlerForTesting = _server,
             RetryPolicy = new RetryPolicy { Delay = _ => TimeSpan.FromMilliseconds(50) },

@@ -2,9 +2,21 @@ using System.Globalization;
 
 namespace Dsh.Core;
 
-/// <summary>A project instruction file the agent loads on every turn.</summary>
+/// <summary>Where an instruction file comes from, which decides how the prompt introduces it.</summary>
+public enum InstructionScope
+{
+    /// <summary>A file in the project folder (AGENTS.md, CLAUDE.md, MEMORY.md, …).</summary>
+    Project,
+    /// <summary>One of your own instruction files in DSH's data folder: it applies in every project.</summary>
+    User,
+    /// <summary>The index of notes saved for this project outside its folder (imported from Claude Code).</summary>
+    Notes,
+}
+
+/// <summary>An instruction file the agent loads on every turn.</summary>
 public sealed record InstructionFile(string Path, string Text, string Label)
 {
+    public InstructionScope Scope { get; init; } = InstructionScope.Project;
     public string Id => Path;
     public int LineCount => Text.Length == 0 ? 0 : Text.Split('\n').Length;
 }
@@ -28,7 +40,10 @@ public sealed record ProjectContext(string Root, IReadOnlyList<InstructionFile> 
     /// <summary>Read the project's instruction files and skill catalog from disk.</summary>
     public static ProjectContext Load(string root, SkillLocations? locations = null, SkillSources sources = SkillSources.All)
     {
+        locations ??= SkillLocations.Standard;
         var instructions = new List<InstructionFile>();
+        // Your own instructions come first; the project's files are more specific, so they follow.
+        instructions.AddRange(UserInstructionFiles(locations));
         var seen = new HashSet<string>(OperatingSystem.IsWindows() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal);
         foreach (var name in InstructionNames)
         {
@@ -40,9 +55,46 @@ public sealed record ProjectContext(string Root, IReadOnlyList<InstructionFile> 
         var today = DayStamp();
         var daily = Join(root, $"memory/{today}.md");
         if (ReadNonEmpty(daily) is { } log) instructions.Add(new InstructionFile(daily, log, $"memory/{today}.md"));
+        // Notes imported for this project (kept outside the folder).
+        if (ImportedNotes(root, locations) is { } notes) instructions.Add(notes);
 
         var skills = SkillCatalog.Load(root, locations, sources);
         return new ProjectContext(root, instructions, skills);
+    }
+
+    /// <summary>How much of an imported notes index goes into the prompt (Claude Code cuts its own at
+    /// the same length). The file is never cut, only what the model is shown.</summary>
+    public const int NotesIndexLines = 200;
+
+    /// <summary>Your own instruction files: every .md in the instructions folder, by name.</summary>
+    public static IReadOnlyList<InstructionFile> UserInstructionFiles(SkillLocations locations)
+    {
+        var output = new List<InstructionFile>();
+        if (!Directory.Exists(locations.UserInstructions)) return output;
+        foreach (var entry in FileWalk.Entries(locations.UserInstructions)
+                     .Where(e => !e.IsDirectory && e.Name.EndsWith(".md", StringComparison.OrdinalIgnoreCase))
+                     .OrderBy(e => e.Name, StringComparer.OrdinalIgnoreCase).ThenBy(e => e.Name, StringComparer.Ordinal))
+        {
+            if (ReadNonEmpty(entry.FullPath) is { } text)
+                output.Add(new InstructionFile(entry.FullPath, text, entry.Name) { Scope = InstructionScope.User });
+        }
+        return output;
+    }
+
+    /// <summary>What applies in a chat with no project folder: your own instruction files, nothing else.</summary>
+    public static ProjectContext UserOnly(SkillLocations locations) => new("", UserInstructionFiles(locations), []);
+
+    /// <summary>Where notes imported for <paramref name="root"/> are kept.</summary>
+    public static string ProjectNotesFolder(string root, SkillLocations locations) =>
+        Path.Combine(locations.ProjectNotes, ClaudeProjectNames.Encode(root));
+
+    /// <summary>The MEMORY.md index of the notes imported for <paramref name="root"/>, if there is one.</summary>
+    public static InstructionFile? ImportedNotes(string root, SkillLocations locations)
+    {
+        var index = Path.Combine(ProjectNotesFolder(root, locations), "MEMORY.md");
+        return ReadNonEmpty(index) is { } text
+            ? new InstructionFile(index, text, "MEMORY.md (saved notes)") { Scope = InstructionScope.Notes }
+            : null;
     }
 
     private static string? ReadNonEmpty(string path)
@@ -78,8 +130,7 @@ public sealed record ProjectContext(string Root, IReadOnlyList<InstructionFile> 
     public string PromptSupplement(string environment, bool includeSkills = true)
     {
         var parts = new List<string> { environment };
-        foreach (var file in Instructions)
-            parts.Add($"--- {file.Label} (project instructions — follow these) ---\n{file.Text.Trim()}");
+        foreach (var file in Instructions) parts.Add(Introduce(file));
 
         if (includeSkills && Skills.Count > 0)
         {
@@ -88,6 +139,26 @@ public sealed record ProjectContext(string Root, IReadOnlyList<InstructionFile> 
             parts.Add("--- Available skills ---\nWhen a task matches one of these, read its SKILL.md with `read_file` first and follow it.\n" + catalog);
         }
         return string.Join("\n\n", parts);
+    }
+
+    /// <summary>One instruction file as the prompt shows it, introduced by where it came from.</summary>
+    private static string Introduce(InstructionFile file)
+    {
+        var text = file.Text.Trim();
+        switch (file.Scope)
+        {
+            case InstructionScope.User:
+                return $"--- {file.Label} (your instructions, for every project — follow these) ---\n{text}";
+            case InstructionScope.Notes:
+                var lines = text.Replace("\r\n", "\n").Split('\n');
+                if (lines.Length > NotesIndexLines)
+                    text = string.Join("\n", lines.Take(NotesIndexLines)) + $"\n[… {lines.Length - NotesIndexLines} more lines; read {file.Path} for the rest]";
+                return $"--- Notes saved for this project ({file.Label}) ---\n" +
+                       $"Saved by another tool. Each entry points to a note file in {Path.GetDirectoryName(file.Path)}; read the ones that apply " +
+                       "with `read_file` before relying on them, and check anything about the code against the code as it is now.\n" + text;
+            default:
+                return $"--- {file.Label} (project instructions — follow these) ---\n{text}";
+        }
     }
 
     /// <summary>Machine facts the model would otherwise guess at.</summary>

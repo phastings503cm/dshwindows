@@ -110,6 +110,53 @@ public sealed class BackgroundAgentsTests : IDisposable
         Assert.Equal("kaput", failed?.Report);
     }
 
+    [Fact]
+    public async Task ReportsThatNeverReachedTheModelCanBeAnnouncedAgain()
+    {
+        var pool = new BackgroundAgents();
+        var (done, _) = pool.Launch("done", _ => Task.FromResult((true, "report")));
+        var (stopped, _) = pool.Launch("stopped", async ct =>
+        {
+            await Task.Delay(5_000, ct);
+            return (true, "");
+        });
+        await pool.WaitAsync(done!.Id, TimeSpan.FromSeconds(5));
+        pool.Stop(stopped!.Id);
+        var taken = pool.TakeUnreported();
+        Assert.Equal([done.Id], taken.Select(j => j.Id));
+        Assert.False(pool.HasUnreported);
+
+        // The request that carried them failed: they come back — but a stopped job is never announced, and nothing twice.
+        pool.Requeue([.. taken, pool.Job(stopped.Id)!]);
+        pool.Requeue(taken);
+        Assert.True(pool.HasUnreported);
+        Assert.Equal([done.Id], pool.TakeUnreported().Select(j => j.Id));
+        Assert.False(pool.HasUnreported);
+    }
+
+    [Fact]
+    public async Task AListenerThatThrowsCannotLeaveAJobStuckOrHideItsFinish()
+    {
+        var pool = new BackgroundAgents(maxConcurrent: 1);
+        var heard = new List<string>();
+        pool.Changed += _ => throw new InvalidOperationException("listener bug");
+        pool.Changed += job =>
+        {
+            lock (heard) heard.Add($"{job.Id}:{job.StatusWord}");
+        };
+
+        var (job, _) = pool.Launch("first", _ => Task.FromResult((true, "report")));
+        var finished = await pool.WaitAsync(job!.Id, TimeSpan.FromSeconds(5));
+
+        Assert.Equal(BackgroundAgentStatus.Done, finished?.Status);
+        await Task.Delay(50);
+        lock (heard) Assert.Contains($"{job.Id}:done", heard);
+        // The one slot was given back: another can start.
+        var (second, error) = pool.Launch("second", _ => Task.FromResult((true, "again")));
+        Assert.NotNull(second);
+        Assert.Null(error);
+    }
+
     private Engine MakeEngine(ILlmClient client, BackgroundAgents pool) =>
         new(client, new ToolRegistry([new AgentTool(), new EchoTool(), .. ToolRegistry.BackgroundAgentTools()]), "main",
             new EngineConfig("m") { MaxIterations = 8 }, _root.Path,

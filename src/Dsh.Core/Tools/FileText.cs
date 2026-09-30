@@ -12,6 +12,19 @@ public readonly record struct TextFileFormat(bool HasBom, bool UsesCrlf)
 
 public static class FileText
 {
+    /// <summary>A fixed set of locks that paths are spread over (by hash), so the number of locks does not grow with the number of
+    /// files an agent touches in a long session. Two files that share one merely take turns.</summary>
+    private static readonly object[] Stripes = Enumerable.Range(0, 64).Select(_ => new object()).ToArray();
+
+    /// <summary>The object to <c>lock</c> while reading a file to change it and writing it back, so two agents editing one
+    /// file (subagents run side by side) can't both start from the same text and lose one of the edits. (Re-entrant: a
+    /// caller that holds it may call <see cref="Write"/>, which takes it again.)</summary>
+    public static object LockFor(string path)
+    {
+        var comparer = OperatingSystem.IsWindows() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal;
+        return Stripes[(uint)comparer.GetHashCode(Path.GetFullPath(path)) % (uint)Stripes.Length];
+    }
+
     /// <summary>Read a file as UTF-8 text. Null when it can't be read or isn't valid UTF-8 (binary).
     /// The returned text has any BOM removed and keeps its original line endings.</summary>
     public static (string Text, TextFileFormat Format)? Read(string path)
@@ -55,16 +68,22 @@ public static class FileText
         var encoding = format.HasBom ? new UTF8Encoding(encoderShouldEmitUTF8Identifier: true) : TextUtil.Utf8NoBom;
         var dir = Path.GetDirectoryName(path);
         if (!string.IsNullOrEmpty(dir)) Directory.CreateDirectory(dir);
+        // One temp name per path, reused by the next write if this one dies half-way (a file named at random would be left
+        // behind for good): writers of one path take turns under LockFor.
         var temp = path + ".dsh-tmp";
-        File.WriteAllText(temp, text, encoding);
-        try
+        lock (LockFor(path))
         {
-            File.Move(temp, path, overwrite: true);
-        }
-        catch
-        {
-            try { File.Delete(temp); } catch { /* best effort */ }
-            throw;
+            try
+            {
+                File.WriteAllText(temp, text, encoding);
+                File.Move(temp, path, overwrite: true);
+            }
+            catch
+            {
+                // (A disk that fills up part-way through the write leaves half a file under this name: nothing else will ever use it.)
+                try { File.Delete(temp); } catch { /* best effort */ }
+                throw;
+            }
         }
     }
 }

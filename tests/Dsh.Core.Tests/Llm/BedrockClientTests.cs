@@ -89,7 +89,8 @@ public sealed class BedrockClientTests
         Assert.Equal("Hello", result.Text);
         Assert.Empty(result.Done.Calls);
         Assert.Equal("stop", result.Done.Finish);
-        Assert.Equal(new LlmUsage(113, 5), result.Done.Usage);
+        // The whole prompt counts (10 + 100 cache-read + 3 cache-write), and the cache-read share is reported.
+        Assert.Equal(new LlmUsage(113, 5, 100), result.Done.Usage);
         Assert.Null(result.Done.ProviderState);
 
         var sent = Assert.Single(handler.Requests);

@@ -41,6 +41,9 @@ public sealed partial class AppModel : ObservableObject
     /// existing Bedrock route, starting from its sign-in and Region).</summary>
     public event Action<Views.Guide.BedrockPage, ProviderProfile?>? BedrockGuideRequested;
     public event Action? MemoryRequested;
+    public event Action? ExternalImportRequested;
+    public event Action? MemoriesRequested;
+    public event Action? OpenClawImportRequested;
     public event Action<string>? ImageRequested;
 
     public AppModel(AppConfig config, ConversationLog log, Dispatcher dispatcher)
@@ -52,6 +55,13 @@ public sealed partial class AppModel : ObservableObject
         _mode = config.LastMode == "code" ? WorkspaceMode.Code : WorkspaceMode.Chat;
 
         Host.IsServerSwitching = () => Spark.IsSwitching;
+        // Agents that reported while the Spark was busy switching models are heard as soon as it is done. (Every status poll
+        // raises IsSwitching, changed or not, so only the step from switching to not switching counts.)
+        var edge = new SwitchEdge();
+        Spark.PropertyChanged += (_, e) =>
+        {
+            if (e.PropertyName == nameof(SparkController.IsSwitching) && edge.Finished(Spark.IsSwitching)) Host.ResumeAfterServerSwitch();
+        };
         Host.OnSwapCommand = (arg, vm) => _ = Spark.HandleCommandAsync(arg, vm);
         // The agent's file writes drive the editor's live reload.
         Host.OnFilesChanged = changes => Code.ApplyExternalChanges(changes);
@@ -185,4 +195,10 @@ public sealed partial class AppModel : ObservableObject
     public void ShowBedrockGuide(Views.Guide.BedrockPage page = Views.Guide.BedrockPage.Welcome, ProviderProfile? route = null) =>
         BedrockGuideRequested?.Invoke(page, route);
     public void ShowMemory() => MemoryRequested?.Invoke();
+    /// <summary>Open "Bring in Claude Code &amp; Cursor".</summary>
+    public void ShowExternalImport() => ExternalImportRequested?.Invoke();
+    /// <summary>Open the remembered-notes manager.</summary>
+    public void ShowMemories() => MemoriesRequested?.Invoke();
+    /// <summary>Open "Bring in from OpenClaw".</summary>
+    public void ShowOpenClawImport() => OpenClawImportRequested?.Invoke();
 }

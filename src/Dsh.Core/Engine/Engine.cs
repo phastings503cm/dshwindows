@@ -12,8 +12,11 @@ public abstract record EngineEvent
     public sealed record ReasoningDelta(string Text) : EngineEvent;
     /// <summary>The assistant's message for this turn is complete (text + any tool calls).</summary>
     public sealed record AssistantMessage(string Id, string Text, IReadOnlyList<ToolCall> Calls) : EngineEvent;
-    /// <summary>A tool call is about to execute.</summary>
+    /// <summary>A tool call is shown as started (it may still be refused or left unrun).</summary>
     public sealed record ToolStarted(string Id, string Name, string Preview) : EngineEvent;
+    /// <summary>A tool call has passed its permission and credential checks and is being executed now — a call that is
+    /// denied, refused or closed unrun never gets one.</summary>
+    public sealed record ToolRunning(string Id, string Name) : EngineEvent;
     /// <summary>A tool call finished. Summary is a one-line headline; Output is the full (already
     /// length-capped) result the UI reveals on demand.</summary>
     public sealed record ToolFinished(string Id, string Name, bool Ok, string Summary, string Output) : EngineEvent;
@@ -27,6 +30,8 @@ public abstract record EngineEvent
     public sealed record PermissionQuestion(string Id, string Name, string Detail) : EngineEvent;
     /// <summary>A tool pushed a todo list for the UI.</summary>
     public sealed record Todos(IReadOnlyList<TodoItem> Items) : EngineEvent;
+    /// <summary>A planning run proposed a plan (exit_plan_mode); the plan panel shows it.</summary>
+    public sealed record PlanProposed(string Text) : EngineEvent;
     /// <summary>The run failed (network error, provider error, ...).</summary>
     public sealed record Failed(string Message) : EngineEvent;
     /// <summary>A model call failed for a reason that can fix itself (timeout, server
@@ -53,7 +58,12 @@ public sealed record RunResult(
     /// <summary>The last non-empty assistant text of the run. Usually FinalText, but when the model
     /// wrote its conclusion alongside a last tool call and then ended with an empty message, this still
     /// carries the conclusion. Null = same as FinalText.</summary>
-    string? LastReply = null)
+    string? LastReply = null,
+    /// <summary>The verdict the model gave a /goal loop through goal_complete / goal_blocked (null = none).</summary>
+    GoalStatus? Goal = null,
+    /// <summary>True when the run ended because the model made the same call with the same result over
+    /// and over (see <see cref="StallTracker"/>) — the harness stops rather than spin.</summary>
+    bool Stalled = false)
 {
     public string LastReplyText => LastReply ?? FinalText;
 }
@@ -69,6 +79,7 @@ public sealed class RunProgress
     /// compaction) — tracked as a flag, not by length, because an in-run compaction shrinks the list
     /// below where it started.</summary>
     private bool _progressed;
+    private IReadOnlyList<BackgroundAgentJob> _reports = [];
 
     internal void Begin()
     {
@@ -76,6 +87,22 @@ public sealed class RunProgress
         {
             _latest = null;
             _progressed = false;
+            _reports = [];
+        }
+    }
+
+    internal void NoteReports(IReadOnlyList<BackgroundAgentJob> reports)
+    {
+        lock (_lock) _reports = reports;
+    }
+
+    /// <summary>The finished background agents whose reports this run took from the pool to hand the model. If the run ends
+    /// before the model has replied (see <see cref="Salvaged"/>), they did not reach it and belong back in the pool.</summary>
+    public IReadOnlyList<BackgroundAgentJob> TakenReports
+    {
+        get
+        {
+            lock (_lock) return _reports;
         }
     }
 
@@ -129,6 +156,24 @@ public sealed record EngineConfig(string Model)
     /// <summary>How model calls that fail transiently (timeouts, server down, overloaded) are retried.
     /// Standard: indefinitely, with backoff, until cancelled.</summary>
     public RetryPolicy Retry { get; init; } = RetryPolicy.Standard;
+    /// <summary>When true, reaching <see cref="MaxIterations"/> is a checkpoint, not the end: the step
+    /// counter (and the per-segment compaction allowance) starts over and the model keeps working until it
+    /// replies without tool calls, the user stops it, or it stalls. Chat turns and /goal rounds use this so
+    /// nobody has to type "continue"; a subagent keeps its hard budget.</summary>
+    public bool ContinueAfterLimit { get; init; }
+    /// <summary>With <see cref="ContinueAfterLimit"/>: how many checkpoints one run may pass before it stops anyway
+    /// (0 = no limit). The backstop for a model that explores for ever with ever-varying calls, which no
+    /// repeat detector can catch — an unattended run must not be able to spend without end.</summary>
+    public int MaxCheckpoints { get; init; }
+    /// <summary>At the step limit (when not continuing), ask the model for a final report with no further
+    /// work, so a subagent that ran out of steps still hands back what it found.</summary>
+    public bool WrapUpAtLimit { get; init; }
+    /// <summary>Identical (call, result) repeats before the model is told it is going in circles (0 = never).</summary>
+    public int StallNudgeAt { get; init; } = 4;
+    /// <summary>Identical repeats before the run ends (0 = never).</summary>
+    public int StallStopAt { get; init; } = 8;
+    /// <summary>Replies in a row cut off by the output-token limit that are continued automatically.</summary>
+    public int MaxTruncationContinuations { get; init; } = 6;
 }
 
 /// <summary>Called before each retry of a failed model call: the host re-resolves the route (the
@@ -172,6 +217,14 @@ public sealed class Engine
     /// from every tool result), and this chat's "ask first" approvals.</summary>
     public CredentialVault? Vault { get; init; }
     public VaultGrants VaultGrants { get; init; } = new();
+    /// <summary>The model servers subagents run on (see <see cref="AgentFleet"/>); null = this engine's client.</summary>
+    public AgentFleet? Fleet { get; init; }
+    /// <summary>Where this chat's subagent runs are recorded for the UI.</summary>
+    public AgentRoster? Roster { get; init; }
+    /// <summary>The kinds of subagent this chat offers.</summary>
+    public AgentCatalog? AgentTypes { get; init; }
+    /// <summary>Answers repeated read-only calls without redoing (or re-sending) the work; null = no caching.</summary>
+    public ToolCache? Cache { get; init; }
 
     public Engine(ILlmClient client, ToolRegistry registry, string systemPrompt, EngineConfig config,
                   string workspace, PermissionPolicy policy, PermissionGate permissionGate)
@@ -192,6 +245,52 @@ public sealed class Engine
 
     // MARK: - Run
 
+    /// <summary>Tools with no permission prompt and no vault substitution that may run side by side when
+    /// the model asks for several in one turn (read-only lookups and subagents).</summary>
+    private static readonly IReadOnlySet<string> ParallelTools = new HashSet<string>(StringComparer.Ordinal)
+    {
+        "read_file", "read_many_files", "glob", "grep", "list_directory", "agent", "memory_search", "vault_search",
+        "todo_write", "use_skill",
+    };
+
+    private const string TruncationNotice =
+        "[Automatic message: your last reply was cut off by the output-token limit. Continue exactly where you stopped — do not repeat what you already wrote.]";
+
+    private const string CutOffNotice =
+        "Not run: your reply was cut off by the output-token limit in the middle of this call, so its arguments were incomplete. " +
+        "Send it again in smaller pieces (for example, write a large file in several parts).";
+
+    private const string SiblingCutOffNotice =
+        "Not run: another call in the same reply was cut off by the output-token limit, so none of this batch was run. " +
+        "Send this call again (and the cut-off one in smaller pieces).";
+
+    private const string GoalNotAlone =
+        "Not recorded: goal_complete counts only when it is the only call in its turn, after you have seen the results of your other calls. " +
+        "Check those results, then call goal_complete again on its own.";
+
+    private const string RunEndedNotice = "Not run: the run was stopped before this call.";
+
+    private const string WrapUpNotice =
+        "[Automatic message: you have used your whole step budget. Reply now with your final report — what you did, what you found or changed, and what is still unfinished. Do not call any tools.]";
+
+    /// <summary>A reply the server ended because it hit the output-token limit (OpenAI "length", Bedrock "max_tokens").</summary>
+    private static bool IsTruncated(string? finish) => finish is "length" or "max_tokens" or "max_output_tokens";
+
+    /// <summary>Whether a call's arguments are a JSON object (an empty string counts: some models send nothing for a
+    /// tool that takes nothing). Cut-off or malformed JSON is not.</summary>
+    internal static bool ValidArguments(string arguments)
+    {
+        if (string.IsNullOrWhiteSpace(arguments)) return true;
+        try
+        {
+            return System.Text.Json.Nodes.JsonNode.Parse(arguments) is System.Text.Json.Nodes.JsonObject;
+        }
+        catch (Exception ex) when (ex is System.Text.Json.JsonException or ArgumentException or InvalidOperationException)
+        {
+            return false;
+        }
+    }
+
     /// <summary>Drive one user turn to completion, executing tool calls along the way.
     /// <paramref name="progress"/>, when given, tracks the transcript as it grows so a caller whose run
     /// throws can keep the work already done (see <see cref="RunProgress.Salvaged"/>).</summary>
@@ -204,10 +303,15 @@ public sealed class Engine
         sink ??= static _ => { };
         var messages = input.ToList();
         progress?.Begin();
+        // A new turn: the user, a background agent or another program may have changed files since the last one, so
+        // nothing searched before it is trusted. (And "read-only" for a subagent type is judged from this chat's own definitions.)
+        Cache?.NoteExternalChange();
+        if (Cache is not null && AgentTypes is not null) Cache.AgentIsReadOnly = type => AgentTypes.Find(type)?.IsReadOnly == true;
         if (userText.Length > 0 || userAttachments is { Count: > 0 })
             messages.Add(LlmMessage.User(userText, userAttachments));
         // Background agents that finished since the last turn report in.
-        AppendBackgroundResults(messages, BackgroundAgents);
+        var reports = TakeBackgroundResults(messages, BackgroundAgents);
+        progress?.NoteReports(reports);
         progress?.Update(messages, progressed: false);
         LlmUsage? usage = null;
         var denied = 0;
@@ -219,9 +323,141 @@ public sealed class Engine
         // whatever it serves now.
         var client = Client;
         var model = Config.Model;
+        var step = 0;          // model calls so far (message ids)
+        var segmentSteps = 0;  // model calls since the last checkpoint
+        var truncations = 0;   // replies in a row cut off by the output-token limit
+        var stall = new StallTracker(Config.StallNudgeAt, Config.StallStopAt, Config.Shell.Kind);
+        GoalStatus? goal = null;
+        var stalled = false;
+        var checkpoints = 0;       // step-limit checkpoints passed
+        var compactFailures = 0;   // summaries that failed in this segment (each costs a model call)
+        var batchSize = 0;         // tool calls in the model turn being recorded
+        var lastRead = new Dictionary<string, string>(StringComparer.Ordinal); // read_file arguments → result key of the last full read
+        var toolImages = new List<(string Tool, IReadOnlyList<MessageAttachment> Images)>();
 
-        for (var iteration = 0; iteration < Config.MaxIterations; iteration++)
+        ToolContext MakeContext() => new()
         {
+            Workspace = Workspace,
+            Policy = Policy,
+            Client = client,
+            Registry = Registry,
+            Depth = Config.Depth,
+            Model = model,
+            ContextWindow = Config.ContextWindow,
+            Thinking = Config.Thinking,
+            Shell = Config.Shell,
+            RequestPermission = PermissionGate,
+            BackgroundAgents = BackgroundAgents,
+            Vault = Vault,
+            VaultGrants = VaultGrants,
+            Fleet = Fleet,
+            Roster = Roster,
+            AgentTypes = AgentTypes,
+            Retry = Config.Retry,
+            VisionEnabled = Config.VisionEnabled,
+            Temperature = Config.Temperature,
+            MaxOutputTokens = Config.MaxOutputTokens,
+        };
+
+        // Run one call's executor (after permission and vault checks) with the timeout that fits it.
+        async Task<ToolResult> RunToolAsync(ToolCall call, string arguments)
+        {
+            var executor = Registry.Tool(call.Name);
+            if (executor is null) return new ToolResult($"Error: unknown tool '{call.Name}'.");
+            // The cache keys on what the model wrote (before any vault value went in).
+            string ResolvePath(string raw) => Policy.Resolve(raw).Path;
+            if (Cache?.TryGet(call.Name, call.Arguments, Workspace, ResolvePath, messages.Count) is { } cached) return cached;
+            // A (foreground) subagent is a whole task, not a quick tool call.
+            var timeout = call.Name is AgentTool.ToolName or DelegateTool.ToolName && Config.ToolTimeout < SubagentTimeout ? SubagentTimeout : Config.ToolTimeout;
+            var fresh = await ExecuteWithTimeoutAsync(executor, arguments, MakeContext(), timeout, cancellationToken).ConfigureAwait(false);
+            Cache?.Observe(call.Name, call.Arguments, Workspace, ResolvePath, fresh, messages.Count);
+            return fresh;
+        }
+
+        // Calls that change things without a list of files: a worker subagent edits the project, a process is a build or a
+        // server. What a check said before them is not what it will say after.
+        bool MayChangeThings(ToolCall call) => call.Name switch
+        {
+            AgentTool.ToolName => !(AgentTypes ?? AgentCatalog.Default).ReadOnlyType(JsonArgs.String(call.Arguments, "agent_type")),
+            DelegateTool.ToolName or "process_start" or "process_write" => true,
+            _ => false,
+        };
+
+        // The same call giving the same answer again is not progress: warn the model, then end the run.
+        string Observe(ToolCall call, string output, bool changedFiles = false)
+        {
+            var key = StallTracker.ResultKey(call.Name, output);
+            if (call.Name == ReadFileTool.ToolName)
+            {
+                // A cached "unchanged" note stands for the text it points back to, so a model re-reading one file
+                // over and over still looks like what it is: the same call with the same result.
+                var arguments = StallTracker.Normalize(call.Arguments);
+                if (ToolCache.IsUnchangedNote(output) && lastRead.TryGetValue(arguments, out var known)) key = known;
+                else lastRead[arguments] = key;
+            }
+            switch (stall.Observe(call.Name, call.Arguments, key, StallTracker.Failed(call.Name, output), changedFiles,
+                        StallTracker.BareFailure(call.Name, output)))
+            {
+                case StallLevel.Nudge:
+                    return output + StallTracker.NudgeText(call.Name, stall.Repeats, stall.Kind, stall.Span);
+                case StallLevel.Stop:
+                    stalled = true;
+                    lastReplyText = StallTracker.StopText(call.Name, stall.Repeats, stall.Kind, stall.Span);
+                    break;
+            }
+            return output;
+        }
+
+        // Everything that happens once a call has a result: todos, redaction, images, file changes, the
+        // transcript entry, the goal verdict, and the repeat check.
+        void Record(ToolCall call, ToolResult result)
+        {
+            if (result.Todos is not null) OnTodos(result.Todos);
+            // No vault value ever reaches the model, the timeline or the logs.
+            var secrets = Vault?.ValuesForRedaction() ?? [];
+            var resultOutput = secrets.Count == 0 ? result.Output : VaultPlaceholders.Redact(result.Output, secrets);
+            if (result.Images.Count > 0)
+            {
+                if (Config.VisionEnabled)
+                {
+                    toolImages.Add((call.Name, result.Images));
+                    sink(new EngineEvent.ToolImages(call.Id, result.Images));
+                }
+                else
+                {
+                    resultOutput += $"\n({result.Images.Count} image(s) not shown: the selected model can't take images. Use text tools — ui_tree, process_read, logs — instead.)";
+                }
+            }
+            if (result.Files.Count > 0) sink(new EngineEvent.FilesChanged(result.Files));
+            if (result.Plan is { Length: > 0 } plan) sink(new EngineEvent.PlanProposed(plan));
+            if (result.Goal is { } verdict)
+            {
+                // "Done" counts only once the model has seen the results of everything else it asked for this turn.
+                if (verdict is GoalStatus.Complete && batchSize > 1) resultOutput = GoalNotAlone;
+                else goal = verdict;
+            }
+            resultOutput = Observe(call, resultOutput, result.Files.Count > 0 || MayChangeThings(call));
+            var truncated = resultOutput.Length > 40_000
+                ? TextUtil.Suffix(resultOutput, 40_000) + "\n[result truncated]"
+                : resultOutput;
+            messages.Add(LlmMessage.ToolOutput(call.Id, call.Name, truncated));
+            progress?.Update(messages);
+            sink(new EngineEvent.ToolFinished(call.Id, call.Name,
+                !resultOutput.StartsWith("Error:", StringComparison.Ordinal), Summary(resultOutput), truncated));
+        }
+
+        while (true)
+        {
+            if (segmentSteps >= Config.MaxIterations)
+            {
+                if (!Config.ContinueAfterLimit) break;
+                if (Config.MaxCheckpoints > 0 && ++checkpoints >= Config.MaxCheckpoints) break;
+                // A checkpoint, not a stop: keep working with a fresh step and compaction allowance.
+                segmentSteps = 0;
+                compacted = 0;
+                compactFailures = 0;
+            }
+            segmentSteps++;
             cancellationToken.ThrowIfCancellationRequested();
 
             // -- Model turn (retried while the server is unavailable) --
@@ -229,6 +465,7 @@ public sealed class Engine
             IReadOnlyList<ToolCall> calls = [];
             LlmUsage? turnUsage = null;
             string? providerState = null;
+            string? finish = null;
             var failures = 0;
             // HTTP 500s get a bounded number of tries of their own — counted apart from outage
             // retries, so a 500 after a long outage still gets its full allowance.
@@ -240,15 +477,23 @@ public sealed class Engine
                 // Auto-compaction: keep the request inside the context window. Re-checked on every
                 // attempt — a retry after an outage may still need it, and a failed summarizer gets
                 // another chance.
-                if (Config.ContextWindow is > 0 and var window && Compactor is not null && compacted < Config.MaxCompactions)
+                if (Config.ContextWindow is > 0 and var window && Compactor is not null && compacted < Config.MaxCompactions && compactFailures < 2)
                 {
                     var used = TokenEstimate.Request(SystemPrompt, messages);
-                    if (used >= (int)(window * Compaction.TriggerFraction)
-                        && await TryCompactAsync(messages, used, cancellationToken).ConfigureAwait(false) is { } shrunk)
+                    if (used >= (int)(window * Compaction.TriggerFraction))
                     {
-                        messages = shrunk;
-                        compacted++;
-                        progress?.Update(messages);
+                        if (await TryCompactAsync(messages, used, cancellationToken).ConfigureAwait(false) is { } shrunk)
+                        {
+                            messages = shrunk;
+                            compacted++;
+                            Cache?.NoteCompaction();
+                            progress?.Update(messages);
+                        }
+                        else
+                        {
+                            // A summariser that keeps failing must not cost a wasted call on every step of a long run.
+                            compactFailures++;
+                        }
                     }
                 }
                 cancellationToken.ThrowIfCancellationRequested();
@@ -261,6 +506,7 @@ public sealed class Engine
                 calls = [];
                 turnUsage = null;
                 providerState = null;
+                finish = null;
                 try
                 {
                     await foreach (var ev in client.StreamAsync(request, cancellationToken).ConfigureAwait(false))
@@ -279,6 +525,7 @@ public sealed class Engine
                                 calls = d.Calls;
                                 turnUsage = d.Usage;
                                 providerState = d.ProviderState;
+                                finish = d.Finish;
                                 break;
                         }
                     }
@@ -303,6 +550,7 @@ public sealed class Engine
                         {
                             messages = shrunk;
                             compacted++;
+                            Cache?.NoteCompaction();
                             progress?.Update(messages);
                             continue;
                         }
@@ -311,6 +559,7 @@ public sealed class Engine
                     // it answers or the user stops.
                     failures++;
                     if (RequestRetry.Disposition(error) is RetryDisposition.Limited) limitedFailures++;
+                    if (Config.Retry.MaxFailures is { } cap && failures > cap) throw;
                     if (!Config.Retry.ShouldRetry(error, Math.Max(1, limitedFailures))) throw;
                     var delay = Config.Retry.Delay(failures);
                     if (delay < TimeSpan.Zero) delay = TimeSpan.Zero;
@@ -325,17 +574,12 @@ public sealed class Engine
                 }
             }
 
-            if (turnUsage is not null)
-            {
-                usage = usage is null
-                    ? turnUsage
-                    : new LlmUsage(usage.PromptTokens + turnUsage.PromptTokens, usage.CompletionTokens + turnUsage.CompletionTokens);
-                lastPromptTokens = turnUsage.PromptTokens;
-            }
+            usage = LlmUsage.Sum(usage, turnUsage);
+            if (turnUsage is not null) lastPromptTokens = turnUsage.PromptTokens;
             finalText = text.ToString();
             if (finalText.Trim().Length > 0) lastReplyText = finalText;
 
-            var assistantId = $"m{iteration}";
+            var assistantId = $"m{step++}";
             // The provider's opaque state (signed reasoning) rides on the message so the next request
             // can send it back.
             messages.Add(LlmMessage.Assistant(finalText, calls) with { ProviderState = providerState });
@@ -344,95 +588,110 @@ public sealed class Engine
 
             if (calls.Count == 0)
             {
+                // Cut off by the output-token limit rather than finished: pick up where the reply
+                // stopped instead of leaving the user to type "continue".
+                if (IsTruncated(finish) && truncations < Config.MaxTruncationContinuations)
+                {
+                    truncations++;
+                    messages.Add(new LlmMessage(MessageRole.User, TruncationNotice) { ImageSource = "output limit" });
+                    progress?.Update(messages);
+                    continue;
+                }
                 sink(new EngineEvent.Finished(usage));
                 return new RunResult(messages, usage, denied, finalText, lastPromptTokens, LastReply: lastReplyText);
             }
+            // The reply ran into the output-token limit in the middle of a tool call: its arguments are cut off. Running
+            // it would act on half a file, and sending broken JSON back would poison every later request, so each
+            // call is closed unrun and the model is asked to send it again in smaller pieces.
+            if (IsTruncated(finish) && calls.Any(c => !ValidArguments(c.Arguments)))
+            {
+                messages[^1] = messages[^1] with { ToolCalls = calls.Select(c => ValidArguments(c.Arguments) ? c : c with { Arguments = "{}" }).ToList() };
+                foreach (var call in calls)
+                {
+                    var notice = ValidArguments(call.Arguments) ? SiblingCutOffNotice : CutOffNotice;
+                    sink(new EngineEvent.ToolStarted(call.Id, call.Name, Preview(call)));
+                    messages.Add(LlmMessage.ToolOutput(call.Id, call.Name, notice));
+                    sink(new EngineEvent.ToolFinished(call.Id, call.Name, false, "Not run", notice));
+                }
+                progress?.Update(messages);
+                if (++truncations > Config.MaxTruncationContinuations)
+                {
+                    lastReplyText = $"Stopped: the model's reply was cut off by its output-token limit {truncations} times in a row while it was writing a tool call. " +
+                                    "Raise the output limit for this model in Settings, or ask for a smaller change.";
+                    sink(new EngineEvent.Finished(usage));
+                    return new RunResult(messages, usage, denied, finalText, lastPromptTokens, LastReply: lastReplyText, Stalled: true);
+                }
+                continue;
+            }
+            truncations = 0;
+            batchSize = calls.Count;
 
             // -- Tool turns --
-            var toolImages = new List<(string Tool, IReadOnlyList<MessageAttachment> Images)>();
-            foreach (var call in calls)
+            toolImages.Clear();
+            // (Calls with a vault placeholder go one at a time: the parallel path does no substitution.)
+            if (calls.Count > 1 && calls.All(c => ParallelTools.Contains(c.Name) && VaultPlaceholders.Names(c.Arguments).Count == 0))
             {
-                cancellationToken.ThrowIfCancellationRequested();
-                sink(new EngineEvent.ToolStarted(call.Id, call.Name, Preview(call)));
-
-                var (ok, reason) = await CheckPermissionAsync(call).ConfigureAwait(false);
-                // Stop resolves a pending question as "no": that is not the user declining, so don't
-                // record it as a refusal.
-                cancellationToken.ThrowIfCancellationRequested();
-                if (!ok)
+                // Independent lookups and subagents run side by side; results are recorded in call order.
+                foreach (var call in calls)
                 {
-                    denied++;
-                    var message = $"Permission denied: {reason}. Do not retry the same action; tell the user what you wanted to do and why, and stop.";
-                    messages.Add(LlmMessage.ToolOutput(call.Id, call.Name, message));
-                    progress?.Update(messages);
-                    sink(new EngineEvent.ToolFinished(call.Id, call.Name, false, "Denied by user", message));
-                    continue;
+                    sink(new EngineEvent.ToolStarted(call.Id, call.Name, Preview(call)));
+                    sink(new EngineEvent.ToolRunning(call.Id, call.Name));
                 }
-
-                // Credentials: {{vault:NAME}} becomes the real value only now, after the permission
-                // check saw the placeholder.
-                var arguments = call.Arguments;
-                switch (await ResolveVaultAsync(call).ConfigureAwait(false))
+                var running = calls.Select(call => RunToolAsync(call, call.Arguments)).ToArray();
+                var results = await Task.WhenAll(running).ConfigureAwait(false);
+                for (var i = 0; i < calls.Count; i++) Record(calls[i], results[i]);
+            }
+            else
+            {
+                foreach (var call in calls)
                 {
-                    case VaultResolution.Substituted substituted:
-                        arguments = substituted.Arguments;
-                        break;
-                    case VaultResolution.Refused refused:
-                        cancellationToken.ThrowIfCancellationRequested();
-                        messages.Add(LlmMessage.ToolOutput(call.Id, call.Name, refused.Message));
+                    cancellationToken.ThrowIfCancellationRequested();
+                    // The run has already ended (repeating itself, or waiting for the user): close the rest unrun.
+                    if (stalled || goal is not null)
+                    {
+                        messages.Add(LlmMessage.ToolOutput(call.Id, call.Name, RunEndedNotice));
                         progress?.Update(messages);
-                        sink(new EngineEvent.ToolFinished(call.Id, call.Name, false, Summary(refused.Message), refused.Message));
+                        sink(new EngineEvent.ToolStarted(call.Id, call.Name, Preview(call)));
+                        sink(new EngineEvent.ToolFinished(call.Id, call.Name, false, "Not run", RunEndedNotice));
                         continue;
-                }
-                cancellationToken.ThrowIfCancellationRequested();
-
-                var context = new ToolContext
-                {
-                    Workspace = Workspace,
-                    Policy = Policy,
-                    Client = client,
-                    Registry = Registry,
-                    Depth = Config.Depth,
-                    Model = model,
-                    ContextWindow = Config.ContextWindow,
-                    Thinking = Config.Thinking,
-                    Shell = Config.Shell,
-                    RequestPermission = PermissionGate,
-                    BackgroundAgents = BackgroundAgents,
-                    Vault = Vault,
-                    VaultGrants = VaultGrants,
-                };
-                var executor = Registry.Tool(call.Name);
-                // A (foreground) subagent is a whole task, not a quick tool call.
-                var timeout = call.Name == AgentTool.ToolName && Config.ToolTimeout < SubagentTimeout ? SubagentTimeout : Config.ToolTimeout;
-                var result = executor is not null
-                    ? await ExecuteWithTimeoutAsync(executor, arguments, context, timeout, cancellationToken).ConfigureAwait(false)
-                    : new ToolResult($"Error: unknown tool '{call.Name}'.");
-
-                if (result.Todos is not null) OnTodos(result.Todos);
-                // No vault value ever reaches the model, the timeline or the logs.
-                var secrets = Vault?.ValuesForRedaction() ?? [];
-                var resultOutput = secrets.Count == 0 ? result.Output : VaultPlaceholders.Redact(result.Output, secrets);
-                if (result.Images.Count > 0)
-                {
-                    if (Config.VisionEnabled)
-                    {
-                        toolImages.Add((call.Name, result.Images));
-                        sink(new EngineEvent.ToolImages(call.Id, result.Images));
                     }
-                    else
+                    sink(new EngineEvent.ToolStarted(call.Id, call.Name, Preview(call)));
+
+                    var (ok, reason) = await CheckPermissionAsync(call).ConfigureAwait(false);
+                    // Stop resolves a pending question as "no": that is not the user declining, so don't
+                    // record it as a refusal.
+                    cancellationToken.ThrowIfCancellationRequested();
+                    if (!ok)
                     {
-                        resultOutput += $"\n({result.Images.Count} image(s) not shown: the selected model can't take images. Use text tools — ui_tree, process_read, logs — instead.)";
+                        denied++;
+                        var message = Observe(call, $"Permission denied: {reason}. Do not retry the same action; tell the user what you wanted to do and why, and stop.");
+                        messages.Add(LlmMessage.ToolOutput(call.Id, call.Name, message));
+                        progress?.Update(messages);
+                        sink(new EngineEvent.ToolFinished(call.Id, call.Name, false, "Denied by user", message));
+                        continue;
                     }
+
+                    // Credentials: {{vault:NAME}} becomes the real value only now, after the permission
+                    // check saw the placeholder.
+                    var arguments = call.Arguments;
+                    switch (await ResolveVaultAsync(call).ConfigureAwait(false))
+                    {
+                        case VaultResolution.Substituted substituted:
+                            arguments = substituted.Arguments;
+                            break;
+                        case VaultResolution.Refused refused:
+                            cancellationToken.ThrowIfCancellationRequested();
+                            var refusal = Observe(call, refused.Message);
+                            messages.Add(LlmMessage.ToolOutput(call.Id, call.Name, refusal));
+                            progress?.Update(messages);
+                            sink(new EngineEvent.ToolFinished(call.Id, call.Name, false, Summary(refused.Message), refusal));
+                            continue;
+                    }
+                    cancellationToken.ThrowIfCancellationRequested();
+
+                    sink(new EngineEvent.ToolRunning(call.Id, call.Name));
+                    Record(call, await RunToolAsync(call, arguments).ConfigureAwait(false));
                 }
-                if (result.Files.Count > 0) sink(new EngineEvent.FilesChanged(result.Files));
-                var truncated = resultOutput.Length > 40_000
-                    ? TextUtil.Suffix(resultOutput, 40_000) + "\n[result truncated]"
-                    : resultOutput;
-                messages.Add(LlmMessage.ToolOutput(call.Id, call.Name, truncated));
-                progress?.Update(messages);
-                sink(new EngineEvent.ToolFinished(call.Id, call.Name,
-                    !resultOutput.StartsWith("Error:", StringComparison.Ordinal), Summary(resultOutput), truncated));
             }
 
             // Chat-completion tool messages are text-only, so what the tools captured goes back on one
@@ -450,13 +709,74 @@ public sealed class Engine
                 });
                 progress?.Update(messages);
             }
-            if (AppendBackgroundResults(messages, BackgroundAgents)) progress?.Update(messages);
+
+            // The model told the harness it is finished (or stuck), or kept repeating itself: the run ends
+            // here, with the transcript still a valid request (every call has its result).
+            if (goal is not null || stalled)
+            {
+                sink(new EngineEvent.Finished(usage));
+                return new RunResult(messages, usage, denied, finalText, lastPromptTokens, LastReply: lastReplyText,
+                                     Goal: goal, Stalled: stalled);
+            }
+            if (AppendBackgroundResults(messages, BackgroundAgents))
+            {
+                // A background agent may have been editing files while this run searched them.
+                Cache?.NoteExternalChange();
+                progress?.Update(messages);
+            }
         }
 
-        // Iteration budget exhausted: stop rather than loop forever.
+        // Iteration budget exhausted: stop rather than loop forever — but a subagent still owes its caller
+        // a report, so ask for one.
+        if (Config.WrapUpAtLimit && await WrapUpAsync(messages, client, model, sink, progress, cancellationToken).ConfigureAwait(false) is { } report)
+        {
+            finalText = report;
+            lastReplyText = report;
+        }
         sink(new EngineEvent.Finished(usage));
         return new RunResult(messages, usage, denied, finalText, lastPromptTokens, HitIterationLimit: true,
                              LastReply: lastReplyText);
+    }
+
+    /// <summary>One last model call with no more work asked of it: the report of a run that hit its step
+    /// budget. Null when the model has nothing to say or the call fails (the caller keeps what it has).</summary>
+    private async Task<string?> WrapUpAsync(List<LlmMessage> messages, ILlmClient client, string model,
+                                            Action<EngineEvent> sink, RunProgress? progress, CancellationToken cancellationToken)
+    {
+        // Close any call the budget cut off, then ask. The tools stay in the request so the transcript
+        // (which contains tool calls) remains a valid one for servers that insist on it.
+        var closed = ClosingDanglingToolCalls(messages);
+        if (!ReferenceEquals(closed, messages))
+        {
+            messages.Clear();
+            messages.AddRange(closed);
+        }
+        messages.Add(new LlmMessage(MessageRole.User, WrapUpNotice) { ImageSource = "step limit" });
+        var request = new LlmRequest(SystemPrompt, messages.ToList(), Registry.Specs, model,
+            Config.Temperature, Config.MaxOutputTokens, Config.Thinking);
+        var text = new StringBuilder();
+        try
+        {
+            await foreach (var ev in client.StreamAsync(request, cancellationToken).ConfigureAwait(false))
+            {
+                if (ev is LlmStreamEvent.Text t)
+                {
+                    text.Append(t.Delta);
+                    sink(new EngineEvent.TextDelta(t.Delta));
+                }
+            }
+        }
+        catch (Exception error) when (error is not OperationCanceledException)
+        {
+            return null;
+        }
+        cancellationToken.ThrowIfCancellationRequested();
+        var report = text.ToString();
+        if (report.Trim().Length == 0) return null;
+        messages.Add(LlmMessage.Assistant(report));
+        progress?.Update(messages);
+        sink(new EngineEvent.AssistantMessage("wrap-up", report, []));
+        return report;
     }
 
     /// <summary>How long a foreground subagent may work before its call times out.</summary>
@@ -509,11 +829,15 @@ public sealed class Engine
     /// <summary>Hand the model the reports of background agents that finished, as an automatic message
     /// (folded into a trailing user message so user turns never stack). Returns true when something
     /// was added.</summary>
-    public static bool AppendBackgroundResults(List<LlmMessage> messages, BackgroundAgents? pool)
+    public static bool AppendBackgroundResults(List<LlmMessage> messages, BackgroundAgents? pool) =>
+        TakeBackgroundResults(messages, pool).Count > 0;
+
+    /// <summary>The same, and says which agents' reports were handed over (none when nothing was added).</summary>
+    public static IReadOnlyList<BackgroundAgentJob> TakeBackgroundResults(List<LlmMessage> messages, BackgroundAgents? pool)
     {
-        if (pool is null) return false;
+        if (pool is null) return [];
         var finished = pool.TakeUnreported();
-        if (finished.Count == 0) return false;
+        if (finished.Count == 0) return [];
         var notice = BackgroundAgents.Notice(finished);
         if (messages.Count > 0 && messages[^1].Role == MessageRole.User)
         {
@@ -524,7 +848,7 @@ public sealed class Engine
             // Tagged like the tool-image message: an automatic user message with no display entry.
             messages.Add(new LlmMessage(MessageRole.User, notice) { ImageSource = "background agents" });
         }
-        return true;
+        return finished;
     }
 
     // MARK: - Vault
@@ -699,6 +1023,12 @@ public sealed class Engine
             case "web_fetch": return S("url") ?? call.Name;
             case "list_directory": return S("path") ?? call.Name;
             case "todo_write": return "update task list";
+            case "delegate": return args["tasks"] is System.Text.Json.Nodes.JsonArray tasks ? $"{tasks.Count} parallel task{(tasks.Count == 1 ? "" : "s")}" : "parallel tasks";
+            case "memory_save": return S("title") ?? "save a memory";
+            case "memory_search": return S("query") ?? call.Name;
+            case "memory_forget": return S("id") ?? call.Name;
+            case "goal_complete": return "goal complete";
+            case "goal_blocked": return S("reason") is { } why ? TextUtil.Prefix(why, 80) : "goal blocked";
             case "agent":
                 return S("description") ?? (S("prompt") is { } p ? TextUtil.Prefix(p, 80) : null) ?? "subagent";
             case "glob": return S("pattern") ?? call.Name;

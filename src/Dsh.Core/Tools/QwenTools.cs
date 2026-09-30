@@ -304,6 +304,6 @@ public sealed class ExitPlanModeTool : IToolExecutor
     public Task<ToolResult> ExecuteAsync(string arguments, ToolContext context, CancellationToken cancellationToken)
     {
         var plan = JsonArgs.String(arguments, "plan") ?? "(no plan summary)";
-        return Task.FromResult<ToolResult>($"Plan presented to the user: {plan}\nImplementation may begin once approved.");
+        return Task.FromResult(new ToolResult($"Plan presented to the user: {plan}\nImplementation may begin once approved.") { Plan = plan });
     }
 }

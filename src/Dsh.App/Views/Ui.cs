@@ -56,7 +56,8 @@ public static class Ui
     }
 
     /// <summary>A settings card: glyph, title and description on the left, the control on the right.</summary>
-    public static Border Row(string title, string? description, UIElement? control, string? glyph = null)
+    /// <param name="below">Something to put on a line of its own under the description (options that would not fit beside the buttons).</param>
+    public static Border Row(string title, string? description, UIElement? control, string? glyph = null, UIElement? below = null)
     {
         var dock = new DockPanel { LastChildFill = true };
         if (control is FrameworkElement element)
@@ -80,6 +81,11 @@ public static class Ui
             var detail = Secondary(description);
             detail.Margin = new Thickness(0, 2, 0, 0);
             labels.Children.Add(detail);
+        }
+        if (below is FrameworkElement extra)
+        {
+            extra.Margin = new Thickness(0, 6, 0, 0);
+            labels.Children.Add(extra);
         }
         dock.Children.Add(labels);
         return Card(dock);

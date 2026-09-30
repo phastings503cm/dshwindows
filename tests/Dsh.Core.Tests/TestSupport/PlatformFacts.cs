@@ -17,3 +17,12 @@ public sealed class UnixFactAttribute : FactAttribute
         if (OperatingSystem.IsWindows()) Skip = "Not supported on Windows.";
     }
 }
+
+/// <summary>A theory that only runs on Linux/macOS (it drives a POSIX shell).</summary>
+public sealed class UnixTheoryAttribute : TheoryAttribute
+{
+    public UnixTheoryAttribute()
+    {
+        if (OperatingSystem.IsWindows()) Skip = "Not supported on Windows.";
+    }
+}

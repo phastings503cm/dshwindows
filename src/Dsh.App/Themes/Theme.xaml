@@ -262,6 +262,29 @@
             </Setter.Value>
         </Setter>
     </Style>
+    <!-- The same hairline as a plain Thumb, for a pane whose neighbour isn't the column next to it (a GridSplitter would
+         resize the wrong pair): the window moves the column itself. -->
+    <Style x:Key="PaneThumb" TargetType="Thumb">
+        <Setter Property="Background" Value="Transparent" />
+        <Setter Property="Focusable" Value="False" />
+        <Setter Property="Width" Value="5" />
+        <Setter Property="Cursor" Value="SizeWE" />
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="Thumb">
+                    <Border Background="Transparent">
+                        <Rectangle x:Name="Line" Width="1" HorizontalAlignment="Center" Fill="{DynamicResource DividerStrokeColorDefaultBrush}" />
+                    </Border>
+                    <ControlTemplate.Triggers>
+                        <Trigger Property="IsMouseOver" Value="True">
+                            <Setter TargetName="Line" Property="Fill" Value="{DynamicResource AccentFillColorDefaultBrush}" />
+                            <Setter TargetName="Line" Property="Width" Value="2" />
+                        </Trigger>
+                    </ControlTemplate.Triggers>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
     <Style x:Key="PaneSplitterRow" TargetType="GridSplitter">
         <Setter Property="Background" Value="Transparent" />
         <Setter Property="Focusable" Value="False" />

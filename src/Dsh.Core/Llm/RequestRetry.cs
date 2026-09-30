@@ -32,6 +32,10 @@ public sealed record RetryPolicy
     public bool Enabled { get; init; } = true;
     /// <summary>How long to wait before retry attempt n (1-based).</summary>
     public Func<int, TimeSpan> Delay { get; init; } = RequestRetry.Backoff;
+    /// <summary>Give up (surface the error) after this many failures in a row, whatever their kind. Null =
+    /// keep retrying transient failures for as long as it takes. A subagent on a multi-server fleet sets
+    /// this so a dead server hands its task to another instead of being waited on for ever.</summary>
+    public int? MaxFailures { get; init; }
 
     /// <summary>Retry transient failures indefinitely with the standard backoff.</summary>
     public static RetryPolicy Standard { get; } = new();

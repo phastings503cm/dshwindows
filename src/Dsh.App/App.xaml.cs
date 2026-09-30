@@ -85,7 +85,9 @@ public partial class App : Application
         _instance?.Listen(forwarded => Dispatcher.BeginInvoke(() => HandleForwarded(forwarded)));
 
         if (Model.NeedsSetup)
-            Dispatcher.BeginInvoke(DispatcherPriority.ApplicationIdle, () => window.ShowWizard());
+            Dispatcher.BeginInvoke(DispatcherPriority.ApplicationIdle, () => window.ShowWizard()); // offers the import once it closes
+        else
+            _ = window.OfferExternalImportAsync();
         if (config.CheckForUpdates) _ = CheckForUpdatesAsync();
     }
 
