@@ -45,10 +45,13 @@ public sealed class TaskQueueTests
         Assert.Equal(["C", "A", "B"], Titles(q));
         Assert.Equal(1, q.Position(c.Id));
 
-        // Move B one up (before finished A) → B lands right after A's slot.
-        q.MoveBy(q.Tasks[2].Id, -1);
-        Assert.Equal(["C", "B", "A"], Titles(q));
-        Assert.Equal(2, q.Position(q.Tasks[1].Id));
+        // Move B one up: it passes C, the waiting task before it (finished A is no step at all), so it is
+        // next in line. Upstream only moved it past A, which changed nothing about the order of work.
+        var b = q.Tasks[2];
+        Assert.True(q.MoveBy(b.Id, -1));
+        Assert.Equal(["B", "C", "A"], Titles(q));
+        Assert.Equal(1, q.Position(b.Id));
+        Assert.False(q.MoveBy(b.Id, -1)); // already first
     }
 
     [Fact]
@@ -236,8 +239,8 @@ public sealed class TaskQueueTests
         using var dir = new TempDirectory("dsh-queue");
         var path = dir["task-queue.json"];
         var q = new TaskQueue(path, _clock);
-        var a = q.Add("A", details: "do a");
-        q.Add("B");
+        var a = q.Add("A", details: "do a", chatId: "s");
+        q.Add("B", chatId: "s");
         q.Start(a.Id);
         q.RecordRound(a.Id, round: 4, prompt: 50, completion: 60);
         q.Finish(a.Id, QueueTaskStatus.Complete, sessionId: "s");
@@ -520,5 +523,111 @@ public sealed class TaskQueueTests
         Assert.All(QueueTaskStatuses.All, s => Assert.Equal(s, QueueTaskStatuses.FromRaw(s.RawValue())));
         Assert.Null(QueueTaskStatuses.FromRaw("paused"));
         Assert.All(Enum.GetValues<QueueLogKind>(), k => Assert.Equal(k, QueueLogKinds.FromRaw(k.RawValue())));
+    }
+
+    // MARK: - One list per chat
+
+    [Fact]
+    public void EachChatHasItsOwnListOrderAndPositions()
+    {
+        var q = NewQueue();
+        var a1 = q.Add("A1", chatId: "a");
+        var b1 = q.Add("B1", chatId: "b");
+        var a2 = q.Add("A2", chatId: "a");
+        var b2 = q.Add("B2", chatId: "b");
+        var a0 = q.Add("A0", atFront: true, chatId: "a");
+
+        Assert.Equal(["A0", "A1", "A2"], q.TasksFor("a").Select(t => t.Title));
+        Assert.Equal(["B1", "B2"], q.TasksFor("b").Select(t => t.Title));
+        Assert.Empty(q.TasksFor("c"));
+        Assert.All(q.TasksFor("a"), t => Assert.Equal("a", t.SessionId));
+        // Positions count each chat's waiting tasks only.
+        Assert.Equal(1, q.Position(a0.Id));
+        Assert.Equal(3, q.Position(a2.Id));
+        Assert.Equal(1, q.Position(b1.Id));
+        Assert.Equal(2, q.Position(b2.Id));
+        Assert.Equal("Entered the queue at #2", b2.Log[^1].Text);
+        Assert.Equal(a0.Id, q.NextTaskFor("a")?.Id);
+        Assert.Equal(b1.Id, q.NextTaskFor("b")?.Id);
+        Assert.Null(q.NextTaskFor("c"));
+        Assert.Equal(3, q.QueuedCountFor("a"));
+        Assert.Equal(2, q.QueuedCountFor("b"));
+
+        q.Start(a0.Id);
+        q.Finish(a0.Id, QueueTaskStatus.Complete);
+        q.Start(b1.Id);
+        Assert.Equal(b1.Id, q.RunningTaskFor("b")?.Id);
+        Assert.Null(q.RunningTaskFor("a"));
+        Assert.Equal(a1.Id, q.NextTaskFor("a")?.Id);
+        var sa = q.Stats("a");
+        Assert.Equal((3, 1, 2, 0), (sa.Total, sa.Completed, sa.Queued, sa.Running));
+        var sb = q.Stats("b");
+        Assert.Equal((2, 1, 1), (sb.Total, sb.Running, sb.Queued));
+    }
+
+    [Fact]
+    public void MovesStayInsideTheChatsList()
+    {
+        var q = NewQueue();
+        var a1 = q.Add("A1", chatId: "a");
+        var b1 = q.Add("B1", chatId: "b");
+        var a2 = q.Add("A2", chatId: "a");
+        var b2 = q.Add("B2", chatId: "b");
+        var a3 = q.Add("A3", chatId: "a");
+
+        // Up and down step over the other chat's tasks.
+        Assert.True(q.MoveBy(a3.Id, -1));
+        Assert.Equal(["A1", "A3", "A2"], q.TasksFor("a").Select(t => t.Title));
+        Assert.Equal(["B1", "B2"], q.TasksFor("b").Select(t => t.Title));
+        Assert.True(q.MoveBy(a1.Id, 5));
+        Assert.Equal(["A3", "A2", "A1"], q.TasksFor("a").Select(t => t.Title));
+        Assert.Equal(3, q.Position(a1.Id));
+
+        // Dragging onto, or moving before, another chat's task does nothing.
+        Assert.False(q.MoveOnto(a1.Id, b1.Id));
+        Assert.False(q.MoveBefore(b2.Id, a2.Id));
+        Assert.True(q.MoveOnto(b2.Id, b1.Id));
+        Assert.Equal(["B2", "B1"], q.TasksFor("b").Select(t => t.Title));
+        // Before null = the end of its own list.
+        Assert.True(q.MoveBefore(a3.Id, null));
+        Assert.Equal(["A2", "A1", "A3"], q.TasksFor("a").Select(t => t.Title));
+    }
+
+    [Fact]
+    public void RequeueGoesToTheFrontOfItsOwnChat()
+    {
+        var q = NewQueue();
+        var b1 = q.Add("B1", chatId: "b");
+        var a1 = q.Add("A1", chatId: "a");
+        var a2 = q.Add("A2", chatId: "a");
+        q.Start(a2.Id);
+        q.Finish(a2.Id, QueueTaskStatus.Blocked, "needs you");
+        Assert.True(q.Find(a2.Id)!.HasStarted);
+        Assert.False(q.Find(a1.Id)!.HasStarted);
+
+        Assert.True(q.Requeue(a2.Id));
+        Assert.Equal(["A2", "A1"], q.TasksFor("a").Select(t => t.Title));
+        Assert.Equal(a2.Id, q.NextTaskFor("a")?.Id);
+        Assert.Equal(b1.Id, q.NextTaskFor("b")?.Id); // the other chat's first task is untouched
+        Assert.True(q.Find(a2.Id)!.HasStarted);
+    }
+
+    [Fact]
+    public void RemovingAChatRemovesItsList()
+    {
+        var q = NewQueue();
+        q.Add("A1", chatId: "a");
+        var a2 = q.Add("A2", chatId: "a");
+        var b1 = q.Add("B1", chatId: "b");
+        q.Start(a2.Id);
+        var changes = 0;
+        q.Changed += () => changes++;
+
+        Assert.Equal(2, q.RemoveChat("a"));
+        Assert.Empty(q.TasksFor("a"));
+        Assert.Equal([b1.Id], q.Tasks.Select(t => t.Id));
+        Assert.Equal(1, changes);
+        Assert.Equal(0, q.RemoveChat("a"));
+        Assert.Equal(1, changes); // nothing to remove, nothing changed
     }
 }

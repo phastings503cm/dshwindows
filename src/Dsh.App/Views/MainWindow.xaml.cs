@@ -251,15 +251,18 @@ public partial class MainWindow : Window
 
     private void UpdateQueueButton()
     {
-        var running = Model.Host.QueueRunning;
-        QueueGlyph.Text = running ? Icons.Play : Icons.Queue;
-        QueueDot.Visibility = running ? Visibility.Visible : Visibility.Collapsed;
-        QueueButton.ToolTip = running
-            ? "The task queue is running (Ctrl+Shift+Q to show it)"
-            : "Task queue (Ctrl+Shift+Q) — queue up work and let the harness run it unattended";
+        var running = Model.Host.QueueRunningCount;
+        QueueGlyph.Text = running > 0 ? Icons.Play : Icons.Queue;
+        QueueDot.Visibility = running > 0 ? Visibility.Visible : Visibility.Collapsed;
+        QueueButton.ToolTip = running switch
+        {
+            0 => "Task list (Ctrl+Shift+Q) — line up tasks for this chat and let it work them unattended",
+            1 => "A chat is working its task list (Ctrl+Shift+Q to show this chat's list)",
+            _ => $"{running} chats are working their task lists (Ctrl+Shift+Q to show this chat's list)",
+        };
     }
 
-    /// <summary>Show or hide the task queue panel on the right.</summary>
+    /// <summary>Show or hide the task list panel on the right.</summary>
     private void SetQueuePanel(bool open)
     {
         Model.Config.QueuePanelOpen = open;
@@ -323,7 +326,7 @@ public partial class MainWindow : Window
 
     private void ToggleQueuePanel() => SetQueuePanel(_queuePanel.Visibility != Visibility.Visible);
 
-    /// <summary>Show or hide the task queue panel (the self-test drives it).</summary>
+    /// <summary>Show or hide the task list panel (the self-test drives it).</summary>
     public void ShowQueuePanel(bool open) => SetQueuePanel(open);
 
     /// <summary>Open the queue's add card and use it (the self-test drives it: the card has to survive being opened again and again).</summary>
@@ -654,7 +657,7 @@ public partial class MainWindow : Window
         "Ctrl+S / Ctrl+Shift+S\tSave / Save all",
         "Ctrl+W\tClose editor",
         "Ctrl+Shift+M\tMemory & skills",
-        "Ctrl+Shift+Q\tTask queue",
+        "Ctrl+Shift+Q\tTask list (this chat's)",
         "Ctrl+Shift+P\tPlan panel (what the agent is working through)",
         "Ctrl+Shift+K\tCredentials vault",
         "Ctrl+,\tSettings",
@@ -805,7 +808,11 @@ public partial class MainWindow : Window
     private void TogglePlan_Click(object sender, RoutedEventArgs e) => TogglePlanPanel();
     private void Memories_Click(object sender, RoutedEventArgs e) => ShowMemories();
     private void ImportOpenClaw_Click(object sender, RoutedEventArgs e) => ShowOpenClawImport();
-    private void QueueLog_Click(object sender, RoutedEventArgs e) => new QueueLogWindow(Model.Host) { Owner = this }.Show();
+    private void QueueLog_Click(object sender, RoutedEventArgs e)
+    {
+        if (Model.Host.SelectedId is not { } chatId) return;
+        new QueueLogWindow(Model.Host, chatId) { Owner = this }.Show();
+    }
     private void Skills_Click(object sender, RoutedEventArgs e) => ShowSettings(SettingsTab.Skills);
     private void GenerateSkill_Click(object sender, RoutedEventArgs e) => ShowSettings(SettingsTab.Skills, SkillsAction.Generate);
     private void ImportSkills_Click(object sender, RoutedEventArgs e) => ShowSettings(SettingsTab.Skills, SkillsAction.Import);

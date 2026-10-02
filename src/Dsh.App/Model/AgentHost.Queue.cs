@@ -4,39 +4,55 @@ using Dsh.Core;
 
 namespace Dsh.App.Model;
 
-// MARK: - Task queue, /goal loop, background agents, vault
+// MARK: - Task lists, /goal loop, background agents, vault
 //
-// The queue works tasks unattended, one at a time, each in its own chat, until the model declares
-// them complete (or blocked). A task runs the same goal loop /goal does, with "decide and move on"
-// wording. Everything here runs on the UI thread, like the rest of AgentHost.
+// Every chat has its own task list. Start works that chat's tasks one at a time, top to bottom, in the
+// chat itself, until the model declares each complete (or blocked): a task runs the same goal loop /goal
+// does, with "decide and move on" wording, and sees the conversation so far. Lists in different chats
+// are independent — several can run at once. Everything here runs on the UI thread, like the rest of
+// AgentHost.
 
 public sealed partial class AgentHost
 {
-    /// <summary>The app's one task queue (saved to %APPDATA%\DSH\task-queue.json).</summary>
+    /// <summary>Every chat's task list (saved to %APPDATA%\DSH\task-queue.json).</summary>
     public TaskQueue Queue { get; private set; } = null!;
-    /// <summary>Raised on the UI thread whenever the queue changes.</summary>
+    /// <summary>Raised on the UI thread whenever a task list changes, or starts or stops running.</summary>
     public event Action? QueueChanged;
-    [ObservableProperty] private bool _queueRunning;
-    /// <summary>The task the runner is working right now.</summary>
-    [ObservableProperty] private string? _queueActiveTaskId;
 
-    /// <summary>Stop was pressed and the in-flight task is still winding down; it goes back in line
-    /// when done.</summary>
-    public bool QueueStopping => !QueueRunning && _queueLoop is not null;
+    /// <summary>One chat's task list being worked.</summary>
+    private sealed class ChatQueueRun
+    {
+        /// <summary>False once Stop was pressed; the task in flight may still be winding down.</summary>
+        public bool Running { get; set; } = true;
+        public Task? Loop { get; set; }
+        /// <summary>The task being worked right now (null while waiting for the chat to be free).</summary>
+        public string? ActiveTaskId { get; set; }
+    }
 
-    /// <summary>A Resume-only run: work just these tasks, then stop.</summary>
-    private List<string>? _queueOnlyTasks;
-    /// <summary>The chat the queue itself last showed; it keeps following only while the user is
-    /// still looking at it.</summary>
-    private string? _queueFollowedSession;
-    private Task? _queueLoop;
-    private int _queueGeneration;
-    /// <summary>Session id → the queue task it is working.</summary>
+    /// <summary>Chat id → its list's run, while it runs or winds down.</summary>
+    private readonly Dictionary<string, ChatQueueRun> _chatQueues = new();
+    /// <summary>Session id → the task it is working.</summary>
     private readonly Dictionary<string, string> _queueSessions = new();
 
-    /// <summary>After this many tasks in a row fail on errors, the queue pauses.</summary>
+    /// <summary>Some chat is working its task list.</summary>
+    public bool QueueRunning => _chatQueues.Values.Any(r => r.Running);
+    /// <summary>How many chats are working their task lists.</summary>
+    public int QueueRunningCount => _chatQueues.Values.Count(r => r.Running);
+
+    /// <summary><paramref name="chatId"/> is working its task list.</summary>
+    public bool IsQueueRunning(string? chatId) => chatId is not null && _chatQueues.TryGetValue(chatId, out var run) && run.Running;
+
+    /// <summary>Stop was pressed on <paramref name="chatId"/>'s list and its task in flight is still
+    /// winding down; that task goes back in line when done.</summary>
+    public bool IsQueueStopping(string? chatId) => chatId is not null && _chatQueues.TryGetValue(chatId, out var run) && !run.Running;
+
+    /// <summary>The task <paramref name="chatId"/>'s list is working right now.</summary>
+    public string? QueueActiveTask(string? chatId) =>
+        chatId is not null && _chatQueues.TryGetValue(chatId, out var run) ? run.ActiveTaskId : null;
+
+    /// <summary>After this many tasks in a row fail on errors, the chat's list pauses.</summary>
     public const int QueueMaxErroredTasks = 3;
-    /// <summary>How many tasks one chat's agent may queue (queue_task).</summary>
+    /// <summary>How many tasks one chat's agent may add to its list (queue_task).</summary>
     public const int MaxAgentQueuedTasksPerChat = 20;
     /// <summary>How many times in a row an idle chat picks itself up after background agents finish.
     /// A guard against a model that keeps relaunching agents for ever, not a limit on real work: a chat that
@@ -46,6 +62,9 @@ public sealed partial class AgentHost
     /// <summary>Rounds in a row that may end because the agent kept repeating one action before a /goal gives
     /// up on it and asks the user for a different direction.</summary>
     public const int MaxStalledRounds = 3;
+
+    /// <summary>How often a task waiting for its chat to be free looks again.</summary>
+    public static TimeSpan QueueBusyPoll { get; set; } = TimeSpan.FromMilliseconds(500);
 
     /// <summary>Pause before goal round n+1 after n errors (or empty replies) in a row.</summary>
     public Func<int, TimeSpan> GoalErrorBackoff { get; set; } = n => RequestRetry.Backoff(n + 1);
@@ -70,37 +89,66 @@ public sealed partial class AgentHost
 
     private readonly string _queueFile;
 
-    /// <summary>A Resume-only run's tasks (null while the whole queue runs).</summary>
-    public IReadOnlyList<string>? QueueOnlyTasks => _queueOnlyTasks;
+    /// <summary>The chat title tasks from before task lists were per chat are collected under.</summary>
+    public const string EarlierTasksTitle = "📋 Earlier tasks";
 
     private void InitQueue()
     {
         Queue = new TaskQueue(_queueFile);
-        Queue.Changed += () => _dispatcher.BeginInvoke(() =>
-        {
-            QueueChanged?.Invoke();
-            OnPropertyChanged(nameof(QueueStopping));
-        });
+        Queue.Changed += () => _dispatcher.BeginInvoke(() => QueueChanged?.Invoke());
         if (Queue.LoadProblem is { } problem) Banner = problem;
+        AdoptOrphanTasks();
     }
 
-    /// <summary>At launch: an interrupted queue (crash, restart, quit) resumes by itself; one the user
-    /// deliberately stopped does not. Needs a configured model — a Spark that's down at launch must
-    /// not fail a whole queue.</summary>
+    /// <summary>Tasks that belong to no chat — queued before task lists were per chat, or whose chat is
+    /// gone — get a chat of their own (one per project folder), so they stay on a list that can run them.</summary>
+    private void AdoptOrphanTasks()
+    {
+        var orphans = Queue.Tasks.Where(t => t.SessionId is null || Session(t.SessionId) is null).ToList();
+        if (orphans.Count == 0) return;
+        var homes = orphans.GroupBy(t => t.Cwd ?? "", StringComparer.OrdinalIgnoreCase)
+            .Select(group =>
+            {
+                var vm = NewSession(group.Key.Length == 0 ? null : group.Key, select: false);
+                RenameSession(vm.Id, EarlierTasksTitle);
+                return (vm.Id, Tasks: group.ToList());
+            })
+            .ToList();
+        Queue.Batch(q =>
+        {
+            foreach (var (chatId, tasks) in homes)
+                foreach (var task in tasks)
+                    q.AttachSession(task.Id, chatId);
+        });
+    }
+
+    private void QueueStateChanged()
+    {
+        OnPropertyChanged(nameof(QueueRunning));
+        OnPropertyChanged(nameof(QueueRunningCount));
+        QueueChanged?.Invoke();
+    }
+
+    /// <summary>At launch: a chat's list that was running when the app quit (or crashed) resumes by itself;
+    /// one the user deliberately stopped does not. Needs a configured model — a Spark that's down at
+    /// launch must not fail a whole list.</summary>
     public void ResumeQueueIfNeeded()
     {
-        if (!Config.IsConfigured || !Config.QueueResumeOnLaunch || Config.QueuePaused || Queue.NextTask is null) return;
-        StartQueue();
+        if (!Config.IsConfigured) return;
+        foreach (var chatId in Config.QueueResumeChats.ToList())
+        {
+            if (Session(chatId) is null || Queue.NextTaskFor(chatId) is null) Config.SetQueueResume(chatId, false);
+            else StartQueue(chatId);
+        }
     }
 
-    // MARK: Queue editing
+    // MARK: Editing a list
 
-    public QueueTask QueueAdd(string title, string details = "", bool atFront = false)
+    /// <summary>Add a task to <paramref name="chatId"/>'s list (the back, or in front of its waiting tasks).</summary>
+    public QueueTask QueueAdd(string chatId, string title, string details = "", bool atFront = false)
     {
-        // The task runs in the project it was queued in, even if the app has moved on to another
-        // project by the time its turn comes.
-        var cwd = ProjectContext?.Root ?? Selected?.WorkspacePath;
-        var task = Queue.Add(title, details, atFront, cwd);
+        var cwd = Session(chatId)?.WorkspacePath ?? ProjectContext?.Root;
+        var task = Queue.Add(title, details, atFront, cwd, chatId);
         return Queue.Find(task.Id) ?? task;
     }
 
@@ -108,14 +156,15 @@ public sealed partial class AgentHost
 
     public void QueueRemove(string id)
     {
-        // A session working this task stops first. The store marks a running task skipped (keeping
-        // its record), so the runner moves on to the next task rather than pausing.
+        // A chat working this task stops it first. The store marks a running task skipped (keeping its
+        // record), so the list moves on to the next task rather than pausing.
         var sessionId = _queueSessions.FirstOrDefault(p => p.Value == id).Key;
         Queue.Remove(id);
         if (sessionId is not null) StopSession(sessionId);
     }
 
-    /// <summary>Put a blocked, failed or skipped task back in line — at the front — keeping its chat.</summary>
+    /// <summary>Put a blocked, failed or skipped task back in line — at the front of its chat's list —
+    /// without starting it.</summary>
     public void QueueRequeue(string id)
     {
         if (Queue.Find(id) is not { } task || task.Status is QueueTaskStatus.Running or QueueTaskStatus.Queued) return;
@@ -126,96 +175,37 @@ public sealed partial class AgentHost
     public void QueueMoveBefore(string id, string? target) => Queue.MoveBefore(id, target);
     public void QueueMoveOnto(string id, string target) => Queue.MoveOnto(id, target);
 
-    /// <summary>Archive a finished task's chat so a long queue doesn't pile up in memory: persist the
-    /// (possibly compacted) timeline, drop the model transcript and engine (both rebuilt on demand),
-    /// and release the timeline unless the user is looking at it.</summary>
-    public void QueueEvict(string sessionId, string? taskId)
-    {
-        if (taskId is null || Queue.Find(taskId) is not { Status: QueueTaskStatus.Complete or QueueTaskStatus.Failed }
-            || Session(sessionId) is not { Running: false } vm) return;
-        if (vm.Entries.Count > 0) Log.Resync(sessionId, LogRows(vm.Entries, sessionId));
-        _transcripts.Remove(sessionId);
-        _engines.Remove(sessionId);
-        _engineKeys.Remove(sessionId);
-        _systemPrompts.Remove(sessionId);
-        if (_caches.TryGetValue(sessionId, out var cache)) cache.NoteCompaction(); // the text those reads pointed at is gone
-        if (SelectedId != sessionId) ReleaseDisplay(vm);
-    }
+    // MARK: Running a list
 
-    private static void ReleaseDisplay(SessionVM vm)
+    /// <summary>Work <paramref name="chatId"/>'s task list: its waiting tasks one at a time, top to bottom,
+    /// in that chat, until none are left, one is blocked, or the user stops it. A list that is already
+    /// running is left alone; one still winding down from a Stop picks back up once that task has stopped.</summary>
+    public void StartQueue(string chatId)
     {
-        vm.Entries.Clear();
-        vm.ContextUsed = null;
-    }
-
-    /// <summary>Drop the timeline of a finished (archived) queue chat the user has moved away from;
-    /// it re-hydrates from disk when opened.</summary>
-    private void ReleaseArchivedDisplay(string sessionId)
-    {
-        if (SelectedId == sessionId || Session(sessionId) is not { Running: false } vm) return;
-        if (Queue.Tasks.FirstOrDefault(t => t.SessionId == sessionId) is not { Status: QueueTaskStatus.Complete or QueueTaskStatus.Failed })
-            return;
-        if (_transcripts.ContainsKey(sessionId)) return;
-        ReleaseDisplay(vm);
-    }
-
-    // MARK: Runner
-
-    /// <summary>Start the queue: work tasks one at a time, top to bottom, until none remain or the
-    /// user stops it. With <paramref name="only"/>, work just that task (Resume on a blocked or failed
-    /// task) and stop afterwards. Idempotent: while a run is going, Resume puts its task next and a
-    /// plain Start widens a Resume-only run to the whole queue.</summary>
-    public void StartQueue(string? only = null)
-    {
+        if (Session(chatId) is not { } vm) return;
         if (!Config.IsConfigured)
         {
-            Broadcast("No model is configured — run the setup wizard, then start the queue.", error: true);
+            ChatNote(vm, "No model is configured — run the setup wizard, then start the task list.", error: true);
             return;
         }
-        if (QueueRunning)
+        if (IsQueueRunning(chatId)) return;
+        var previous = _chatQueues.GetValueOrDefault(chatId);
+        // A task still winding down from a Stop goes back in line, so a stopping list is not empty.
+        if (Queue.NextTaskFor(chatId) is null && previous is null)
         {
-            if (only is not null && Queue.Find(only) is { } task && task.Status != QueueTaskStatus.Running)
-            {
-                Queue.Requeue(only, toFront: true);
-                if (_queueOnlyTasks is not null && !_queueOnlyTasks.Contains(only)) _queueOnlyTasks.Add(only);
-                Broadcast($"“{task.Title}” is next in line — the queue is already running.");
-            }
-            else if (only is null && _queueOnlyTasks is not null)
-            {
-                _queueOnlyTasks = null;
-                Config.QueuePaused = false;
-                Config.QueueResumeOnLaunch = true;
-                Broadcast("The whole queue will run after the current task.");
-            }
+            ChatNote(vm, "This chat's task list has nothing waiting — add a task first.");
             return;
         }
-        if (only is not null)
-        {
-            if (Queue.Find(only) is not { } task || task.Status == QueueTaskStatus.Running) return;
-            if (task.Status != QueueTaskStatus.Queued) Queue.Requeue(only, toFront: true);
-        }
-        else
-        {
-            // A task still winding down from a Stop goes back in line, so a stopping queue is not empty.
-            if (Queue.NextTask is null && !QueueStopping)
-            {
-                Broadcast("The queue is empty — add a task first.");
-                return;
-            }
-            Config.QueuePaused = false;
-            Config.QueueResumeOnLaunch = true;
-        }
-        QueueRunning = true;
-        _queueOnlyTasks = only is null ? null : [only];
-        var generation = ++_queueGeneration;
-        var previous = _queueLoop;
-        _queueLoop = RunAfterAsync(previous, generation);
-        OnPropertyChanged(nameof(QueueStopping));
+        var run = new ChatQueueRun();
+        _chatQueues[chatId] = run;
+        Config.SetQueueResume(chatId, true);
+        QueueStateChanged();
+        run.Loop = RunAfterAsync(previous?.Loop);
 
-        async Task RunAfterAsync(Task? before, int gen)
+        async Task RunAfterAsync(Task? before)
         {
-            // A loop still winding down from a Stop finishes its cleanup first, so two loops never
-            // work the queue at once.
+            // A loop still winding down from a Stop finishes its cleanup first, so two loops never work
+            // one chat's list at once.
             if (before is not null)
             {
                 try
@@ -227,79 +217,73 @@ public sealed partial class AgentHost
                     // Its own problem, already reported.
                 }
             }
-            await QueueRunLoopAsync(gen);
+            await QueueRunLoopAsync(chatId, run);
         }
     }
 
-    /// <summary>Stop the queue: cancel the in-flight task and put it back in line. A deliberate stop
-    /// is remembered, so a relaunch doesn't auto-resume.</summary>
-    public void StopQueue()
+    /// <summary>Stop <paramref name="chatId"/>'s list: cancel its task in flight and put it back in line. A
+    /// deliberate stop is remembered, so a relaunch doesn't resume it.</summary>
+    public void StopQueue(string chatId)
     {
-        if (!QueueRunning) return;
-        QueueRunning = false;
-        Config.QueuePaused = true;
-        Config.QueueResumeOnLaunch = false;
-        OnPropertyChanged(nameof(QueueStopping));
-        if (QueueActiveTaskId is { } taskId && _queueSessions.FirstOrDefault(p => p.Value == taskId).Key is { } sessionId)
-            StopSession(sessionId);
+        if (!_chatQueues.TryGetValue(chatId, out var run) || !run.Running) return;
+        run.Running = false;
+        Config.SetQueueResume(chatId, false);
+        QueueStateChanged();
+        // Only the list's own task: a turn the user started while the list waited is theirs to stop.
+        if (run.ActiveTaskId is not null) StopSession(chatId);
     }
 
-    /// <summary>Resume a blocked, failed (or skipped) task in its own chat: when the queue is idle it
-    /// works just that task and stops; when it is running the task goes next. Either way it runs
-    /// through the one runner, so two tasks never run at once.</summary>
+    /// <summary>Stop every chat's list.</summary>
+    public void StopAllQueues()
+    {
+        foreach (var chatId in _chatQueues.Keys.ToList()) StopQueue(chatId);
+    }
+
+    /// <summary>Resume a blocked, failed (or skipped) task: it goes to the front of its chat's list and the
+    /// list starts — or, if it is already running, the task is next.</summary>
     public void ResumeTask(string taskId)
     {
-        if (Queue.Find(taskId) is not { } task || task.Status == QueueTaskStatus.Running) return;
-        if (task.SessionId is { } sid && Session(sid) is { } vm)
-        {
-            Hydrate(vm);
-            SelectedId = sid;
-            _queueFollowedSession = sid;
-        }
-        StartQueue(only: taskId);
+        if (Queue.Find(taskId) is not { } task || task.Status == QueueTaskStatus.Running || task.SessionId is not { } chatId
+            || Session(chatId) is not { } vm) return;
+        Queue.Requeue(taskId, toFront: true);
+        Hydrate(vm);
+        if (IsQueueRunning(chatId)) ChatNote(vm, $"“{task.Title}” is next on this chat's task list.");
+        else StartQueue(chatId);
     }
 
-    /// <summary>True while the run started as <paramref name="generation"/> is still in charge.</summary>
-    private bool QueueActive(int generation) => QueueRunning && generation == _queueGeneration;
+    /// <summary>True while <paramref name="run"/> is still in charge of <paramref name="chatId"/>'s list.</summary>
+    private bool QueueActive(string chatId, ChatQueueRun run) =>
+        run.Running && _chatQueues.TryGetValue(chatId, out var current) && ReferenceEquals(current, run);
 
-    private QueueTask? NextQueueTask() =>
-        _queueOnlyTasks is { } only
-            ? only.Select(Queue.Find).FirstOrDefault(t => t?.Status == QueueTaskStatus.Queued)
-            : Queue.NextTask;
+    private enum WorkOutcome { Finished, Errored, Blocked, Stopped }
 
-    private enum WorkOutcome { Finished, Errored, Stopped }
-
-    private async Task QueueRunLoopAsync(int generation)
+    private async Task QueueRunLoopAsync(string chatId, ChatQueueRun run)
     {
         // An unattended run must not stall because the PC went to sleep.
         var awake = KeepAwake.Begin();
         try
         {
             var erroredInARow = 0;
-            var first = true;
-            while (QueueActive(generation))
+            while (QueueActive(chatId, run))
             {
-                if (NextQueueTask() is not { } task) break;
-                var outcome = await WorkAsync(task.Id, generation, first);
-                first = false;
+                if (Queue.NextTaskFor(chatId) is not { } task) break;
+                var outcome = await WorkAsync(chatId, task.Id, run);
                 switch (outcome)
                 {
                     case WorkOutcome.Stopped:
-                        if (QueueActive(generation) && !_shuttingDown)
-                        {
-                            // Stopped from its chat (or the chat was deleted) rather than with the
-                            // queue's Stop: pause the queue the same way.
-                            Config.QueuePaused = true;
-                            Broadcast($"Queue paused — “{task.Title}” was stopped and is back in line. Press Start to continue.");
-                        }
+                        // Stopped from the chat (Ctrl+.) rather than with the list's Stop: pause the same way.
+                        if (QueueActive(chatId, run) && !_shuttingDown)
+                            ChatNote(chatId, $"Task list paused — “{task.Title}” was stopped and is back in line. Press Start to continue.");
+                        return;
+                    case WorkOutcome.Blocked:
+                        // The chat is waiting on the user's answer; the next task would talk over it.
                         return;
                     case WorkOutcome.Errored:
                         erroredInARow++;
-                        if (erroredInARow >= QueueMaxErroredTasks && _queueOnlyTasks is null && QueueActive(generation))
+                        if (erroredInARow >= QueueMaxErroredTasks && QueueActive(chatId, run))
                         {
-                            Config.QueuePaused = true;
-                            Broadcast($"Queue paused — {erroredInARow} tasks in a row failed on errors. " +
-                                      "Check the failed tasks' chats, then press Start to continue.", error: true);
+                            ChatNote(chatId, $"Task list paused — {erroredInARow} tasks in a row failed on errors. " +
+                                             "Check the errors above, then press Start to continue.", error: true);
                             return;
                         }
                         break;
@@ -308,120 +292,84 @@ public sealed partial class AgentHost
                         break;
                 }
             }
-            if (_queueOnlyTasks is null && QueueActive(generation) && Queue.Stats() is { Finished: true } s)
-                Broadcast($"Queue finished: {s.Completed} complete, {s.Failed} failed, {s.Blocked} blocked.");
+            if (QueueActive(chatId, run) && Queue.Stats(chatId) is { Finished: true } s)
+                ChatNote(chatId, $"Task list done: {s.Completed} complete, {s.Failed} failed, {s.Blocked} blocked.");
         }
         catch (Exception error)
         {
-            Broadcast($"The task queue stopped on an error: {Describe(error)}", error: true);
+            ChatNote(chatId, $"The task list stopped on an error: {Describe(error)}", error: true);
         }
         finally
         {
             KeepAwake.End(awake);
-            if (generation == _queueGeneration)
+            if (_chatQueues.TryGetValue(chatId, out var current) && ReferenceEquals(current, run))
             {
-                QueueRunning = false;
-                QueueActiveTaskId = null;
-                _queueOnlyTasks = null;
-                _queueLoop = null;
-                // Ran dry, paused or stopped: nothing to pick up on relaunch (unless the app is
-                // quitting mid-queue).
-                if (!_shuttingDown) Config.QueueResumeOnLaunch = false;
-                OnPropertyChanged(nameof(QueueStopping));
+                _chatQueues.Remove(chatId);
+                // Ran dry, paused or stopped: nothing to pick up on relaunch (unless the app is quitting
+                // mid-list).
+                if (!_shuttingDown) Config.SetQueueResume(chatId, false);
+                QueueStateChanged();
             }
         }
     }
 
-    /// <summary>Something else is using this chat (a turn the user started, a command): the queue
-    /// waits rather than run two things in one chat.</summary>
+    /// <summary>Something else is using this chat (a turn the user started, a command): the list waits
+    /// rather than run two things in one chat.</summary>
     private bool IsBusy(SessionVM vm) => vm.Running || _runs.ContainsKey(vm.Id);
 
-    /// <summary>Take a task and run its unattended goal loop to a conclusion.</summary>
-    private async Task<WorkOutcome> WorkAsync(string taskId, int generation, bool first)
+    /// <summary>Run one task's unattended goal loop in its chat, to a conclusion.</summary>
+    private async Task<WorkOutcome> WorkAsync(string chatId, string taskId, ChatQueueRun run)
     {
-        // Pick a chat: the one this task already used (resume where it stopped, with its context), or
-        // a fresh one in the task's project. The preset follows the app's current setting — a week of
-        // unattended work needs the autonomy the user already chose.
-        SessionVM vm;
-        while (true)
+        if (Session(chatId) is not { } vm) return WorkOutcome.Stopped;
+        // The user may be mid-turn in the chat: their turn finishes first.
+        while (IsBusy(vm))
         {
-            if (Queue.Find(taskId) is not { Status: QueueTaskStatus.Queued } task) return WorkOutcome.Finished;
-            if (task.SessionId is { } existingId && Session(existingId) is { } existing)
-            {
-                vm = existing;
-            }
-            else
-            {
-                var cwd = task.Cwd ?? ProjectContext?.Root ?? Sessions.FirstOrDefault()?.WorkspacePath;
-                vm = NewSession(cwd, select: false);
-                RenameSession(vm.Id, $"🚀 {task.Title}");
-                Queue.AttachSession(taskId, vm.Id);
-            }
-            // The user may be mid-turn in that chat (answering a blocked task): let it finish first.
-            while (IsBusy(vm) && Sessions.Contains(vm))
-            {
-                if (!QueueActive(generation)) return WorkOutcome.Stopped;
-                await Task.Delay(500);
-            }
-            if (!QueueActive(generation)) return WorkOutcome.Stopped;
-            // Deleted while we waited: pick again (a fresh chat this time).
-            if (Sessions.Contains(vm)) break;
+            if (!QueueActive(chatId, run) || !Sessions.Contains(vm)) return WorkOutcome.Stopped;
+            await Task.Delay(QueueBusyPoll);
         }
-        if (Queue.Find(taskId)?.Status != QueueTaskStatus.Queued) return WorkOutcome.Finished;
+        if (!QueueActive(chatId, run) || !Sessions.Contains(vm)) return WorkOutcome.Stopped;
+        if (Queue.Find(taskId) is not { Status: QueueTaskStatus.Queued } task) return WorkOutcome.Finished;
 
-        var sessionId = vm.Id;
-        // Follow the queue: for its first task unless the user is busy in another chat, then only
-        // while the user is still on the chat the queue itself last showed — never pull them out of
-        // their own work.
-        var follow = first
-            ? Selected is not { Running: true } || SelectedId == sessionId
-            : SelectedId is null || (SelectedId == _queueFollowedSession && Selected is not { Running: true });
-
-        Queue.Start(taskId, sessionId);
-        _queueSessions[sessionId] = taskId;
-        QueueActiveTaskId = taskId;
-        // An archived task's compacted timeline lives on disk: replay it.
+        // A chat the user hasn't opened since launch replays its timeline first.
         Hydrate(vm);
-        var resuming = vm.Entries.Any(e => e is MessageEntryVM { Role: MessageRole.User });
+        // A task stopped, interrupted or blocked part-way picks up where it left off — if the model ever
+        // got its kickoff (one that never arrived reads "not delivered", and the task starts afresh).
+        var resuming = task.HasStarted && vm.Entries.Any(e => e is MessageEntryVM { Role: MessageRole.User } m
+                                                              && (m.Text == TaskKickoffDisplay(task.GoalText, false)
+                                                                  || m.Text == TaskKickoffDisplay(task.GoalText, true)));
+        Queue.Start(taskId, chatId);
+        _queueSessions[chatId] = taskId;
+        run.ActiveTaskId = taskId;
+        QueueStateChanged();
 
         vm.Running = true;
         vm.Stopping = false;
         var cts = new CancellationTokenSource();
-        _runs[sessionId] = cts;
-        if (follow)
-        {
-            var previous = SelectedId;
-            SelectedId = sessionId;
-            _queueFollowedSession = sessionId;
-            if (previous is not null && previous != sessionId) ReleaseArchivedDisplay(previous);
-        }
+        _runs[chatId] = cts;
         try
         {
             await RunTaskGoalAsync(vm, taskId, resuming, cts.Token);
         }
         finally
         {
-            if (_runs.TryGetValue(sessionId, out var current) && ReferenceEquals(current, cts)) _runs.Remove(sessionId);
+            if (_runs.TryGetValue(chatId, out var current) && ReferenceEquals(current, cts)) _runs.Remove(chatId);
             cts.Dispose();
         }
 
         var status = Queue.Find(taskId)?.Status;
-        FinishTaskSession(vm, taskId);
-        // Archive finished tasks: the transcript stays on disk (auto-compaction kept it small), the
-        // in-memory transcript and engine go. Blocked tasks keep their chat intact so the model
-        // resumes with full context.
-        if (status is QueueTaskStatus.Complete or QueueTaskStatus.Failed) QueueEvict(sessionId, taskId);
+        FinishTaskSession(vm, taskId, run);
         return status switch
         {
             QueueTaskStatus.Running => WorkOutcome.Stopped, // cancelled mid-way; FinishTaskSession requeued it
             QueueTaskStatus.Failed => WorkOutcome.Errored,
+            QueueTaskStatus.Blocked => WorkOutcome.Blocked,
             _ => WorkOutcome.Finished,
         };
     }
 
-    /// <summary>Post-goal cleanup: reset the chat's live state and, if the task was cancelled mid-way,
-    /// put it back in the queue exactly once.</summary>
-    private void FinishTaskSession(SessionVM vm, string taskId)
+    /// <summary>After a task's goal loop: reset the chat's live state and, if the task was cancelled
+    /// mid-way, put it back in line exactly once.</summary>
+    private void FinishTaskSession(SessionVM vm, string taskId, ChatQueueRun run)
     {
         vm.Running = false;
         vm.Stopping = false;
@@ -434,16 +382,15 @@ public sealed partial class AgentHost
         _queueSessions.Remove(vm.Id);
         // The task is over: nothing it started in the background keeps going.
         if (_backgroundPools.TryGetValue(vm.Id, out var pool)) pool.StopAll();
-        if (QueueActiveTaskId == taskId) QueueActiveTaskId = null;
+        if (run.ActiveTaskId == taskId) run.ActiveTaskId = null;
         Log.Touch(vm.Id);
         vm.UpdatedAt = DateTimeOffset.Now;
         SortSessions();
         if (Queue.Find(taskId)?.Status == QueueTaskStatus.Running) Queue.MarkStopped(taskId);
-        // The chat was deleted mid-run: the task starts a fresh one next time.
-        if (!Sessions.Contains(vm)) Queue.DetachSession(vm.Id);
+        QueueStateChanged();
     }
 
-    /// <summary>Run the unattended goal loop for a queue task and record the outcome.</summary>
+    /// <summary>Run the unattended goal loop for a task and record the outcome.</summary>
     private async Task RunTaskGoalAsync(SessionVM vm, string taskId, bool resuming, CancellationToken ct)
     {
         if (Queue.Find(taskId) is not { } task) return;
@@ -461,7 +408,7 @@ public sealed partial class AgentHost
                     Queue.Finish(taskId, QueueTaskStatus.Blocked, blocked.Reason, vm.Id);
                     break;
                 default:
-                    return; // cancelled; FinishTaskSession puts it back in the queue
+                    return; // cancelled; FinishTaskSession puts it back in line
             }
             Settle(taskId, vm.Id);
         }
@@ -481,25 +428,34 @@ public sealed partial class AgentHost
         }
     }
 
-    /// <summary>Tell the task's chat how it ended.</summary>
+    /// <summary>Tell the chat how its task ended.</summary>
     private void Settle(string taskId, string sessionId)
     {
         if (Queue.Find(taskId) is not { } task || Session(sessionId) is not { } vm) return;
         string? text = task.Status switch
         {
             QueueTaskStatus.Complete =>
-                $"✅ Task complete — {task.Rounds} round{(task.Rounds == 1 ? "" : "s")}, {task.Duration()?.FormattedDuration() ?? "?"}"
+                $"✅ Task complete: “{task.Title}” — {task.Rounds} round{(task.Rounds == 1 ? "" : "s")}, {task.Duration()?.FormattedDuration() ?? "?"}"
                 + (task.AvgTokensPerSecond() is { } rate ? $" · {Math.Round(rate):0} tokens/s avg" : "") + ".",
             QueueTaskStatus.Blocked =>
-                "⏸ Task blocked — the queue moved on. Answer here, then press Resume on the task (Task Queue panel) to pick it back up.",
+                $"⏸ Task blocked: “{task.Title}” — this chat's task list is paused. Answer here, then press Resume on the task (Task List panel, Ctrl+Shift+Q) to carry on.",
             QueueTaskStatus.Failed =>
-                "Task failed. Fix what's needed in this chat, then press Resume on the task (Task Queue panel) to retry it.",
+                $"Task failed: “{task.Title}”. Fix what's needed in this chat, then press Resume on the task (Task List panel) to retry it.",
             _ => null,
         };
         if (text is null) return;
-        var failed = task.Status == QueueTaskStatus.Failed;
-        vm.Note(text, failed ? MessageRole.Error : MessageRole.Notice);
-        Log.RecordItem(vm.Id, failed ? "error" : "notice", text, isError: failed);
+        ChatNote(vm, text, error: task.Status == QueueTaskStatus.Failed);
+    }
+
+    private void ChatNote(string chatId, string text, bool error = false)
+    {
+        if (Session(chatId) is { } vm) ChatNote(vm, text, error);
+    }
+
+    private void ChatNote(SessionVM vm, string text, bool error = false)
+    {
+        vm.Note(text, error ? MessageRole.Error : MessageRole.Notice);
+        Log.RecordItem(vm.Id, error ? "error" : "notice", text, isError: error);
     }
 
     // MARK: - /goal
@@ -564,7 +520,7 @@ public sealed partial class AgentHost
                     if (auto)
                     {
                         modelText = resuming ? GoalProtocol.ResumeAuto(goal) : GoalProtocol.KickoffAuto(goal);
-                        displayText = resuming ? $"🚀 queue (resuming): {goal}" : $"🚀 queue: {goal}";
+                        displayText = TaskKickoffDisplay(goal, resuming);
                     }
                     else if (reply is not null)
                     {
@@ -702,6 +658,9 @@ public sealed partial class AgentHost
     }
 
     private static TimeSpan NonNegative(TimeSpan span) => span < TimeSpan.Zero ? TimeSpan.Zero : span;
+
+    /// <summary>How a task's kickoff shows in its chat.</summary>
+    private static string TaskKickoffDisplay(string goal, bool resuming) => resuming ? $"📋 Task (resuming): {goal}" : $"📋 Task: {goal}";
 
     /// <summary>The most recent /goal in a timeline (display form "🎯 /goal …"), so a bare /goal can
     /// resume it even after a relaunch.</summary>
@@ -862,33 +821,34 @@ public sealed partial class AgentHost
             if (Session(sessionId) is { } vm) ContinueAfterBackgroundAgents(vm);
         });
 
-    /// <summary>queue_task: the agent adds a background task to the queue.</summary>
+    /// <summary>queue_task: the agent adds a task to its own chat's list.</summary>
     private string AgentQueueTask(string title, string details, bool front, bool start, string sessionId)
     {
+        if (Session(sessionId) is not { } vm) return "Error: this chat is gone.";
         var count = _agentQueuedCount.GetValueOrDefault(sessionId);
         if (count >= MaxAgentQueuedTasksPerChat)
-            return $"Error: this chat has already queued {count} tasks — the limit. Ask the user before queuing more.";
+            return $"Error: this chat has already added {count} tasks to its list — the limit. Ask the user before adding more.";
         _agentQueuedCount[sessionId] = count + 1;
-        var vm = Session(sessionId);
-        var cwd = vm?.WorkspacePath ?? ProjectContext?.Root;
-        var task = Queue.Add(title, details, front, cwd);
-        Queue.Note(task.Id, $"Queued by the agent in “{vm?.Title ?? "a chat"}”.");
+        var task = QueueAdd(sessionId, title, details, front);
+        Queue.Note(task.Id, "Added by the agent.");
         var position = Queue.Position(task.Id) ?? 0;
-        var output = $"Queued “{task.Title}” at #{position} ({Queue.QueuedCount} waiting).";
-        if (QueueRunning)
+        var output = $"Added “{task.Title}” to this chat's task list at #{position} ({Queue.QueuedCountFor(sessionId)} waiting).";
+        if (IsQueueRunning(sessionId))
         {
-            output += " The queue is running; it will get to it in order.";
+            output += " The list is running; it gets to it in order, after the current task.";
         }
         else if (start)
         {
-            StartQueue();
-            output += QueueRunning ? " Started the queue." : " The queue couldn't start (no model configured?).";
+            StartQueue(sessionId);
+            output += IsQueueRunning(sessionId)
+                ? " Started the list: it begins once this turn is over."
+                : " The list couldn't start (no model configured?).";
         }
         else
         {
-            output += " The queue isn't running — it starts when the user presses Start (or call queue_task with start: true).";
+            output += " The list isn't running — it starts when the user presses Start (or call queue_task with start: true).";
         }
-        vm?.Note($"📋 The agent queued a task: “{task.Title}” (#{position}).");
+        vm.Note($"📋 The agent added a task to this chat's list: “{task.Title}” (#{position}).");
         return output;
     }
 
@@ -903,7 +863,7 @@ public sealed partial class AgentHost
     }
 }
 
-/// <summary>Keeps Windows from going to sleep while unattended work runs (a goal, the task queue).
+/// <summary>Keeps Windows from going to sleep while unattended work runs (a goal, a task list).
 /// Counted: the PC may sleep again once every holder has let go. UI thread only — the execution state
 /// belongs to the thread that set it, and the UI thread lives as long as the app.</summary>
 internal static class KeepAwake

@@ -4,8 +4,9 @@ namespace Dsh.Core;
 
 // MARK: - Task queue: the data
 //
-// A durable, ordered list of autonomous work items. Each task is run exactly like a /goal: the
-// harness works it round after round until the model declares it complete (or blocked / failed).
+// A durable, ordered list of autonomous work items, each on one chat's task list. Each task is run
+// exactly like a /goal, in its chat: the harness works it round after round until the model declares
+// it complete (or blocked / failed).
 // The records here are immutable, so a snapshot handed to the UI can never change under it while the
 // runner moves on; TaskQueue swaps in new copies under its lock.
 
@@ -140,9 +141,14 @@ public sealed record QueueTask
     public long PromptTokens { get; init; }
     public long CompletionTokens { get; init; }
 
-    /// <summary>The chat working / that worked this task (to jump to its transcript, and so an
-    /// interrupted task resumes in the same chat).</summary>
+    /// <summary>The chat this task belongs to: it is on that chat's task list and runs in that chat,
+    /// after the tasks before it. Null only for tasks from before task lists were per chat (the app
+    /// gives them a chat when it opens the queue).</summary>
     public string? SessionId { get; init; }
+
+    /// <summary>True once work on the task has begun (it may since have been stopped, blocked or
+    /// re-queued): running it again resumes rather than starts over.</summary>
+    public bool HasStarted => Log.Any(l => l.Kind == QueueLogKind.Started);
 
     /// <summary>The project folder the task was queued in; it runs there even if the app has since
     /// switched to another project. Null for tasks queued without one (they run in the current

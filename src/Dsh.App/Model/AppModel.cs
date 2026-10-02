@@ -46,10 +46,12 @@ public sealed partial class AppModel : ObservableObject
     public event Action? OpenClawImportRequested;
     public event Action<string>? ImageRequested;
 
-    public AppModel(AppConfig config, ConversationLog log, Dispatcher dispatcher)
+    /// <param name="host">The agent host to use (tests pass one with their own files); by default one
+    /// over <paramref name="config"/> and <paramref name="log"/>.</param>
+    public AppModel(AppConfig config, ConversationLog log, Dispatcher dispatcher, AgentHost? host = null)
     {
         Config = config;
-        Host = new AgentHost(config, log, dispatcher);
+        Host = host ?? new AgentHost(config, log, dispatcher);
         Spark = new SparkController(config, Host);
         Code = new CodeWorkspace(config, dispatcher);
         _mode = config.LastMode == "code" ? WorkspaceMode.Code : WorkspaceMode.Chat;
@@ -83,7 +85,7 @@ public sealed partial class AppModel : ObservableObject
     {
         Spark.StartMonitoring();
         Host.EnsureContextProbe();
-        // An interrupted task queue (crash, restart, quit) resumes by itself; one the user stopped
+        // A task list interrupted mid-run (crash, restart, quit) resumes by itself; one the user stopped
         // on purpose does not.
         Host.ResumeQueueIfNeeded();
     }

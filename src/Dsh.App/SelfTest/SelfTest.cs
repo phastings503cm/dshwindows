@@ -132,12 +132,12 @@ public sealed class SelfTest
 
             await CaptureImport(window, model);
 
-            FillQueue(model);
+            FillQueue(model, chat.Id);
             window.ShowQueuePanel(true);
             model.Select(chat.Id);
             await Settle(1000);
             Capture(window, "queue");
-            await ShowAndCapture(new QueueLogWindow(model.Host) { Owner = window }, "queue-log");
+            await ShowAndCapture(new QueueLogWindow(model.Host, chat.Id) { Owner = window }, "queue-log");
 
             // The add card, opened again while open and used twice (it once threw "already the logical child of another element").
             window.SelfTestAddQueueTasks("Check the add card", "Check it once more");
@@ -368,21 +368,21 @@ public sealed class SelfTest
         return chat;
     }
 
-    /// <summary>A queue with one task in each state.</summary>
-    private static void FillQueue(AppModel model)
+    /// <summary>A chat's task list with one task in each state.</summary>
+    private static void FillQueue(AppModel model, string chatId)
     {
         var queue = model.Host.Queue;
-        var done = queue.Add("Write parser tests", "Cover empty input, nested quotes and the 64 KB limit.", cwd: model.Project);
+        var done = model.Host.QueueAdd(chatId, "Write parser tests", "Cover empty input, nested quotes and the 64 KB limit.");
         queue.Start(done.Id);
         queue.RecordRound(done.Id, 1, 18_000, 2_400);
         queue.RecordRound(done.Id, 2, 21_000, 1_900);
         queue.Finish(done.Id, QueueTaskStatus.Complete);
-        var blocked = queue.Add("Deploy the staging build", "Needs the deploy token from the vault.", cwd: model.Project);
+        var blocked = model.Host.QueueAdd(chatId, "Deploy the staging build", "Needs the deploy token from the vault.");
         queue.Start(blocked.Id);
         queue.RecordRound(blocked.Id, 1, 9_000, 800);
         queue.Finish(blocked.Id, QueueTaskStatus.Blocked, "The DEPLOY_TOKEN credential is set to Never.");
-        queue.Add("Refactor Stock into a repository", "Keep the public API; move persistence behind IStockStore.", cwd: model.Project);
-        queue.Add("Update the README build section", cwd: model.Project);
+        model.Host.QueueAdd(chatId, "Refactor Stock into a repository", "Keep the public API; move persistence behind IStockStore.");
+        model.Host.QueueAdd(chatId, "Update the README build section");
     }
 
     /// <summary>Subagents in the states the plan panel draws: working on two servers, and one that finished.</summary>

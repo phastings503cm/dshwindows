@@ -148,7 +148,7 @@ public static class Icons
         "vault_search" => "Vault",
         "agent_status" => "Agent status",
         "agent_stop" => "Stop agent",
-        "queue_task" => "Queue task",
+        "queue_task" => "Add to task list",
         _ => name,
     };
 

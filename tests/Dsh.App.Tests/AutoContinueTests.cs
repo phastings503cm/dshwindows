@@ -174,14 +174,15 @@ public sealed class AutoContinueTests : IDisposable
     public void AQueueTaskEndsOnTheAgentsSignalToo() => Run(async host =>
     {
         _server.Reset((_, _) => new FakeReply.ToolCall("goal_complete", """{"summary":"Done and verified."}"""));
-        var done = host.QueueAdd("Signal with the tool");
-        host.StartQueue();
+        var chat = host.NewSession(Project("main"));
+        var done = host.QueueAdd(chat.Id, "Signal with the tool");
+        host.StartQueue(chat.Id);
         await WaitUntil("queue done", () => !host.QueueRunning);
         Assert.Equal(QueueTaskStatus.Complete, host.Queue.Find(done.Id)?.Status);
 
         _server.Reset((_, _) => new FakeReply.ToolCall("goal_blocked", """{"reason":"Need the deploy key."}"""));
-        var stuck = host.QueueAdd("Needs a key");
-        host.StartQueue();
+        var stuck = host.QueueAdd(chat.Id, "Needs a key");
+        host.StartQueue(chat.Id);
         await WaitUntil("queue done again", () => !host.QueueRunning);
         Assert.Equal(QueueTaskStatus.Blocked, host.Queue.Find(stuck.Id)?.Status);
     });

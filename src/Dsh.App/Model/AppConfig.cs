@@ -68,11 +68,10 @@ public sealed partial class AppConfig : ObservableObject
     [ObservableProperty] private double _sidebarWidth = 260;
     public WindowPlacement? Window { get; set; }
 
-    /// <summary>The user stopped the task queue on purpose: a relaunch doesn't start it again.</summary>
-    [ObservableProperty] private bool _queuePaused;
-    /// <summary>The queue was running when the app quit (or crashed): pick it back up on launch.</summary>
-    [ObservableProperty] private bool _queueResumeOnLaunch;
-    /// <summary>The Task Queue panel is showing.</summary>
+    /// <summary>Chats whose task list was running when the app quit (or crashed): they pick it back up
+    /// on launch. A list the user stopped, or that ran dry, isn't here.</summary>
+    public HashSet<string> QueueResumeChats { get; } = new(StringComparer.Ordinal);
+    /// <summary>The task list panel is showing.</summary>
     [ObservableProperty] private bool _queuePanelOpen;
     [ObservableProperty] private double _queuePanelWidth = 360;
 
@@ -231,6 +230,12 @@ public sealed partial class AppConfig : ObservableObject
         OnPropertyChanged(nameof(DisabledSkills));
     }
 
+    /// <summary>Remember (or forget) that <paramref name="chatId"/>'s task list should resume on launch.</summary>
+    public void SetQueueResume(string chatId, bool resume)
+    {
+        if (resume ? QueueResumeChats.Add(chatId) : QueueResumeChats.Remove(chatId)) OnPropertyChanged(nameof(QueueResumeChats));
+    }
+
     public SessionSkillSelection SkillsFor(string sessionId) =>
         SessionSkills.GetValueOrDefault(sessionId) ?? SessionSkillSelection.Default;
 
@@ -288,8 +293,7 @@ public sealed partial class AppConfig : ObservableObject
         public string? SparkPin { get; set; }
         public double? SidebarWidth { get; set; }
         public WindowPlacement? Window { get; set; }
-        public bool? QueuePaused { get; set; }
-        public bool? QueueResumeOnLaunch { get; set; }
+        public List<string>? QueueResumeChats { get; set; }
         public bool? QueuePanelOpen { get; set; }
         public double? QueuePanelWidth { get; set; }
         public bool? PlanPanelOpen { get; set; }
@@ -339,8 +343,7 @@ public sealed partial class AppConfig : ObservableObject
             SparkPin = stored?.SparkPin;
             SidebarWidth = stored?.SidebarWidth ?? 260;
             Window = stored?.Window;
-            QueuePaused = stored?.QueuePaused ?? false;
-            QueueResumeOnLaunch = stored?.QueueResumeOnLaunch ?? false;
+            foreach (var id in stored?.QueueResumeChats ?? []) QueueResumeChats.Add(id);
             QueuePanelOpen = stored?.QueuePanelOpen ?? false;
             QueuePanelWidth = stored?.QueuePanelWidth ?? 360;
             PlanPanelOpen = stored?.PlanPanelOpen ?? false;
@@ -403,8 +406,7 @@ public sealed partial class AppConfig : ObservableObject
             SparkPin = SparkPin,
             SidebarWidth = SidebarWidth,
             Window = Window,
-            QueuePaused = QueuePaused,
-            QueueResumeOnLaunch = QueueResumeOnLaunch,
+            QueueResumeChats = QueueResumeChats.Count == 0 ? null : QueueResumeChats.OrderBy(s => s, StringComparer.Ordinal).ToList(),
             QueuePanelOpen = QueuePanelOpen,
             QueuePanelWidth = QueuePanelWidth,
             PlanPanelOpen = PlanPanelOpen,

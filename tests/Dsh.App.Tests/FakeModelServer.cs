@@ -32,6 +32,14 @@ public sealed record SeenRequest(IReadOnlyList<(string Role, string? Content)> M
     /// <summary>The request answers a user message (not a tool result).</summary>
     public bool Fresh => Messages.Count > 0 && Messages[^1].Role == "user";
     public string System => Messages.FirstOrDefault(m => m.Role == "system").Content ?? "";
+
+    /// <summary>The request is part of the goal <paramref name="title"/> — its kickoff, a resumed kickoff or
+    /// a later round — rather than an earlier task in the same chat.</summary>
+    public bool WorkingOn(string title) =>
+        LastUser.Contains($"GOAL: {title}\n", StringComparison.Ordinal) || LastUser.Contains($"GOAL (unchanged): {title}\n", StringComparison.Ordinal);
+
+    /// <summary>The goal's first request: its kickoff (fresh or resumed).</summary>
+    public bool KickoffOf(string title) => Fresh && LastUser.Contains($"GOAL: {title}\n", StringComparison.Ordinal);
 }
 
 /// <summary>An OpenAI-compatible model server in memory: /models answers with one model,
