@@ -100,11 +100,16 @@ public sealed class PositiveToVisibilityConverter : IValueConverter
         throw new NotSupportedException();
 }
 
-/// <summary>Formats a timestamp as a clock time ("14:32").</summary>
-public sealed class ClockConverter : IValueConverter
+/// <summary>Formats a timestamp as a message's date and time on this PC's clock ("Fri, Oct 2, 2026 · 11:42:05 AM");
+/// with the parameter "full", the long form with the UTC offset (for tooltips).</summary>
+public sealed class StampConverter : IValueConverter
 {
-    public object Convert(object? value, Type targetType, object? parameter, CultureInfo culture) =>
-        value is DateTimeOffset date ? Formatting.Clock(date) : "";
+    public object Convert(object? value, Type targetType, object? parameter, CultureInfo culture) => value switch
+    {
+        DateTimeOffset date when parameter is "full" => Formatting.FullStamp(date),
+        DateTimeOffset date => Formatting.Stamp(date),
+        _ => "",
+    };
 
     public object ConvertBack(object value, Type targetType, object parameter, CultureInfo culture) =>
         throw new NotSupportedException();

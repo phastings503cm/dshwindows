@@ -7,20 +7,28 @@
              xmlns:core="clr-namespace:Dsh.Core;assembly=Dsh.Core"
              AllowDrop="True" Background="{DynamicResource SolidBackgroundFillColorBaseBrush}">
     <UserControl.Resources>
-        <!-- A message: role marker in the gutter, then the text. -->
+        <!-- A message: its date and time on this PC's clock, then the role marker in the gutter and the text. -->
         <DataTemplate DataType="{x:Type model:MessageEntryVM}">
             <Grid Margin="0,0,0,16">
                 <Grid.ColumnDefinitions>
                     <ColumnDefinition Width="28" />
                     <ColumnDefinition Width="*" />
                 </Grid.ColumnDefinitions>
-                <Grid x:Name="Marker" Width="18" Height="18" VerticalAlignment="Top" HorizontalAlignment="Left" Margin="0,2,0,0"
-                      ToolTip="{Binding At, Converter={StaticResource Clock}}">
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="Auto" />
+                </Grid.RowDefinitions>
+                <TextBlock x:Name="Stamp" Grid.Column="1" Style="{StaticResource MetaText}" Margin="0,0,0,3"
+                           Text="{Binding At, Converter={StaticResource Stamp}}"
+                           ToolTip="{Binding At, Converter={StaticResource Stamp}, ConverterParameter=full}"
+                           Foreground="{DynamicResource TextFillColorTertiaryBrush}" />
+                <Grid x:Name="Marker" Grid.Row="1" Width="18" Height="18" VerticalAlignment="Top" HorizontalAlignment="Left" Margin="0,2,0,0"
+                      ToolTip="{Binding At, Converter={StaticResource Stamp}, ConverterParameter=full}">
                     <Path x:Name="Sparkle" Data="{StaticResource SparkleGeometry}" Stretch="Uniform" Width="14" Height="14"
                           Fill="{DynamicResource TextFillColorSecondaryBrush}" />
                     <TextBlock x:Name="MarkerGlyph" Style="{StaticResource Glyph}" FontSize="14" Visibility="Collapsed" />
                 </Grid>
-                <Border x:Name="Bubble" Grid.Column="1" CornerRadius="8" HorizontalAlignment="Stretch">
+                <Border x:Name="Bubble" Grid.Row="1" Grid.Column="1" CornerRadius="8" HorizontalAlignment="Stretch">
                     <Grid>
                         <chat:MarkdownPresenter x:Name="Rich" Markdown="{Binding Text}" FontSize="14" />
                         <TextBox x:Name="Plain" Style="{StaticResource SelectableText}" Text="{Binding Text, Mode=OneWay}" FontSize="14"
@@ -87,7 +95,8 @@
                             <ColumnDefinition Width="Auto" />
                         </Grid.ColumnDefinitions>
                         <TextBlock x:Name="Glyph" Style="{StaticResource Glyph}" FontSize="12" Text="{Binding Glyph}" HorizontalAlignment="Left"
-                                   Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
+                                   Foreground="{DynamicResource TextFillColorSecondaryBrush}"
+                                   ToolTip="{Binding At, Converter={StaticResource Stamp}}" />
                         <TextBlock Grid.Column="1" Text="{Binding Label}" FontSize="12" FontWeight="SemiBold" Margin="0,0,8,0"
                                    VerticalAlignment="Center" Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
                         <TextBlock Grid.Column="2" Text="{Binding Preview, Converter={StaticResource HeadTruncate}, ConverterParameter=90}"

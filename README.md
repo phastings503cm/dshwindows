@@ -175,7 +175,9 @@ To remove DSH's sign-in: `aws logout --profile dsh-bedrock`.
 ## The window
 
 **Chat** (Ctrl+1) — the transcript interleaves messages and tool calls in the order they happened,
-each tool card expandable to its full output. Markdown renders with headings, code blocks (with
+each tool card expandable to its full output. Every message — yours, the agent's, and the app's notices
+— shows the date and time it was sent on this PC's clock, in your Windows date and time format (hover it
+for the full date and UTC offset). Markdown renders with headings, code blocks (with
 copy), lists, quotes and tables. **Enter** sends, **Shift+Enter** adds a line. Drop files on the chat
 or paste an image (Ctrl+V) to attach it. Under the composer: the chat's permission preset, the model
 menu (with DGX Spark model switching), thinking level, skills, and a live context gauge.
