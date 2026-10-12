@@ -268,7 +268,19 @@ public sealed class SelfTest
                     await Settle(400);
                     Capture(swapper, $"swapper-{page.ToString().ToLowerInvariant()}-more");
                 }
+                // Every page is drawn again on any change: its reused controls must move to the new drawing.
+                swapper.ShowSwapperDemo(page);
+                await Settle(200);
             }
+            // The address-and-login form, back to the code, and Back from the check.
+            swapper.ShowSwapperDemo(SwapperPage.Paste, login: true);
+            await Settle(600);
+            Capture(swapper, "swapper-login");
+            swapper.ShowSwapperDemo(SwapperPage.Paste);
+            swapper.ShowSwapperDemo(SwapperPage.Check);
+            swapper.SelfTestBack();
+            await Settle(400);
+            Capture(swapper, "swapper-back");
         }
         catch (Exception error)
         {
@@ -295,7 +307,14 @@ public sealed class SelfTest
                     await Settle(400);
                     Capture(subscription, $"subscription-{page.ToString().ToLowerInvariant()}-more");
                 }
+                subscription.ShowPlanDemo(page);
+                await Settle(200);
             }
+            // Back from the check to the key.
+            subscription.ShowPlanDemo(PlanPage.Check);
+            subscription.SelfTestBack();
+            await Settle(400);
+            Capture(subscription, "subscription-back");
         }
         catch (Exception error)
         {

@@ -113,6 +113,8 @@ public sealed partial class SparkController : ObservableObject, IDisposable
     private readonly AgentHost _host;
     private CancellationTokenSource? _poll;
     private readonly DispatcherTimer _tick;
+    /// <summary>The UI thread: boxes are bound to views, so they change only there.</summary>
+    private readonly Dispatcher _dispatcher;
 
     /// <summary>Every box, in the order they were added.</summary>
     public ObservableCollection<SwapperBox> Boxes { get; } = [];
@@ -127,6 +129,7 @@ public sealed partial class SparkController : ObservableObject, IDisposable
     {
         _config = config;
         _host = host;
+        _dispatcher = Dispatcher.CurrentDispatcher;
         foreach (var connection in config.SwapperConnections) Attach(new SwapperBox(config, connection));
         config.SwapperConnections.CollectionChanged += (_, _) => Sync();
         // Keep the elapsed time in the banners moving while a swap or an install runs.
@@ -134,7 +137,7 @@ public sealed partial class SparkController : ObservableObject, IDisposable
         {
             foreach (var box in Boxes.Where(b => b.IsSwitching || b.InstallJob is { IsRunning: true })) box.Tick();
             if (IsSwitching) OnPropertyChanged(nameof(ProgressLine));
-        }, Dispatcher.CurrentDispatcher);
+        }, _dispatcher);
     }
 
     public bool IsConfigured => Boxes.Count > 0;
@@ -371,7 +374,8 @@ public sealed partial class SparkController : ObservableObject, IDisposable
         StartMonitoring();
         try
         {
-            var job = await SwapperSetupFlows.InstallModelAsync(box.Client(), key, j => box.InstallJob = j);
+            // Progress arrives on a pool thread; the box changes on the UI thread (views follow it).
+            var job = await SwapperSetupFlows.InstallModelAsync(box.Client(), key, j => _dispatcher.BeginInvoke(() => box.InstallJob = j));
             await RefreshAsync(box);
             if (job is { IsFailed: true } failed)
             {

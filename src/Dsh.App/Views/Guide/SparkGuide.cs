@@ -76,6 +76,7 @@ public sealed partial class SparkGuide : IWizardGuide
             _installOk = true;
             _installPhase = InstallPhase.Done;
         }
+        if (resume is not null) CheckSavedLogin();
     }
 
     /// <summary>Start the current page's own work (a scan, a probe) — once the window shows the guide.</summary>
@@ -270,6 +271,7 @@ public sealed partial class SparkGuide : IWizardGuide
                 if (_cert is null && !_probingCert) _ = ProbeCertificateAsync();
                 break;
             case GuidePage.Admin:
+                CheckSavedLogin();
                 if (_session is null && !_adminBusy) _ = LoadSessionAsync();
                 break;
             case GuidePage.Model:

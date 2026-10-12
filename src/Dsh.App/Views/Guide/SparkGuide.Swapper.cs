@@ -28,8 +28,33 @@ public sealed partial class SparkGuide
                                       && string.Equals(_state.SwapperFingerprint, _cert.Fingerprint, StringComparison.OrdinalIgnoreCase);
 
     /// <summary>The Swapper connection this guide made (after the login step), from Settings › Model servers.</summary>
-    private SwapperConnection? GuideConnection =>
-        _state.SwapperConnectionId is { } id ? _model.Config.SwapperConnections.FirstOrDefault(c => c.Id == id) : null;
+    private SwapperConnection? GuideConnection
+    {
+        get
+        {
+            var connections = _model.Config.SwapperConnections;
+            if (_state.SwapperConnectionId is { } id && connections.FirstOrDefault(c => c.Id == id) is { } known) return known;
+            // A guide saved by an older version (no connection id yet), or a box added another way: the same box, by its
+            // address or its host name — so finishing the guide never makes a second one.
+            if (SparkHost.Length == 0) return null;
+            var url = SwapperUrl.ToString();
+            var host = ShortName(_state.HostName ?? SparkHost);
+            var same = connections.FirstOrDefault(c => SwapperConnection.SameBase(c.Url, url))
+                       ?? connections.FirstOrDefault(c => c.Hostname is { Length: > 0 } name && string.Equals(name, host, StringComparison.OrdinalIgnoreCase));
+            if (same is not null) _state.SwapperConnectionId = same.Id;
+            return same;
+        }
+    }
+
+    /// <summary>A resumed guide that says the Swapper login is ready but has no login to show for it (saved by an older
+    /// version, or the box was removed from Settings since) asks for the login again rather than failing later.</summary>
+    private void CheckSavedLogin()
+    {
+        if (!_state.AdminReady) return;
+        if (GuideConnection is { } connection && _model.Config.SwapperSecret(connection).Length > 0) return;
+        _state.AdminReady = false;
+        _state.Save();
+    }
 
     private async Task ProbeCertificateAsync()
     {

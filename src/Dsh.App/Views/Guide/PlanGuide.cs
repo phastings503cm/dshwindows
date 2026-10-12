@@ -244,7 +244,7 @@ public sealed class PlanGuide : IWizardGuide
             Heading("Paste your key"),
             Lead($"Your {plan.Name} key. DSH keeps it in Windows Credential Manager and sends it only to {new Uri(Region.BaseUrl).Host}."),
             Field("API key", Detach(_keyBox), plan.KeyHint));
-        panel.Children.Add(_keyNote);
+        panel.Children.Add(Detach(_keyNote)); // reused from one rendering of the page to the next
         UpdateKeyNote();
         return panel;
     }

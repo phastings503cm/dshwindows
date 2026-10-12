@@ -161,12 +161,16 @@ public sealed class SetupWizardWindow : Window, IGuideHost
         ShowGuide(new PlanGuide(_model, this, plan));
     }
 
-    /// <summary>For the self-test: "Connect my Spark Swapper" on <paramref name="page"/>, with sample state.</summary>
-    internal void ShowSwapperDemo(SwapperPage page)
+    /// <summary>For the self-test: "Connect my Spark Swapper" on <paramref name="page"/>, with sample state (its paste page in
+    /// the address-and-login form when <paramref name="login"/>).</summary>
+    internal void ShowSwapperDemo(SwapperPage page, bool login = false)
     {
         if (_guide is not SwapperConnectGuide) StartSwapperGuide();
-        ((SwapperConnectGuide)_guide!).ShowDemo(page);
+        ((SwapperConnectGuide)_guide!).ShowDemo(page, login);
     }
+
+    /// <summary>For the self-test: the footer's Back button.</summary>
+    internal void SelfTestBack() => Back();
 
     /// <summary>For the self-test: "Connect a subscription plan" on <paramref name="page"/>, with sample state.</summary>
     internal void ShowPlanDemo(PlanPage page)

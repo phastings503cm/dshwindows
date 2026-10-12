@@ -198,7 +198,7 @@ public sealed class SwapperConnectGuide : IWizardGuide
             Lead("Paste the connection code from the Swapper's Connect tab. It sets up the model, switching, and the security certificate in one go."),
             Field("Connection code", Detach(_codeBox)),
             Paragraph($"Where do I find it? Open your Swapper's web page (https://<box>:{SparkSetup.SwapperPort}), choose **Connect**, then **Connect DSH**, and copy the code.", 12.5, "TextFillColorSecondaryBrush"));
-        panel.Children.Add(_codeNote);
+        panel.Children.Add(Detach(_codeNote));
         UpdateCodeNote();
         var login = Link("Use an address and login instead", () =>
         {
@@ -526,11 +526,11 @@ public sealed class SwapperConnectGuide : IWizardGuide
         _host.Render();
         try
         {
-            var job = await SwapperSetupFlows.InstallModelAsync(Client(), key, j =>
+            var job = await SwapperSetupFlows.InstallModelAsync(Client(), key, j => _dispatcher.BeginInvoke(() =>
             {
                 _job = j;
-                _dispatcher.BeginInvoke(() => RenderIf(SwapperPage.Model));
-            });
+                RenderIf(SwapperPage.Model);
+            }));
             _status = await Client().StatusAsync();
             if (job is { IsDone: true }) _installed = key;
         }
@@ -709,9 +709,10 @@ public sealed class SwapperConnectGuide : IWizardGuide
 
     // MARK: - Self-test
 
-    internal void ShowDemo(SwapperPage page)
+    internal void ShowDemo(SwapperPage page, bool login = false)
     {
         _demo = true;
+        _loginMode = login;
         _codeText = SwapperConnectionCode.Encode(new System.Text.Json.Nodes.JsonObject
         {
             ["v"] = 1, ["name"] = "DGX Spark (spark-3f2a)", ["hostname"] = "spark-3f2a", ["platform"] = "nvidia-gb10", ["version"] = "2.0.0",
