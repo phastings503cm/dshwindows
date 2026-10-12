@@ -1,6 +1,8 @@
 using System.Collections.ObjectModel;
 using System.ComponentModel;
 using System.IO;
+using System.Security.Cryptography;
+using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using System.Windows.Threading;
@@ -463,12 +465,13 @@ public sealed partial class AppConfig : ObservableObject
         public bool? MemoryEnabled { get; set; }
         public bool? SubagentsUsePrimary { get; set; }
         public List<SwapperConnection>? SwapperConnections { get; set; }
-        public PrivacySettings? Privacy { get; set; }
+        public StoredPrivacy? Privacy { get; set; }
     }
 
     private void Load()
     {
         var migrateSwapper = false;
+        var migratePrivacy = false;
         _loading = true;
         try
         {
@@ -516,7 +519,7 @@ public sealed partial class AppConfig : ObservableObject
             PlanPanelAutoOpen = stored?.PlanPanelAutoOpen ?? true;
             MemoryEnabled = stored?.MemoryEnabled ?? true;
             SubagentsUsePrimary = stored?.SubagentsUsePrimary ?? true;
-            Privacy = stored?.Privacy ?? PrivacySettings.Default;
+            Privacy = ReadPrivacy(stored?.Privacy, out migratePrivacy);
             if (stored?.SwapperConnections is { } connections)
                 foreach (var connection in connections) SwapperConnections.Add(connection);
             else
@@ -531,6 +534,83 @@ public sealed partial class AppConfig : ObservableObject
             MigrateLegacySwapper();
             if (SwapperConnections.Count > 0) SaveNow();
         }
+        // Custom terms an earlier version kept in plain text are written back encrypted straight away.
+        if (migratePrivacy) SaveNow();
+    }
+
+    // MARK: - The shield's custom terms (encrypted)
+
+    /// <summary>The sensitive-data settings as stored: the switches as they are, the custom terms encrypted for this Windows
+    /// account (DPAPI) — client and patient names don't belong in a settings file anyone can read.</summary>
+    internal sealed class StoredPrivacy
+    {
+        public bool Mask { get; set; } = true;
+        public bool Secrets { get; set; } = true;
+        public bool Emails { get; set; } = true;
+        public bool Phones { get; set; } = true;
+        public bool Ids { get; set; } = true;
+        public bool Ips { get; set; }
+        public bool Terms { get; set; } = true;
+        /// <summary>The terms as an earlier version stored them, in plain text: read once, never written.</summary>
+        public string? CustomTerms { get; set; }
+        /// <summary>The terms, encrypted with Windows Data Protection for the current user, in base64.</summary>
+        public string? ProtectedTerms { get; set; }
+    }
+
+    private static readonly byte[] TermsEntropy = Encoding.UTF8.GetBytes("DSH for Windows · privacy terms · v1");
+
+    /// <summary>Encrypted terms this account can't read (settings copied from another account or PC): kept as they are
+    /// until the user writes new terms, rather than lost.</summary>
+    private string? _unreadableTerms;
+
+    private PrivacySettings ReadPrivacy(StoredPrivacy? stored, out bool migrate)
+    {
+        migrate = false;
+        if (stored is null) return PrivacySettings.Default;
+        var terms = "";
+        if (stored.ProtectedTerms is { Length: > 0 } sealedTerms)
+        {
+            try
+            {
+                terms = Encoding.UTF8.GetString(ProtectedData.Unprotect(Convert.FromBase64String(sealedTerms), TermsEntropy, DataProtectionScope.CurrentUser));
+            }
+            catch (Exception ex) when (ex is CryptographicException or FormatException or PlatformNotSupportedException)
+            {
+                _unreadableTerms = sealedTerms;
+            }
+        }
+        else if (stored.CustomTerms is { Length: > 0 } plain)
+        {
+            terms = plain;
+            migrate = true;
+        }
+        return new PrivacySettings
+        {
+            Mask = stored.Mask, Secrets = stored.Secrets, Emails = stored.Emails, Phones = stored.Phones, Ids = stored.Ids,
+            Ips = stored.Ips, Terms = stored.Terms, CustomTerms = terms,
+        };
+    }
+
+    private StoredPrivacy WritePrivacy(PrivacySettings privacy)
+    {
+        string? sealedTerms = null;
+        if (privacy.CustomTerms.Length > 0)
+        {
+            _unreadableTerms = null; // new terms replace ones this account couldn't read
+            try
+            {
+                sealedTerms = Convert.ToBase64String(ProtectedData.Protect(Encoding.UTF8.GetBytes(privacy.CustomTerms), TermsEntropy, DataProtectionScope.CurrentUser));
+            }
+            catch (Exception ex) when (ex is CryptographicException or PlatformNotSupportedException)
+            {
+                // Never in plain text: without encryption the terms last this session only.
+            }
+        }
+        return new StoredPrivacy
+        {
+            Mask = privacy.Mask, Secrets = privacy.Secrets, Emails = privacy.Emails, Phones = privacy.Phones, Ids = privacy.Ids,
+            Ips = privacy.Ips, Terms = privacy.Terms, ProtectedTerms = sealedTerms ?? _unreadableTerms,
+        };
     }
 
     /// <summary>Save soon: several changes in one UI tick are written once.</summary>
@@ -591,7 +671,7 @@ public sealed partial class AppConfig : ObservableObject
             MemoryEnabled = MemoryEnabled,
             SubagentsUsePrimary = SubagentsUsePrimary,
             SwapperConnections = SwapperConnections.Select(c => c.DeepCopy()).ToList(),
-            Privacy = Privacy,
+            Privacy = WritePrivacy(Privacy),
         };
         try
         {

@@ -214,7 +214,8 @@ reply, a command or a tool's output, even run together with other text (`-phunte
   card numbers (US SSNs, IBANs that pass their check, and card numbers that pass the Luhn check and start
   like a real card network's), IP addresses (off by default), and **custom terms**: one per line — client
   names, project code names — matched without regard to case on whole words, or a regular expression
-  after `re:`. Values in the Credentials Vault are always masked, even with the switch off.
+  after `re:` (they are saved encrypted for your Windows account, not in plain text). Values in the
+  Credentials Vault are always masked, even with the switch off.
 - **Try it** shows exactly what a model that isn't private would receive for the text you type.
 - A reply whose request had anything masked carries a small shield: *Masked 2 emails and 1 key before
   sending to Kimi Code* (hover for the categories — never the values).
