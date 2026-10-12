@@ -142,6 +142,8 @@ public sealed class ShieldV2Tests
         "password=$DB_PASSWORD",
         "$env:API_KEY = $env:API_KEY",
         "set TOKEN=%TOKEN%",
+        "{\"username\": \"string\", \"password\": \"string\"}",   // an API's documented example
+        "PASSWORD=true",
     ];
 
     [Theory]

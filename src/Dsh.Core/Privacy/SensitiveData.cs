@@ -404,6 +404,9 @@ public sealed partial class SensitiveDetector
         if (v.Equals("changeme", StringComparison.OrdinalIgnoreCase)) return true;
         if (v.StartsWith("your-", StringComparison.OrdinalIgnoreCase) || v.StartsWith("your_", StringComparison.OrdinalIgnoreCase)) return true;
         if (v.Contains('⟦')) return true;
+        // The name of a type where an example value goes: {"password": "string"} in an API's documentation. (Found once,
+        // a value is masked everywhere it appears — "string" would be masked all through the code.)
+        if (TypeWords.Contains(v)) return true;
         // A reference to where the value lives, not the value: $DB_PASSWORD, $env:API_KEY, %TOKEN%.
         if (VariableReference().IsMatch(v)) return true;
         return false;
