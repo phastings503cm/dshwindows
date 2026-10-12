@@ -230,8 +230,28 @@ public sealed class ShieldV2Tests
     public void TextFilesAreReadAndOthersArent(string name, bool text) =>
         Assert.Equal(text, AttachmentText.Read(new MessageAttachment(AttachmentKind.File, name, Encoding.UTF8.GetBytes("a,b\n1,2"))) is not null);
 
-    // MARK: Speed and patterns that take too long
+    [Fact]
+    public void ManyOverlappingMatchesResolveLikeOneAtATime()
+    {
+        var detector = new SensitiveDetector(SensitiveCategories.None, vaultSecrets: ["abcd", "bcdef", "cdefgh", "ghij"]);
+        // Longest first: cdefgh, then abcd overlaps it (dropped), bcdef too, ghij too.
+        var found = detector.Find("abcdefghij");
+        Assert.Equal([(2, 6)], found.Select(m => (m.Start, m.Length)).ToList());
+    }
 
+    [Fact]
+    public void TheMatcherFindsEveryOccurrence()
+    {
+        var matcher = new LiteralMatcher(["he", "she", "his", "hers"]);
+        Assert.Equal([(1, 3), (2, 2), (2, 4)], matcher.Find("ushers").OrderBy(m => m.Start).ThenBy(m => m.Length).ToList());
+        Assert.Empty(new LiteralMatcher([]).Find("anything"));
+    }
+}
+
+/// <summary>The shield's speed: these measure the clock, so they run on their own (and keep their load off the rest).</summary>
+[Collection(TimingSensitive.Name)]
+public sealed class ShieldTimingTests
+{
     [Fact]
     public void AnEightThousandRowSpreadsheetIsMaskedQuickly()
     {
@@ -265,22 +285,5 @@ public sealed class ShieldV2Tests
         var clock = Stopwatch.StartNew();
         Assert.Equal(found, detector.Find(text));
         Assert.True(clock.Elapsed < TimeSpan.FromMilliseconds(200), $"took {clock.ElapsedMilliseconds} ms");
-    }
-
-    [Fact]
-    public void ManyOverlappingMatchesResolveLikeOneAtATime()
-    {
-        var detector = new SensitiveDetector(SensitiveCategories.None, vaultSecrets: ["abcd", "bcdef", "cdefgh", "ghij"]);
-        // Longest first: cdefgh, then abcd overlaps it (dropped), bcdef too, ghij too.
-        var found = detector.Find("abcdefghij");
-        Assert.Equal([(2, 6)], found.Select(m => (m.Start, m.Length)).ToList());
-    }
-
-    [Fact]
-    public void TheMatcherFindsEveryOccurrence()
-    {
-        var matcher = new LiteralMatcher(["he", "she", "his", "hers"]);
-        Assert.Equal([(1, 3), (2, 2), (2, 4)], matcher.Find("ushers").OrderBy(m => m.Start).ThenBy(m => m.Length).ToList());
-        Assert.Empty(new LiteralMatcher([]).Find("anything"));
     }
 }
