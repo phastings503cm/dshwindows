@@ -22,7 +22,7 @@ namespace Dsh.Core;
 public static class SecretGuard
 {
     /// <summary>Changes whenever the rules do, so notes indexed under older rules are screened again.</summary>
-    public const int Revision = 4;
+    public const int Revision = 5;
 
     /// <summary>A pattern that takes longer than this on some pathological text refuses the text.</summary>
     private static readonly TimeSpan Limit = TimeSpan.FromMilliseconds(200);
@@ -34,7 +34,8 @@ public static class SecretGuard
     [
         Format(@"\bsk-[A-Za-z0-9_\-]{20,}"),                                     // OpenAI-style, Anthropic, OpenRouter
         Format(@"\bsk_(?:live|test)_[A-Za-z0-9]{16,}"),                          // Stripe
-        Format(@"\brk_live_[A-Za-z0-9]{16,}"),                                   // Stripe, restricted
+        Format(@"\brk_(?:live|test)_[A-Za-z0-9]{16,}"),                          // Stripe, restricted
+        Format(@"\bsst_[0-9a-f]{8}_[A-Za-z0-9_\-]{20,}"),                         // Spark Swapper app token (also masked by the privacy shield)
         Format(@"\b(?:AKIA|ASIA)[0-9A-Z]{16}\b"),                                // AWS access key id
         Format(@"\bgh[pousr]_[A-Za-z0-9]{30,}"),                                 // GitHub
         Format(@"\bgithub_pat_[A-Za-z0-9_]{30,}"),

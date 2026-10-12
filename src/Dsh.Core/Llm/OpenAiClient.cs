@@ -775,6 +775,13 @@ public sealed class OpenAiClient : IProviderClient
     public void ApplyThinking(LlmRequest request, JsonObject body)
     {
         if (ThinkingLevelFor(request) is not { } level) return;
+        // GLM-5 always thinks: switching thinking off fails the request, so Off asks for the least of it, in the words
+        // it accepts (low, high, max).
+        if (SubscriptionPlans.AlwaysThinks(string.IsNullOrEmpty(request.Model) ? Profile.Model : request.Model))
+        {
+            body["reasoning_effort"] = SubscriptionPlans.GlmEffort(level);
+            return;
+        }
         var effort = EffortWord(request);
         if (Profile.IsSelfHosted && Profile.Kind is ProviderKind.OpenAICompat or ProviderKind.OpenAI or ProviderKind.OpenRouter)
         {
@@ -862,12 +869,16 @@ public sealed class OpenAiClient : IProviderClient
         return parts;
     }
 
+    /// <summary>"DSH/0.7.12 (Windows)" — who is calling, honestly. (Some plans check the calling app; DSH never claims to
+    /// be another one.)</summary>
+    public static string UserAgent => $"DSH/{AppInfo.Version} (Windows)";
+
     /// <summary>Authorization + user-supplied custom headers on every request.</summary>
     private void ApplyHeaders(HttpRequestMessage req)
     {
         if (!string.IsNullOrEmpty(Profile.ApiKey))
             req.Headers.Authorization = new AuthenticationHeaderValue("Bearer", Profile.ApiKey);
-        req.Headers.UserAgent.ParseAdd($"DSH-Windows/{AppInfo.Version}");
+        req.Headers.UserAgent.ParseAdd(UserAgent);
         if (Profile.CustomHeaders is null) return;
         foreach (var (key, value) in Profile.CustomHeaders)
         {

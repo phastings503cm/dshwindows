@@ -130,6 +130,18 @@ public sealed record ProviderProfile
     public bool SubagentWorker { get; set; }
     /// <summary>How many subagents may work on this server at once (null = 2 for a worker, 4 for the primary).</summary>
     public int? SubagentParallel { get; set; }
+    /// <summary>Off: the route is never used — not as the primary, not for subagents, not as a backup — but stays
+    /// listed. null = on.</summary>
+    public bool? Enabled { get; set; }
+    /// <summary>Use this route when the primary stops answering (a backup). null = no.</summary>
+    public bool? Backup { get; set; }
+    /// <summary>Whether this model may see sensitive data as it is. null = decided by its address
+    /// (<see cref="RoutePrivacy.IsPrivateAddress"/>): your own machines are private, online services aren't. A route
+    /// that isn't private gets sensitive details masked before anything is sent.</summary>
+    public bool? IsPrivate { get; set; }
+    /// <summary>The plan's terms allow only interactive use (the Qwen Coding Plan): the task queue and other unattended
+    /// runs don't use it as the primary. null = no restriction.</summary>
+    public bool? InteractiveOnly { get; set; }
 
     public ProviderProfile() { }
 
@@ -166,9 +178,34 @@ public sealed record ProviderProfile
 
     [JsonIgnore] public string DisplayName => $"{Name} · {Model}";
 
+    /// <summary>On (the default) or switched off in Settings › AI Models.</summary>
+    [JsonIgnore] public bool IsEnabled => Enabled ?? true;
+
+    /// <summary>Takes over when the primary stops answering.</summary>
+    [JsonIgnore] public bool IsBackup => Backup == true;
+
+    /// <summary>May see sensitive data unmasked: the user's own choice when they made one, otherwise decided by the
+    /// address.</summary>
+    [JsonIgnore] public bool IsPrivateRoute => IsPrivate ?? RoutePrivacy.IsPrivateAddress(BaseUrl);
+
+    /// <summary>For interactive use only, under its plan's terms.</summary>
+    [JsonIgnore] public bool IsInteractiveOnly => InteractiveOnly == true;
+
+    /// <summary>Hosted APIs: these hosts and their subdomains are someone else's service (see <see cref="IsSelfHosted"/>).</summary>
+    public static readonly IReadOnlyList<string> HostedServices =
+    [
+        "openai.com", "openrouter.ai", "anthropic.com", "groq.com", "together.xyz", "together.ai",
+        "fireworks.ai", "mistral.ai", "deepseek.com", "x.ai", "googleapis.com", "azure.com",
+        "cerebras.ai", "perplexity.ai", "amazonaws.com", "api.aws",
+        // Subscription and pay-as-you-go plans: Z.ai / BigModel (GLM), Kimi and Moonshot, Alibaba Cloud (Qwen).
+        "z.ai", "bigmodel.cn", "kimi.ai", "kimi.com", "moonshot.ai", "moonshot.cn", "aliyuncs.com", "alibabacloud.com",
+    ];
+
     /// <summary>True for a server you run yourself (vLLM, SGLang, llama.cpp, Ollama, LM Studio ...) as
     /// opposed to a hosted API. Decided by host, not kind: a Spark behind nginx is often configured
-    /// as kind "OpenAI" because it speaks the same protocol, and it still wants chat_template_kwargs.</summary>
+    /// as kind "OpenAI" because it speaks the same protocol, and it still wants chat_template_kwargs.
+    /// (An unknown host counts as self-hosted here — the right way round for thinking parameters, the wrong
+    /// one for privacy, which <see cref="IsPrivateRoute"/> decides separately.)</summary>
     [JsonIgnore]
     public bool IsSelfHosted
     {
@@ -176,13 +213,7 @@ public sealed record ProviderProfile
         {
             if (!Uri.TryCreate(BaseUrl, UriKind.Absolute, out var uri) || string.IsNullOrEmpty(uri.Host)) return true;
             var host = uri.Host.ToLowerInvariant();
-            string[] hosted =
-            [
-                "openai.com", "openrouter.ai", "anthropic.com", "groq.com", "together.xyz", "together.ai",
-                "fireworks.ai", "mistral.ai", "deepseek.com", "x.ai", "googleapis.com", "azure.com",
-                "cerebras.ai", "perplexity.ai", "amazonaws.com", "api.aws",
-            ];
-            return !hosted.Any(h => host == h || host.EndsWith("." + h, StringComparison.Ordinal));
+            return !HostedServices.Any(h => host == h || host.EndsWith("." + h, StringComparison.Ordinal));
         }
     }
 
