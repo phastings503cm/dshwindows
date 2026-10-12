@@ -128,6 +128,15 @@ public sealed class ShieldV2Tests
         Assert.DoesNotContain("ann@x.io", Wire(sent[0]));
     }
 
+    [Fact]
+    public void ShortValuesCountInReplayedStateOnlyAsWords()
+    {
+        var map = new ShieldMap();
+        map.Mask("ask Al", new SensitiveDetector(SensitiveCategories.Default, ["Al"]));
+        Assert.False(map.Holds("Also, Alan"));
+        Assert.True(map.Holds("then ask Al."));
+    }
+
     // MARK: The assignment rule
 
     public static TheoryData<string> Code() =>

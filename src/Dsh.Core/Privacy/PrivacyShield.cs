@@ -167,12 +167,20 @@ public sealed class ShieldMap
         return Replace(text);
     }
 
-    /// <summary>Whether <paramref name="text"/> holds any collected value.</summary>
+    /// <summary>Whether <paramref name="text"/> holds any collected value (a short one as a word of its own).</summary>
     public bool Holds(string text)
     {
         if (IsEmpty || string.IsNullOrEmpty(text)) return false;
         if (Matcher().Find(text).Count > 0) return true;
-        return _placeholderOf.Keys.Any(v => v.Length < MinLiteralLength && text.Contains(v, StringComparison.Ordinal));
+        foreach (var value in _placeholderOf.Keys.Where(v => v.Length < MinLiteralLength))
+        {
+            for (var at = text.IndexOf(value, StringComparison.Ordinal); at >= 0; at = text.IndexOf(value, at + 1, StringComparison.Ordinal))
+            {
+                var end = at + value.Length;
+                if ((at == 0 || !char.IsLetterOrDigit(text[at - 1])) && (end == text.Length || !char.IsLetterOrDigit(text[end]))) return true;
+            }
+        }
+        return false;
     }
 
     /// <summary>One matcher for every collected value long enough to be looked for anywhere (built once per request,
