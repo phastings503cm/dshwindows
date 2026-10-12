@@ -275,7 +275,7 @@ public sealed class BedrockClientTests
         var error = await Assert.ThrowsAsync<LlmException>(() => CollectAsync(Client(handler)));
         Assert.Contains(Sonnet45, error.Message);
         Assert.Contains("us-east-1", error.Message);
-        Assert.Contains("Settings › Models", error.Message);
+        Assert.Contains("Settings › AI Models", error.Message);
         Assert.Contains("15 minutes", error.Message);
     }
 
@@ -351,7 +351,7 @@ public sealed class BedrockClientTests
 
         Assert.Equal("Fail", Disposition(error));
         Assert.Contains("expired", error.Message);
-        Assert.Contains("Settings › Models", error.Message);
+        Assert.Contains("Settings › AI Models", error.Message);
         Assert.Contains("aws login --profile dsh-bedrock", error.Message);
         Assert.IsType<AwsSignInRequiredException>(error.InnerException);
         Assert.Empty(handler.Requests);

@@ -76,7 +76,7 @@ public sealed class BedrockClient : IProviderClient
     }
 
     private string RequireRegion() => Region ?? throw LlmException.Rejected(400,
-        "Bedrock needs an AWS Region (such as us-east-1) — set one in Settings › Models.", "no AWS Region configured",
+        "Bedrock needs an AWS Region (such as us-east-1) — set one in Settings › AI Models.", "no AWS Region configured",
         permanent: true);
 
     /// <summary>The runtime endpoint: the profile's base URL when it is an absolute http(s) URL (the
@@ -327,7 +327,7 @@ public sealed class BedrockClient : IProviderClient
         if (_credentials is null)
         {
             throw LlmException.Rejected(401,
-                "Bedrock needs an AWS sign-in: choose an AWS profile and sign in (Settings › Models), or use a Bedrock API key.",
+                "Bedrock needs an AWS sign-in: choose an AWS profile and sign in (Settings › AI Models), or use a Bedrock API key.",
                 "no AWS credentials", permanent: true);
         }
         var region = RequireRegion();
@@ -344,7 +344,7 @@ public sealed class BedrockClient : IProviderClient
     }
 
     private static string SignInExpired(string profile) =>
-        $"The AWS sign-in for profile \"{profile}\" has expired. Sign in again in Settings › Models, or run `aws login --profile {profile}`.";
+        $"The AWS sign-in for profile \"{profile}\" has expired. Sign in again in Settings › AI Models, or run `aws login --profile {profile}`.";
 
     /// <summary>User agent + the profile's custom headers (before signing, so x-amz-* ones are signed).</summary>
     private void ApplyHeaders(HttpRequestMessage request)
@@ -424,14 +424,14 @@ public sealed class BedrockClient : IProviderClient
             && (e.Kind != "accessdeniedexception" || lower.Contains("api key") || lower.Contains("bearer") || lower.Contains("authentication")))
         {
             return LlmException.Rejected(e.Status is 0 ? 403 : e.Status,
-                $"Bedrock did not accept the API key ({detail}). Short-term keys last at most 12 hours: create a new one, or sign in with AWS in Settings › Models.",
+                $"Bedrock did not accept the API key ({detail}). Short-term keys last at most 12 hours: create a new one, or sign in with AWS in Settings › AI Models.",
                 body, permanent: true);
         }
         if (e.Authentication)
         {
             var profile = Profile.AwsProfile ?? "default";
             return LlmException.Rejected(e.Status is 0 ? 403 : e.Status,
-                $"AWS did not accept the credentials for profile \"{profile}\" ({detail}). Sign in again in Settings › Models, or run `aws login --profile {profile}`.",
+                $"AWS did not accept the credentials for profile \"{profile}\" ({detail}). Sign in again in Settings › AI Models, or run `aws login --profile {profile}`.",
                 body, permanent: true);
         }
         switch (e.Kind)
@@ -442,7 +442,7 @@ public sealed class BedrockClient : IProviderClient
             case "accessdeniedexception":
             {
                 var text = $"Bedrock refused access to {model} in {region} ({detail}). Your AWS account may need access to this model " +
-                           "enabled — the Bedrock setup in Settings › Models can do that.";
+                           "enabled — the Bedrock setup in Settings › AI Models can do that.";
                 if (lower.Contains("subscri") || lower.Contains("marketplace") || lower.Contains("not authorized"))
                     text += " Right after a first-time subscription AWS can keep refusing for up to about 15 minutes; if you just enabled it, try again shortly.";
                 return LlmException.Rejected(403, text, body);

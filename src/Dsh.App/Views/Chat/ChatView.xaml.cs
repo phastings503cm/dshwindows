@@ -327,8 +327,10 @@ public partial class ChatView : UserControl
         var current = _model.Host.ActiveModelId ?? _model.Config.ActiveProvider?.Model ?? "No model";
         var limit = _model.Host.ContextLimit();
         ModelMenuText.Text = $"{current} · {Menus.ShortTokens(limit)}";
+        var masked = _model.Config.ActiveProvider is { IsPrivateRoute: false } && _model.Config.Privacy.Mask;
         ModelMenuButton.ToolTip = "Model in use and its context window. Pick a Spark Swapper model to switch what that box serves " +
-                                  "(also /swap), or another configured provider.";
+                                  "(also /swap), or make another model the primary." +
+                                  (masked ? "\nNot private: sensitive details are masked before anything is sent to it." : "");
 
         var fallback = _model.Config.ActiveProvider?.Thinking;
         var level = session.Thinking ?? fallback;

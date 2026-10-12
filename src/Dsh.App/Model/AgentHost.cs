@@ -69,7 +69,7 @@ public sealed partial class AgentHost : ObservableObject
 
     private sealed record EngineKey(string Profile, int Window, ThinkingLevel? Thinking, PermissionPreset Preset,
                                     int Skills, bool ComputerTools, bool Vision, string Shell, long Vault,
-                                    bool GoalMode, int Memory, string Agents);
+                                    bool GoalMode, int Memory, string Agents, string Routing);
 
     /// <summary>Everything about skills one turn needs: what exists, what's on, and the prompt text.</summary>
     private sealed record SkillState(IReadOnlyList<Skill> All, IReadOnlyList<Skill> Active, SkillPromptResult Result, int Signature);
@@ -229,6 +229,7 @@ public sealed partial class AgentHost : ObservableObject
         Queue.DetachSession(id);
         Config.SetSkillsFor(id, null);
         Log.Delete(id);
+        _pendingShield.Remove(id);
         if (Session(id) is { } vm) Sessions.Remove(vm);
         if (SelectedId == id) SelectedId = Sessions.FirstOrDefault()?.Id;
     }
@@ -278,7 +279,15 @@ public sealed partial class AgentHost : ObservableObject
             switch (row.Kind)
             {
                 case "user": vm.AppendMessage(MessageRole.User, row.Text ?? "", row.At); break;
-                case "assistant": vm.AppendMessage(MessageRole.Assistant, row.Text ?? "", row.At); break;
+                case "assistant":
+                    vm.AppendMessage(MessageRole.Assistant, row.Text ?? "", row.At);
+                    // The shield's line rides in ArgSummary (an assistant row has no arguments).
+                    if (row.ArgSummary is { Length: > 0 } shield && vm.Entries[^1] is MessageEntryVM reply)
+                    {
+                        reply.Shield = shield;
+                        reply.ShieldDetails = shield;
+                    }
+                    break;
                 case "notice": vm.AppendMessage(MessageRole.Notice, row.Text ?? "", row.At); break;
                 case "error": vm.AppendMessage(MessageRole.Error, row.Text ?? "", row.At); break;
                 case "tool":
@@ -369,6 +378,11 @@ public sealed partial class AgentHost : ObservableObject
         if (VaultPrompt.Section(Vault.All, shell.Kind) is { Length: > 0 } vaultSection) prompt += "\n\n" + vaultSection;
         if (vm.Preset == PermissionPreset.Plan)
             prompt += "\n\n--- Plan mode ---\nDo not modify anything. Research and produce a plan, then call `exit_plan_mode` with it and stop.";
+        // With servers for subagents: which they are, which are private, and what that means for what they may be told.
+        var servers = SubagentServersNow();
+        if (SubagentServers.Section(servers) is { Length: > 0 } serverSection)
+            prompt += "\n\n--- Subagent servers ---\n" + serverSection +
+                      " When a task needs sensitive data, set `sensitive: true` on agent or delegate: it then runs only on a private server.";
         _systemPrompts[sessionId] = prompt;
 
         // Background processes: the model's own long-running programs (game engines, dev servers,
@@ -377,7 +391,7 @@ public sealed partial class AgentHost : ObservableObject
         // in a chat still asks (the engine's gate). Both count as built-ins, so a plugin can't take
         // over their names.
         var agents = CatalogFor(vm);
-        var builtins = ToolRegistry.Standard(0, shell, agents).Adding(ExtraTools.Processes());
+        var builtins = ToolRegistry.Standard(0, shell, agents, servers).Adding(ExtraTools.Processes());
         if (Config.ComputerToolsEnabled) builtins = builtins.Adding(ExtraTools.Machine());
         var extra = new List<IToolExecutor>(PluginLoader.Tools(Plugins, builtins.Names));
         if (skillState.Active.Count > 0) extra.Add(new UseSkillTool(skillState.Active));
@@ -895,15 +909,18 @@ public sealed partial class AgentHost : ObservableObject
         var shell = Config.ResolvedAgentShell;
         var key = new EngineKey(ProfileKey(profile), window, thinking, vm.Preset, skillState.Signature,
                                 Config.ComputerToolsEnabled, VisionOn(profile), shell.Executable, Vault.Revision,
-                                vm.Goal is not null, MemorySignature(vm), AgentsStampFor(vm));
+                                vm.Goal is not null, MemorySignature(vm), AgentsStampFor(vm), RoutingStamp());
         if (_engineKeys.TryGetValue(sessionId, out var previous) && !string.Equals(ModelOf(previous.Profile), profile.Model, StringComparison.Ordinal))
             vm.Note($"The server is now serving `{profile.Model}` (was `{ModelOf(previous.Profile)}`) — switched to it, {Fmt.N(window)}-token window.");
         if (!_engines.TryGetValue(sessionId, out var engine) || _engineKeys.GetValueOrDefault(sessionId) != key)
         {
-            engine = BuildEngine(vm, MakeClient(profile), window, thinking, skillState);
+            engine = BuildEngine(vm, MakeChatClient(profile, sessionId), window, thinking, skillState);
             _engineKeys[sessionId] = key;
         }
         _retryRoute.Remove(sessionId);
+        // A turn reports its own backup and its own masking.
+        _failoverNoted.Remove(sessionId);
+        _pendingShield.Remove(sessionId);
         var input = _transcripts[sessionId].ToList();
 
         // Engine events arrive on a pool thread; hop to the UI thread so the timeline is only ever
@@ -958,8 +975,10 @@ public sealed partial class AgentHost : ObservableObject
     /// so the engine is rebuilt exactly then and the server's prompt cache stays warm the rest of the time.</summary>
     private int MemorySignature(SessionVM vm) => MemoryPromptFor(vm.WorkspacePath, vm.Preset != PermissionPreset.Plan).GetHashCode();
 
-    /// <summary>Every model client the host makes goes through here, so tests can swap the network.</summary>
-    private IProviderClient MakeClient(ProviderProfile profile) => ProviderClients.Create(profile, HttpHandlerForTesting);
+    /// <summary>Every model client the host makes goes through here, so tests can swap the network. A route that isn't
+    /// private gets the sensitive-data shield (reporting to <paramref name="sessionId"/>'s chat, when given).</summary>
+    private IProviderClient MakeClient(ProviderProfile profile, string? sessionId = null) =>
+        ProviderClients.Create(profile, HttpHandlerForTesting, ShieldFor(sessionId));
 
     /// <summary>Tests: answer model requests from this handler instead of the network.</summary>
     public HttpMessageHandler? HttpHandlerForTesting { get; set; }
@@ -1019,10 +1038,23 @@ public sealed partial class AgentHost : ObservableObject
             }
 
             case EngineEvent.AssistantMessage m:
+            {
                 // Fold a turn's complete text if deltas never arrived, then close the bubble so any
                 // tool calls render after it.
-                if (vm.StreamingId is null && m.Text.Length > 0) vm.AppendMessage(MessageRole.Assistant, m.Text);
-                if (m.Text.Length > 0) Log.RecordItem(sessionId, "assistant", m.Text);
+                var replyId = vm.StreamingId;
+                if (vm.StreamingId is null && m.Text.Length > 0) replyId = vm.AppendMessage(MessageRole.Assistant, m.Text);
+                // What the shield masked for this reply shows on it (its request reported just before it ended).
+                ShieldReport? shield = null;
+                if (m.Text.Length > 0 && _pendingShield.Remove(sessionId, out var masked) && masked.Summary is { } summary)
+                {
+                    shield = masked;
+                    if (vm.Entries.LastOrDefault(e => e.Id == replyId) is MessageEntryVM reply)
+                    {
+                        reply.Shield = summary;
+                        reply.ShieldDetails = masked.Details;
+                    }
+                }
+                if (m.Text.Length > 0) Log.RecordItem(sessionId, "assistant", m.Text, argSummary: shield?.Summary);
                 vm.EndStreaming();
                 // A plan written in prose ("Here's my plan: 1. … 2. …") shows in the plan panel too, unless
                 // the agent is keeping a live todo list that is still in progress.
@@ -1036,6 +1068,7 @@ public sealed partial class AgentHost : ObservableObject
                     }
                 }
                 break;
+            }
 
             case EngineEvent.ToolStarted t:
                 vm.ClearReasoning();
@@ -1524,7 +1557,7 @@ public sealed partial class AgentHost : ObservableObject
                     MessageRole.Assistant => "assistant",
                     MessageRole.Notice => "notice",
                     _ => "error",
-                }, m.Text, null, null, null, m.Role == MessageRole.Error, entry.At),
+                }, m.Text, null, m.Role == MessageRole.Assistant ? m.Shield : null, null, m.Role == MessageRole.Error, entry.At),
                 ToolEntryVM t => new LogItemRow(sessionId, seq, "tool", t.Summary, t.Name, t.Preview, t.Output, t.IsOk == false, entry.At),
                 // The removed count rides in ArgSummary so a reloaded divider still says how much
                 // was folded away.

@@ -33,6 +33,11 @@ public sealed partial class AppModel : ObservableObject
     /// <summary>A newer release is available (shown as a banner until dismissed).</summary>
     [ObservableProperty] private UpdateInfo? _update;
 
+    /// <summary>The last connection test of each route (Settings › AI Models shows it as a dot): route id → result.</summary>
+    public Dictionary<string, RouteCheck> RouteChecks { get; } = new(StringComparer.Ordinal);
+
+    public sealed record RouteCheck(bool Ok, string Detail, DateTimeOffset At);
+
     public sealed record UpdateInfo(string Version, string Url);
 
     /// <summary>Views ask the shell to open windows through these.</summary>
@@ -43,6 +48,8 @@ public sealed partial class AppModel : ObservableObject
     public event Action<Views.Guide.BedrockPage, ProviderProfile?>? BedrockGuideRequested;
     /// <summary>Open the setup window on "Connect my Spark Swapper" (true: straight to the address-and-login form).</summary>
     public event Action<bool>? SwapperGuideRequested;
+    /// <summary>Open the setup window on "Connect a subscription plan" (optionally with a plan already chosen).</summary>
+    public event Action<string?>? PlanGuideRequested;
     public event Action? MemoryRequested;
     public event Action? ExternalImportRequested;
     public event Action? MemoriesRequested;
@@ -200,6 +207,8 @@ public sealed partial class AppModel : ObservableObject
         BedrockGuideRequested?.Invoke(page, route);
     /// <summary>"Connect my Spark Swapper": paste a connection code (or sign in with an address and login).</summary>
     public void ShowSwapperGuide(bool login = false) => SwapperGuideRequested?.Invoke(login);
+    /// <summary>"Connect a subscription plan": GLM, Kimi, Qwen or OpenAI.</summary>
+    public void ShowPlanGuide(string? plan = null) => PlanGuideRequested?.Invoke(plan);
     public void ShowMemory() => MemoryRequested?.Invoke();
     /// <summary>Open "Bring in Claude Code &amp; Cursor".</summary>
     public void ShowExternalImport() => ExternalImportRequested?.Invoke();

@@ -54,7 +54,7 @@ public sealed partial class BedrockGuide : IWizardGuide
 
     public void Activate()
     {
-        // Opened past the CLI page (Settings › Models: sign in again, change the model): find the CLI
+        // Opened past the CLI page (Settings › AI Models: sign in again, change the model): find the CLI
         // first; if it's gone or too old, that page comes first.
         if (Page > BedrockPage.Cli && _cliStatus is null && !_demo) _ = ResumeAsync(Page);
         else OnShown();

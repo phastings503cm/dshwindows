@@ -69,6 +69,7 @@ public partial class MainWindow : Window
         model.WizardRequested += ShowWizard;
         model.BedrockGuideRequested += ShowBedrockGuide;
         model.SwapperGuideRequested += ShowSwapperGuide;
+        model.PlanGuideRequested += ShowPlanGuide;
         model.MemoryRequested += ShowMemory;
         model.ExternalImportRequested += ShowExternalImport;
         model.MemoriesRequested += ShowMemories;
@@ -226,7 +227,7 @@ public partial class MainWindow : Window
         ModelLabel.Text = provider is null ? "No model" : served ?? provider.Model;
         ModelButton.ToolTip = provider is null
             ? "No model configured — run the setup wizard"
-            : $"{provider.DisplayName}\n{provider.BaseUrl}" +
+            : $"{provider.DisplayName}\n{provider.BaseUrl}" + (provider.IsPrivateRoute ? "\nPrivate" : "\nNot private: sensitive details are masked") +
               (Model.Spark.IsSwitchingFor(provider) ? $"\n{Model.Spark.BoxFor(provider)?.Name} is switching models…" : "");
     }
 
@@ -690,6 +691,17 @@ public partial class MainWindow : Window
         var owner = OwnedWindows.OfType<Window>().FirstOrDefault(w => w.IsActive) ?? this;
         var wizard = new SetupWizardWindow(Model) { Owner = owner };
         wizard.StartSwapperGuide(login);
+        wizard.ShowDialog();
+        UpdateModelLabel();
+        UpdateBanner();
+    }
+
+    /// <summary>"Connect a subscription plan" in the setup window.</summary>
+    public void ShowPlanGuide(string? plan)
+    {
+        var owner = OwnedWindows.OfType<Window>().FirstOrDefault(w => w.IsActive) ?? this;
+        var wizard = new SetupWizardWindow(Model) { Owner = owner };
+        wizard.StartPlanGuide(plan);
         wizard.ShowDialog();
         UpdateModelLabel();
         UpdateBanner();

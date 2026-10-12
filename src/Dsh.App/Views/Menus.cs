@@ -33,8 +33,9 @@ public static class Menus
         return item;
     }
 
-    /// <summary>The model in use, and one click to change it: the Spark's models (served by the
-    /// Spark Swapper) and the provider routes configured in Settings.</summary>
+    /// <summary>The model in use, and one click to change it: what each Spark Swapper box serves (picking a model asks that
+    /// box to switch), then the configured routes by role — Primary, Subagents, Backups, Other — each marked private (a
+    /// lock) or masked (a shield). Switched-off routes aren't offered.</summary>
     public static ContextMenu Model(AppModel model)
     {
         var menu = new ContextMenu();
@@ -71,15 +72,24 @@ public static class Menus
             menu.Items.Add(Item("Refresh", () => _ = spark.RefreshAsync(), Icons.Refresh));
             menu.Items.Add(new Separator());
         }
-        menu.Items.Add(Header("Providers"));
-        foreach (var provider in model.Config.Providers)
+        var config = model.Config;
+        foreach (var (role, routes) in RouteRoster.Groups(config.Providers, config.ActiveRoute))
         {
-            var route = provider.RouteId;
-            menu.Items.Add(Item(provider.DisplayName, () =>
+            menu.Items.Add(Header(role.Title()));
+            foreach (var provider in routes)
             {
-                model.Config.ActiveRoute = route;
-                model.Host.ResetRouteCache();
-            }, isChecked: route == model.Config.ActiveRoute));
+                var route = provider.RouteId;
+                var item = Item(provider.DisplayName, () =>
+                {
+                    if (config.ActiveRoute == route) return;
+                    config.ActiveRoute = route;
+                    model.Host.ResetRouteCache();
+                }, provider.IsPrivateRoute ? Icons.Lock : Icons.Shield);
+                item.ToolTip = (role == RouteRole.Primary ? "The primary model: it answers you. " : "Make this the primary model. ") +
+                               (provider.IsPrivateRoute ? "Private — it may see sensitive data." : "Not private — sensitive details are masked before anything is sent.");
+                if (role == RouteRole.Primary) item.FontWeight = FontWeights.SemiBold;
+                menu.Items.Add(item);
+            }
         }
         menu.Items.Add(new Separator());
         menu.Items.Add(Item("Configure Models…", () => model.ShowSettings(SettingsTab.Models), Icons.Settings));

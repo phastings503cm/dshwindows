@@ -172,6 +172,12 @@ public sealed partial class AgentHost
             Broadcast("No model is configured — run the setup wizard, then start the queue.", error: true);
             return;
         }
+        // A plan whose terms allow only interactive use never works the queue.
+        if (InteractiveOnlyPrimary is { } interactive)
+        {
+            Broadcast(QueueRefusal(interactive), error: true);
+            return;
+        }
         if (QueueRunning)
         {
             if (only is not null && Queue.Find(only) is { } task && task.Status != QueueTaskStatus.Running)
@@ -280,6 +286,13 @@ public sealed partial class AgentHost
             while (QueueActive(generation))
             {
                 if (NextQueueTask() is not { } task) break;
+                // The primary was changed to an interactive-only plan while the queue ran: stop before the next task.
+                if (InteractiveOnlyPrimary is { } interactive)
+                {
+                    Config.QueuePaused = true;
+                    Broadcast(QueueRefusal(interactive), error: true);
+                    return;
+                }
                 var outcome = await WorkAsync(task.Id, generation, first);
                 first = false;
                 switch (outcome)
@@ -558,6 +571,14 @@ public sealed partial class AgentHost
             while (true)
             {
                 if (ct.IsCancellationRequested) return new GoalOutcome.Stopped();
+                // Under an interactive-only plan, nothing runs without the user: a queue task not at all, a /goal one round at
+                // a time (each reply of the user's takes it one round further).
+                if ((auto || kickedOff) && InteractiveOnlyPrimary is { } interactive)
+                {
+                    var why = auto ? QueueRefusal(interactive) : GoalRefusal(interactive);
+                    Notice(why, error: auto);
+                    return new GoalOutcome.Blocked(why);
+                }
                 string modelText, displayText;
                 if (!kickedOff)
                 {
@@ -778,7 +799,7 @@ public sealed partial class AgentHost
             : _engineKeys.TryGetValue(sessionId, out var key) ? key.Profile : null;
         if (ProfileKey(profile) == current) return null;
         _retryRoute[sessionId] = profile;
-        return (MakeClient(profile), profile.Model);
+        return (MakeChatClient(profile, sessionId), profile.Model);
     }
 
     // MARK: - Background agents

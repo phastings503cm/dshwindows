@@ -29,6 +29,13 @@ public sealed partial class MessageEntryVM(MessageRole role, string text, string
 {
     public MessageRole Role { get; } = role;
     [ObservableProperty] private string _text = text;
+    /// <summary>On an assistant reply from a model that isn't private: what the shield masked before sending
+    /// ("Masked 2 emails and 1 key before sending to Kimi Code") — counts, never values. Null: nothing was masked.</summary>
+    [ObservableProperty] [NotifyPropertyChangedFor(nameof(HasShield))] private string? _shield;
+    /// <summary>The categories behind <see cref="Shield"/>, for its tooltip.</summary>
+    [ObservableProperty] private string? _shieldDetails;
+
+    public bool HasShield => Shield is not null;
 
     public bool IsUser => Role == MessageRole.User;
     public bool IsAssistant => Role == MessageRole.Assistant;

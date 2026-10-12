@@ -19,6 +19,31 @@ public sealed record SessionSkillSelection(IReadOnlyList<string> Pinned, bool Au
 /// <summary>What code mode reopens with for one project.</summary>
 public sealed record CodeState(IReadOnlyList<string> Files, string? Active, bool Terminal, bool Tree, bool Chat = true);
 
+/// <summary>Settings › AI Models › Sensitive data: whether the shield masks what goes to models that aren't private,
+/// which kinds of value, and the user's own terms (one per line; "re:" for a regular expression).</summary>
+public sealed record PrivacySettings
+{
+    public bool Mask { get; init; } = true;
+    public bool Secrets { get; init; } = true;
+    public bool Emails { get; init; } = true;
+    public bool Phones { get; init; } = true;
+    public bool Ids { get; init; } = true;
+    public bool Ips { get; init; }
+    public bool Terms { get; init; } = true;
+    public string CustomTerms { get; init; } = "";
+
+    public static PrivacySettings Default { get; } = new();
+
+    [JsonIgnore]
+    public SensitiveCategories Categories =>
+        (Secrets ? SensitiveCategories.Secrets : 0) | (Emails ? SensitiveCategories.Emails : 0) | (Phones ? SensitiveCategories.Phones : 0)
+        | (Ids ? SensitiveCategories.Ids : 0) | (Ips ? SensitiveCategories.Ips : 0) | (Terms ? SensitiveCategories.CustomTerms : 0);
+
+    [JsonIgnore]
+    public IReadOnlyList<string> TermLines =>
+        CustomTerms.Replace("\r", "").Split('\n').Select(l => l.Trim()).Where(l => l.Length > 0).ToList();
+}
+
 /// <summary>Persisted app configuration: providers, active model, permission preset, recent
 /// projects, editor/terminal preferences, skills choices, window placement. Stored as JSON in
 /// %APPDATA%\DSH\settings.json. API keys are kept out of it — they live in Windows Credential
@@ -69,6 +94,9 @@ public sealed partial class AppConfig : ObservableObject
     [ObservableProperty] private string _sparkUrl = "";
     [ObservableProperty] private string _sparkUser = "";
     [ObservableProperty] private string? _sparkPin;
+
+    /// <summary>The sensitive-data shield's settings.</summary>
+    [ObservableProperty] private PrivacySettings _privacy = PrivacySettings.Default;
 
     [ObservableProperty] private double _sidebarWidth = 260;
     public WindowPlacement? Window { get; set; }
@@ -379,6 +407,7 @@ public sealed partial class AppConfig : ObservableObject
         public bool? MemoryEnabled { get; set; }
         public bool? SubagentsUsePrimary { get; set; }
         public List<SwapperConnection>? SwapperConnections { get; set; }
+        public PrivacySettings? Privacy { get; set; }
     }
 
     private void Load()
@@ -431,6 +460,7 @@ public sealed partial class AppConfig : ObservableObject
             PlanPanelAutoOpen = stored?.PlanPanelAutoOpen ?? true;
             MemoryEnabled = stored?.MemoryEnabled ?? true;
             SubagentsUsePrimary = stored?.SubagentsUsePrimary ?? true;
+            Privacy = stored?.Privacy ?? PrivacySettings.Default;
             if (stored?.SwapperConnections is { } connections)
                 foreach (var connection in connections) SwapperConnections.Add(connection);
             else
@@ -505,6 +535,7 @@ public sealed partial class AppConfig : ObservableObject
             MemoryEnabled = MemoryEnabled,
             SubagentsUsePrimary = SubagentsUsePrimary,
             SwapperConnections = SwapperConnections.Select(c => c.DeepCopy()).ToList(),
+            Privacy = Privacy,
         };
         try
         {

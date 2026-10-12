@@ -7,7 +7,7 @@ namespace Dsh.App.Model;
 //
 // Everything the host adds around a chat's engine beyond the model loop itself:
 //  * the fleet — with more than one model server (say two DGX Sparks), the active route is the primary
-//    (the main agent talks to it) and routes marked "subagent server" in Settings › Models are workers;
+//    (the main agent talks to it) and routes marked "Subagent" in Settings › AI Models are workers;
 //    subagents run on the workers, spreading side tasks across machines
 //  * a roster per chat, so the plan panel can show who is working on what, and where
 //  * long-term memory — notes searched for each message, never loaded wholesale
@@ -35,6 +35,8 @@ public sealed partial class AgentHost
         Config.PropertyChanged += (_, e) =>
         {
             if (e.PropertyName is nameof(AppConfig.ActiveRoute) or nameof(AppConfig.SubagentsUsePrimary)) RefreshFleet();
+            // The shield's settings are part of every engine: chats pick them up from their next message.
+            if (e.PropertyName is nameof(AppConfig.Privacy)) _engines.Clear();
         };
         Config.Providers.CollectionChanged += (_, _) => RefreshFleet();
         RefreshFleet();
@@ -55,6 +57,7 @@ public sealed partial class AgentHost
                 Id = active.RouteId,
                 Label = RouteLabel(active),
                 IsPrimary = true,
+                IsPrivate = active.IsPrivateRoute,
                 MaxParallel = Math.Clamp(active.SubagentParallel ?? 4, 1, 16),
                 // The main route is probed the way the chat probes it (and shares its cache).
                 Resolve = _ => _dispatcher.InvokeAsync(ResolvePrimaryTargetAsync).Task.Unwrap(),
@@ -68,6 +71,7 @@ public sealed partial class AgentHost
                 Id = captured.RouteId,
                 Label = RouteLabel(captured),
                 IsPrimary = false,
+                IsPrivate = captured.IsPrivateRoute,
                 MaxParallel = Math.Clamp(captured.SubagentParallel ?? 2, 1, 16),
                 Resolve = ct => ResolveWorkerTargetAsync(captured, ct),
             });
@@ -91,7 +95,7 @@ public sealed partial class AgentHost
             var primary = Config.Providers.FirstOrDefault(p => p.RouteId == Config.ActiveRoute);
             var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             if (primary is not null) seen.Add(MachineOf(primary));
-            return Config.Providers.Where(p => p.SubagentWorker && p.RouteId != Config.ActiveRoute && seen.Add(MachineOf(p))).ToList();
+            return Config.Providers.Where(p => p.IsEnabled && p.SubagentWorker && p.RouteId != Config.ActiveRoute && seen.Add(MachineOf(p))).ToList();
         }
     }
 
@@ -334,7 +338,7 @@ public sealed partial class AgentHost
         else
         {
             lines.Add(fleet.Count == 1
-                ? "**Model server:** subagents share the one server. Mark more routes “Use for subagents” in Settings › Models to spread them across machines."
+                ? "**Model server:** subagents share the one server. Tick “Subagent” on more routes in Settings › AI Models to spread them across machines."
                 : "**Model servers** (the main agent uses the primary; subagents go to workers first):");
             foreach (var server in fleet)
             {

@@ -574,7 +574,7 @@ public sealed partial class BedrockGuide
             Lead($"Chats now run on {_selected?.Name ?? "Bedrock"} in your AWS account."),
             Bullets(
                 (Icons.Chat, "**Start chatting** — press the button below."),
-                (Icons.Robot, "**Switch models** any time: run this guide again from Settings › Models › Add Amazon Bedrock, or the setup wizard."),
+                (Icons.Robot, "**Switch models** any time: run this guide again from Settings › AI Models › Add › Amazon Bedrock, or the setup wizard."),
                 (Icons.Refresh, "**Sign-in**: when your AWS session ends, DSH says so and signs you in again with one click (the browser opens)."),
                 (Icons.Info, "**Costs** show up on your AWS bill, under Amazon Bedrock (and AWS Marketplace for Marketplace models). AWS Budgets can email you before you spend more than you planned.")));
         var keys = Ui.Stack(Paragraph("Some tools (like Claude Code with Bedrock) take a Bedrock API key instead of an AWS sign-in. DSH can make one from your sign-in. It works for 12 hours (or until your sign-in ends).", 12.5));

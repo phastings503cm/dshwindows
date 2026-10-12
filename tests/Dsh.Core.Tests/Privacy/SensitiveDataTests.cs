@@ -64,6 +64,8 @@ public sealed class SensitiveDataTests
     [InlineData("token=short")]                 // under six characters
     [InlineData("the password is required")]    // no separator
     [InlineData("max_tokens: 4096")]
+    [InlineData("echo token=[vault:DEPLOY_TOKEN]")] // the vault's own stand-ins
+    [InlineData("$env:OPENAI_API_KEY = \"{{vault:OPENAI_API_KEY}}\"")]
     public void PlaceholdersAndProseAreNotSecrets(string text) => Assert.DoesNotContain(Found(text), f => f.Kind == SensitiveKind.Secret);
 
     // MARK: Email, phone

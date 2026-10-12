@@ -20,13 +20,26 @@
                           Fill="{DynamicResource TextFillColorSecondaryBrush}" />
                     <TextBlock x:Name="MarkerGlyph" Style="{StaticResource Glyph}" FontSize="14" Visibility="Collapsed" />
                 </Grid>
-                <Border x:Name="Bubble" Grid.Column="1" CornerRadius="8" HorizontalAlignment="Stretch">
-                    <Grid>
-                        <chat:MarkdownPresenter x:Name="Rich" Markdown="{Binding Text}" FontSize="14" />
-                        <TextBox x:Name="Plain" Style="{StaticResource SelectableText}" Text="{Binding Text, Mode=OneWay}" FontSize="14"
-                                 Visibility="Collapsed" />
-                    </Grid>
-                </Border>
+                <StackPanel Grid.Column="1">
+                    <Border x:Name="Bubble" CornerRadius="8" HorizontalAlignment="Stretch">
+                        <Grid>
+                            <chat:MarkdownPresenter x:Name="Rich" Markdown="{Binding Text}" FontSize="14" />
+                            <TextBox x:Name="Plain" Style="{StaticResource SelectableText}" Text="{Binding Text, Mode=OneWay}" FontSize="14"
+                                     Visibility="Collapsed" />
+                        </Grid>
+                    </Border>
+                    <!-- What the privacy shield masked before this reply's request went to a model that isn't private. -->
+                    <Border Style="{StaticResource Chip}" HorizontalAlignment="Left" Margin="0,6,0,0"
+                            Visibility="{Binding HasShield, Converter={StaticResource BoolToVisibility}}"
+                            ToolTip="{Binding ShieldDetails}">
+                        <StackPanel Orientation="Horizontal">
+                            <TextBlock Style="{StaticResource Glyph}" FontSize="11" Text="{x:Static infra:Icons.Shield}" Margin="0,0,6,0"
+                                       VerticalAlignment="Center" Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
+                            <TextBlock Text="{Binding Shield}" FontSize="11.5" VerticalAlignment="Center"
+                                       Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
+                        </StackPanel>
+                    </Border>
+                </StackPanel>
             </Grid>
             <DataTemplate.Triggers>
                 <DataTrigger Binding="{Binding Role}" Value="{x:Static model:MessageRole.User}">

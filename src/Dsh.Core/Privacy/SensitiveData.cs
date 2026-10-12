@@ -295,13 +295,14 @@ public sealed partial class SensitiveDetector
     }
 
     /// <summary>A stand-in rather than a real value: ***, &lt;your key&gt;, ${TOKEN}, xxxxxx, changeme, your-api-key — or a
-    /// placeholder the shield already put there.</summary>
+    /// placeholder the app already put there (the shield's ⟦…⟧, the Credentials Vault's {{vault:NAME}} and [vault:NAME]).</summary>
     public static bool IsPlaceholderValue(string value)
     {
         var v = value.Trim().Trim('"', '\'', ',', ';');
         if (v.Length == 0) return true;
         if (v.All(c => c == '*')) return true;
         if (v.StartsWith('<') || v.StartsWith("${", StringComparison.Ordinal) || v.StartsWith("{{", StringComparison.Ordinal)) return true;
+        if (v.StartsWith("[vault:", StringComparison.Ordinal)) return true;
         if (v.StartsWith("xxx", StringComparison.OrdinalIgnoreCase)) return true;
         if (v.Equals("changeme", StringComparison.OrdinalIgnoreCase)) return true;
         if (v.StartsWith("your-", StringComparison.OrdinalIgnoreCase) || v.StartsWith("your_", StringComparison.OrdinalIgnoreCase)) return true;

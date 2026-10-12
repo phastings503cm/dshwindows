@@ -25,34 +25,58 @@ public static class ProviderKinds
     };
 }
 
-/// <summary>The configured model routes: which one is active, add/edit/remove, and a connection test.</summary>
+/// <summary>Settings › AI Models: every configured model and its role — the primary that answers you, subagent
+/// servers, backups — whether it is on and whether it is private, plus testing, editing and adding models; and the
+/// sensitive-data shield that masks what goes to models that aren't private.</summary>
 public sealed class ModelsPage : UserControl
 {
     private readonly AppModel _model;
     private readonly StackPanel _list = new();
     private readonly StackPanel _fleet = new();
     private readonly TextBlock _status = Ui.Secondary("");
+    private readonly StackPanel _privacy = new();
+    private readonly TextBox _tryIn = Ui.Field(placeholder: "Type or paste something to see what a model that isn't private would get");
+    private readonly TextBox _tryOut = Ui.Field(mono: true);
+    private readonly TextBlock _termProblems = Ui.Status("", "SystemFillColorCautionBrush");
+    private bool _testing;
 
     public ModelsPage(AppModel model)
     {
         _model = model;
-        var page = new StackPanel { MaxWidth = 760 };
-        page.Children.Add(Ui.Title("Models"));
-        var intro = Ui.Secondary("Any OpenAI-compatible server works: a local Ollama or LM Studio, vLLM or SGLang on your LAN, a DGX Spark, or a hosted API — or Amazon Bedrock with your AWS sign-in. API keys are kept in Windows Credential Manager, never in the settings file.");
+        var page = new StackPanel { MaxWidth = 820 };
+        page.Children.Add(Ui.Title("AI Models"));
+        var intro = Ui.Secondary("Any OpenAI-compatible server works: a Spark Swapper box, a local Ollama or LM Studio, vLLM or SGLang on your LAN, a subscription plan (GLM, Kimi, Qwen, OpenAI), or Amazon Bedrock with your AWS sign-in. API keys are kept in Windows Credential Manager, never in the settings file.");
         intro.Margin = new Thickness(0, 6, 0, 8);
         page.Children.Add(intro);
+        var add = Ui.Button("Add ▾", () => { }, accent: true);
+        add.Click += (_, _) =>
+        {
+            var menu = new ContextMenu();
+            menu.Items.Add(Menus.Item("Spark Swapper (connection code)…", () => model.ShowSwapperGuide(), Icons.Connect));
+            menu.Items.Add(Menus.Item("Subscription plan…", () => model.ShowPlanGuide(), Icons.Key));
+            menu.Items.Add(Menus.Item("Amazon Bedrock…", () => model.ShowBedrockGuide(), Icons.Cloud));
+            menu.Items.Add(Menus.Item("Other OpenAI-compatible server…",
+                () => Edit(new ProviderProfile(ProviderKind.OpenAICompat, "New server", "http://127.0.0.1:8000/v1", "")), Icons.Add));
+            Menus.Open(menu, add);
+        };
         page.Children.Add(Ui.Buttons(
-            Ui.Button("Add Server…", () => Edit(new ProviderProfile(ProviderKind.OpenAICompat, "New server", "http://127.0.0.1:8000/v1", "")), accent: true),
-            Ui.Button("Add Amazon Bedrock…", () => model.ShowBedrockGuide()),
-            Ui.Button("Test Active", () => _ = TestAsync()),
+            add,
+            Ui.Button("Test All", () => _ = TestAllAsync(), tooltip: "Check every model that's on answers, and show the result as a dot on each"),
             Ui.Button("Setup Wizard…", model.ShowWizard)));
         _status.Margin = new Thickness(0, 8, 0, 4);
         page.Children.Add(_status);
-        page.Children.Add(Ui.Section("Routes"));
-        page.Children.Add(_fleet);
+        page.Children.Add(Ui.Section("Your models"));
         page.Children.Add(_list);
+        var roles = Ui.Secondary("Primary answers you. Subagents take side tasks in parallel. Backups take over if the primary stops answering. " +
+                                 "Private models may see sensitive data; the others get it masked.");
+        roles.Margin = new Thickness(2, 6, 0, 10);
+        page.Children.Add(roles);
+        page.Children.Add(_fleet);
+        page.Children.Add(Ui.Section("Sensitive data"));
+        page.Children.Add(_privacy);
         Content = Ui.Scroll(page);
         Rebuild();
+        BuildPrivacy();
         model.Config.Providers.CollectionChanged += (_, _) => Rebuild();
     }
 
@@ -60,112 +84,173 @@ public sealed class ModelsPage : UserControl
     {
         _list.Children.Clear();
         var config = _model.Config;
-        foreach (var provider in config.Providers.ToList())
-        {
-            var active = provider.RouteId == config.ActiveRoute;
-            var actions = new StackPanel { Orientation = Orientation.Horizontal };
-            if (active)
-            {
-                var badge = new Border { CornerRadius = new CornerRadius(9), Padding = new Thickness(8, 2, 8, 2), Margin = new Thickness(0, 0, 8, 0) };
-                badge.SetResourceReference(Border.BackgroundProperty, "AccentFillColorDefaultBrush");
-                badge.Child = Ui.Text("Active", 11, FontWeights.SemiBold, "TextOnAccentFillColorPrimaryBrush", wrap: false);
-                badge.VerticalAlignment = VerticalAlignment.Center;
-                actions.Children.Add(badge);
-            }
-            else
-            {
-                var use = Ui.Button("Use", () =>
-                {
-                    config.ActiveRoute = provider.RouteId;
-                    _model.Host.ResetRouteCache();
-                    Rebuild();
-                });
-                use.Margin = new Thickness(0, 0, 8, 0);
-                actions.Children.Add(use);
-            }
-            if (provider.Kind == ProviderKind.Bedrock)
-            {
-                var signIn = Ui.Button("Sign in again", () => _ = SignInAgainAsync(provider));
-                signIn.Margin = new Thickness(0, 0, 8, 0);
-                signIn.ToolTip = "Opens your browser to sign in to AWS again — for when the sign-in has run out.";
-                actions.Children.Add(signIn);
-                var change = Ui.Button("Change…", () => _model.ShowBedrockGuide(BedrockPage.Model, provider));
-                change.Margin = new Thickness(0, 0, 8, 0);
-                change.ToolTip = "Pick another model or Region, or sign in with another AWS account, in the Bedrock guide.";
-                actions.Children.Add(change);
-            }
-            StackPanel? subagents = null;
-            if (!active)
-            {
-                // A second server (another DGX Spark, say) can take the main model's side tasks. (On a line of its own: the
-                // buttons beside the name leave a long route name no room for more.)
-                subagents = new StackPanel { Orientation = Orientation.Horizontal };
-                var worker = new CheckBox
-                {
-                    Content = "Use for subagents",
-                    IsChecked = provider.SubagentWorker,
-                    VerticalAlignment = VerticalAlignment.Center,
-                    Margin = new Thickness(0, 0, 12, 0),
-                    ToolTip = "Use this server for subagents: side tasks the main model hands out run here, in parallel with the main model.",
-                };
-                worker.Click += (_, _) =>
-                {
-                    provider.SubagentWorker = worker.IsChecked == true;
-                    config.Persist();
-                    _model.Host.RefreshFleet();
-                    Rebuild();
-                };
-                subagents.Children.Add(worker);
-                if (provider.SubagentWorker)
-                {
-                    subagents.Children.Add(Ui.Secondary("at a time:", 12));
-                    var parallel = new ComboBox { Width = 54, Margin = new Thickness(6, 0, 0, 0), ToolTip = "How many subagents may work on this server at the same time" };
-                    for (var n = 1; n <= 8; n++) parallel.Items.Add(n);
-                    parallel.SelectedItem = Math.Clamp(provider.SubagentParallel ?? 2, 1, 8);
-                    parallel.SelectionChanged += (_, _) =>
-                    {
-                        if (parallel.SelectedItem is not int chosen) return;
-                        provider.SubagentParallel = chosen;
-                        config.Persist();
-                        _model.Host.RefreshFleet();
-                    };
-                    subagents.Children.Add(parallel);
-                    // A second model on the main model's own machine (a Spark serves one at a time) adds no worker: say so.
-                    if (_model.Host.WorkerRoutes.All(w => w.RouteId != provider.RouteId))
-                    {
-                        var same = Ui.Secondary("· the same server as the main model, so not used", 12);
-                        same.Margin = new Thickness(10, 0, 0, 0);
-                        same.ToolTip = "A server that is already the main model's runs one model at a time; a second route on it would only queue behind it.";
-                        subagents.Children.Add(same);
-                    }
-                }
-            }
-            actions.Children.Add(Ui.Button("Edit…", () => Edit(provider)));
-            var remove = new Button { Content = Icons.Delete, ToolTip = "Remove", Margin = new Thickness(6, 0, 0, 0) };
-            remove.SetResourceReference(StyleProperty, "IconButton");
-            remove.Click += (_, _) =>
-            {
-                if (!Dialog.Confirm($"Remove {provider.DisplayName}?", "Its saved API key is removed too.", "Remove", destructive: true)) return;
-                config.RemoveProvider(provider);
-                try { SecretStore.Delete(SecretStore.ProviderTarget(provider.RouteId)); } catch (Exception) { }
-                _model.Host.ResetRouteCache();
-            };
-            actions.Children.Add(remove);
-
-            var detail = provider.Kind == ProviderKind.Bedrock
-                ? $"{provider.Model} · {BedrockRegions.NameOf(provider.AwsRegion ?? BedrockRegions.Default)} · {(provider.AwsProfile is { } aws ? $"AWS profile {aws}" : "Bedrock API key")}"
-                : $"{provider.Model} · {provider.BaseUrl}";
-            if (provider.ContextWindow is { } window) detail += $" · {window:N0} ctx";
-            var row = Ui.Row(provider.Name, detail, actions, Icons.ForProvider(provider.Kind), below: subagents);
-            row.MouseLeftButtonDown += (_, e) =>
-            {
-                if (e.ClickCount == 2) Edit(provider);
-            };
-            if (active) row.SetResourceReference(Border.BorderBrushProperty, "AccentFillColorDefaultBrush");
-            _list.Children.Add(row);
-        }
-        if (config.Providers.Count == 0) _list.Children.Add(Ui.Card(Ui.Secondary("No routes yet. Add a server or run the setup wizard.")));
+        foreach (var provider in config.Providers.ToList()) _list.Children.Add(RouteRow(provider));
+        if (config.Providers.Count == 0) _list.Children.Add(Ui.Card(Ui.Secondary("No models yet. Add one, or run the setup wizard.")));
         RebuildFleet();
+    }
+
+    /// <summary>One model: its switch, what and where it is, its role, its privacy, how it did when last tested.</summary>
+    private Border RouteRow(ProviderProfile provider)
+    {
+        var config = _model.Config;
+        var primary = provider.RouteId == config.ActiveRoute;
+        var enabled = provider.IsEnabled || primary;
+
+        void Changed(bool fleet = true)
+        {
+            config.Persist();
+            if (fleet) _model.Host.RefreshFleet();
+            Rebuild();
+        }
+
+        var actions = new StackPanel { Orientation = Orientation.Horizontal };
+        if (provider.Kind == ProviderKind.Bedrock)
+        {
+            var signIn = Ui.Button("Sign in again", () => _ = SignInAgainAsync(provider));
+            signIn.Margin = new Thickness(0, 0, 8, 0);
+            signIn.ToolTip = "Opens your browser to sign in to AWS again — for when the sign-in has run out.";
+            actions.Children.Add(signIn);
+            var change = Ui.Button("Change…", () => _model.ShowBedrockGuide(BedrockPage.Model, provider));
+            change.Margin = new Thickness(0, 0, 8, 0);
+            change.ToolTip = "Pick another model or Region, or sign in with another AWS account, in the Bedrock guide.";
+            actions.Children.Add(change);
+        }
+        actions.Children.Add(Ui.Button("Edit…", () => Edit(provider)));
+        var remove = new Button { Content = Icons.Delete, ToolTip = "Remove", Margin = new Thickness(6, 0, 0, 0) };
+        remove.SetResourceReference(StyleProperty, "IconButton");
+        remove.Click += (_, _) =>
+        {
+            if (!Dialog.Confirm($"Remove {provider.DisplayName}?", "Its saved API key is removed too.", "Remove", destructive: true)) return;
+            config.RemoveProvider(provider);
+            try { SecretStore.Delete(SecretStore.ProviderTarget(provider.RouteId)); } catch (Exception) { }
+            _model.Host.ResetRouteCache();
+        };
+        actions.Children.Add(remove);
+
+        // The switches, on a line of their own under the name.
+        var controls = new WrapPanel();
+        var on = new CheckBox { Content = "On", IsChecked = enabled, Margin = new Thickness(0, 0, 16, 4), VerticalAlignment = VerticalAlignment.Center };
+        on.ToolTip = "Off: this model is never used — not as the primary, not for subagents, not as a backup.";
+        on.Click += (_, _) =>
+        {
+            if (primary && on.IsChecked != true)
+            {
+                on.IsChecked = true;
+                Dialog.Info("Pick another primary first", $"{provider.Name} is the primary model, which answers you. Make another model the primary, then switch this one off.");
+                return;
+            }
+            provider.Enabled = on.IsChecked == true ? null : false;
+            Changed();
+        };
+        controls.Children.Add(on);
+        var asPrimary = new RadioButton { Content = "Primary", GroupName = "primary-route", IsChecked = primary, IsEnabled = enabled, Margin = new Thickness(0, 0, 16, 4) };
+        asPrimary.ToolTip = "The primary model answers you (and runs the main agent).";
+        asPrimary.Checked += (_, _) =>
+        {
+            if (config.ActiveRoute == provider.RouteId) return;
+            config.ActiveRoute = provider.RouteId;
+            _model.Host.ResetRouteCache();
+            Dispatcher.BeginInvoke(Rebuild);
+        };
+        controls.Children.Add(asPrimary);
+        var worker = new CheckBox
+        {
+            Content = "Subagent",
+            IsChecked = provider.SubagentWorker && !primary,
+            IsEnabled = enabled && !primary,
+            Margin = new Thickness(0, 0, 6, 4),
+            ToolTip = "Use this server for subagents: side tasks the main model hands out run here, in parallel with the main model.",
+        };
+        worker.Click += (_, _) =>
+        {
+            provider.SubagentWorker = worker.IsChecked == true;
+            Changed();
+        };
+        controls.Children.Add(worker);
+        if (provider.SubagentWorker && !primary && enabled)
+        {
+            var parallel = new ComboBox { Width = 54, Margin = new Thickness(0, 0, 4, 4), ToolTip = "How many subagents may work on this server at the same time" };
+            for (var n = 1; n <= 8; n++) parallel.Items.Add(n);
+            parallel.SelectedItem = Math.Clamp(provider.SubagentParallel ?? 2, 1, 8);
+            parallel.SelectionChanged += (_, _) =>
+            {
+                if (parallel.SelectedItem is not int chosen) return;
+                provider.SubagentParallel = chosen;
+                config.Persist();
+                _model.Host.RefreshFleet();
+            };
+            controls.Children.Add(parallel);
+            controls.Children.Add(WithMargin(Ui.Secondary("at a time", 12), new Thickness(0, 4, 12, 4)));
+            // A second model on the main model's own machine (a Spark serves one at a time) adds no worker: say so.
+            if (_model.Host.WorkerRoutes.All(w => w.RouteId != provider.RouteId))
+            {
+                var same = Ui.Secondary("(the same server as the main model, so not used)", 12);
+                same.Margin = new Thickness(0, 4, 12, 4);
+                same.ToolTip = "A server that is already the main model's runs one model at a time; a second route on it would only queue behind it.";
+                controls.Children.Add(same);
+            }
+        }
+        else
+        {
+            controls.Children.Add(WithMargin(new Border(), new Thickness(0, 0, 10, 0)));
+        }
+        var backup = new CheckBox
+        {
+            Content = "Backup",
+            IsChecked = provider.IsBackup && !primary,
+            IsEnabled = enabled && !primary,
+            Margin = new Thickness(0, 0, 16, 4),
+            ToolTip = "Use if the primary fails: a turn the primary can't answer runs here instead (the chat says so).",
+        };
+        backup.Click += (_, _) =>
+        {
+            provider.Backup = backup.IsChecked == true ? true : null;
+            Changed(fleet: false);
+        };
+        controls.Children.Add(backup);
+        var isPrivate = new CheckBox { IsChecked = provider.IsPrivateRoute, Margin = new Thickness(0, 0, 16, 4) };
+        isPrivate.Content = Ui.Stack(Orientation.Horizontal, WithMargin(Ui.Glyph(provider.IsPrivateRoute ? Icons.Lock : Icons.Shield, 12), new Thickness(0, 0, 5, 0)),
+            Ui.Text("Private", 13, wrap: false));
+        isPrivate.ToolTip = (provider.IsPrivate is null
+                                ? $"Decided by its address: {(RoutePrivacy.IsPrivateAddress(provider.BaseUrl) ? "your own network, so private" : "an online service, so not private")}. "
+                                : "Set by you. ") +
+                            "Private models may see sensitive data; for the others, DSH masks it before sending (see Sensitive data below).";
+        isPrivate.Click += (_, _) =>
+        {
+            provider.IsPrivate = isPrivate.IsChecked == true;
+            Changed();
+        };
+        controls.Children.Add(isPrivate);
+        if (provider.IsInteractiveOnly)
+            controls.Children.Add(WithMargin(Ui.Secondary("interactive use only", 12), new Thickness(0, 4, 16, 4)));
+        if (_model.RouteChecks.TryGetValue(provider.RouteId, out var check))
+        {
+            var dot = new System.Windows.Shapes.Ellipse { Width = 8, Height = 8, Margin = new Thickness(0, 0, 5, 0), VerticalAlignment = VerticalAlignment.Center };
+            dot.SetResourceReference(System.Windows.Shapes.Shape.FillProperty, check.Ok ? "SystemFillColorSuccessBrush" : "SystemFillColorCriticalBrush");
+            var result = Ui.Stack(Orientation.Horizontal, dot, Ui.Secondary(check.Ok ? "answered" : "didn't answer", 12));
+            result.ToolTip = $"{check.Detail} ({Formatting.Relative(check.At)})";
+            result.Margin = new Thickness(0, 4, 0, 4);
+            controls.Children.Add(result);
+        }
+
+        var detail = provider.Kind == ProviderKind.Bedrock
+            ? $"{provider.Model} · Amazon Bedrock · {provider.AwsRegion ?? BedrockRegions.Default} · {(provider.AwsProfile is { } aws ? $"AWS profile {aws}" : "Bedrock API key")}"
+            : $"{provider.Model} · {provider.BaseUrl}";
+        if (provider.ContextWindow is { } window) detail += $" · {window:N0} ctx";
+        var row = Ui.Row(provider.Name, detail, actions, Icons.ForProvider(provider.Kind), below: controls);
+        row.MouseLeftButtonDown += (_, e) =>
+        {
+            if (e.ClickCount == 2) Edit(provider);
+        };
+        if (primary) row.SetResourceReference(Border.BorderBrushProperty, "AccentFillColorDefaultBrush");
+        if (!enabled) row.Opacity = 0.55;
+        return row;
+    }
+
+    private static T WithMargin<T>(T element, Thickness margin) where T : FrameworkElement
+    {
+        element.Margin = margin;
+        return element;
     }
 
     /// <summary>How the main model and the subagent servers are arranged.</summary>
@@ -180,14 +265,14 @@ public sealed class ModelsPage : UserControl
         if (workers.Count == 0)
         {
             text.Children.Add(Ui.Text("Several servers? Put them all to work", 13, FontWeights.SemiBold));
-            var tip = Ui.Secondary($"{main.Name} is the main model. Tick “Use for subagents” on another server — a second DGX Spark, say — and the main model hands side tasks to it, so they run in parallel instead of queueing.");
+            var tip = Ui.Secondary($"{main.Name} is the primary. Tick “Subagent” on another server — a second DGX Spark, say — and the primary hands side tasks to it, so they run in parallel instead of queueing.");
             tip.Margin = new Thickness(0, 3, 0, 0);
             text.Children.Add(tip);
         }
         else
         {
-            text.Children.Add(Ui.Text($"{main.Name} is the main model · subagents run on {string.Join(", ", workers.Select(w => AgentHost.RouteLabel(w) + $" ({w.SubagentParallel ?? 2} at a time)"))}", 13, FontWeights.SemiBold));
-            var also = Ui.Check("When those are all busy, let subagents use the main server too", config.SubagentsUsePrimary, on =>
+            text.Children.Add(Ui.Text($"{main.Name} is the primary · subagents run on {string.Join(", ", workers.Select(w => AgentHost.RouteLabel(w) + $" ({w.SubagentParallel ?? 2} at a time{(w.IsPrivateRoute ? "" : ", not private")})"))}", 13, FontWeights.SemiBold));
+            var also = Ui.Check("When those are all busy, let subagents use the primary too", config.SubagentsUsePrimary, on =>
             {
                 config.SubagentsUsePrimary = on;
                 _model.Host.RefreshFleet();
@@ -199,6 +284,104 @@ public sealed class ModelsPage : UserControl
         card.Margin = new Thickness(0, 0, 0, 10);
         _fleet.Children.Add(card);
     }
+
+    // MARK: - Sensitive data
+
+    private void BuildPrivacy()
+    {
+        _privacy.Children.Clear();
+        var config = _model.Config;
+        var privacy = config.Privacy;
+        void Set(Func<PrivacySettings, PrivacySettings> change)
+        {
+            config.Privacy = change(config.Privacy);
+            UpdateTry();
+        }
+
+        var master = Ui.Check("Mask sensitive data before sending it to models that aren't private", privacy.Mask, on => Set(p => p with { Mask = on }));
+        master.FontWeight = FontWeights.SemiBold;
+        var explain = Ui.Secondary("Private models get the conversation as it is. For the others, DSH replaces sensitive values with placeholders such as ⟦EMAIL_1⟧ before anything leaves this PC, and puts the real values back in what comes back — the model can still work with them. Values in the Credentials Vault are always masked.");
+        explain.Margin = new Thickness(0, 4, 0, 10);
+        var categories = new WrapPanel();
+        void Category(string label, bool value, Func<PrivacySettings, bool, PrivacySettings> change)
+        {
+            var box = Ui.Check(label, value, on => Set(p => change(p, on)));
+            box.Margin = new Thickness(0, 0, 18, 6);
+            categories.Children.Add(box);
+        }
+        Category("Secrets and keys", privacy.Secrets, (p, on) => p with { Secrets = on });
+        Category("Email addresses", privacy.Emails, (p, on) => p with { Emails = on });
+        Category("Phone numbers", privacy.Phones, (p, on) => p with { Phones = on });
+        Category("ID and card numbers", privacy.Ids, (p, on) => p with { Ids = on });
+        Category("IP addresses", privacy.Ips, (p, on) => p with { Ips = on });
+        Category("Custom terms", privacy.Terms, (p, on) => p with { Terms = on });
+
+        var terms = Ui.Field(privacy.CustomTerms, "Acme Corp\nJane Doe\nre:PRJ-\\d{4}");
+        terms.AcceptsReturn = true;
+        terms.TextWrapping = TextWrapping.NoWrap;
+        terms.Height = 96;
+        terms.VerticalScrollBarVisibility = ScrollBarVisibility.Auto;
+        terms.VerticalContentAlignment = VerticalAlignment.Top;
+        terms.TextChanged += (_, _) =>
+        {
+            config.Privacy = config.Privacy with { CustomTerms = terms.Text };
+            UpdateTermProblems();
+            UpdateTry();
+        };
+        var termsHint = Ui.Secondary("One per line — client names, patient names, project code names. Matched without regard to case, as whole words. A line starting with re: is a regular expression.", 11.5);
+        termsHint.Margin = new Thickness(0, 4, 0, 0);
+        _termProblems.Margin = new Thickness(0, 4, 0, 0);
+
+        _tryIn.AcceptsReturn = true;
+        _tryIn.TextWrapping = TextWrapping.Wrap;
+        _tryIn.Height = 64;
+        _tryIn.VerticalContentAlignment = VerticalAlignment.Top;
+        _tryIn.TextChanged += (_, _) => UpdateTry();
+        _tryOut.IsReadOnly = true;
+        _tryOut.TextWrapping = TextWrapping.Wrap;
+        _tryOut.MinHeight = 40;
+        _tryOut.Margin = new Thickness(0, 6, 0, 0);
+        System.Windows.Automation.AutomationProperties.SetName(_tryOut, "What a model that isn't private would get");
+
+        var termsTitle = Ui.Text("Custom terms", 12.5, FontWeights.SemiBold);
+        termsTitle.Margin = new Thickness(0, 6, 0, 4);
+        var tryTitle = Ui.Text("Try it", 12.5, FontWeights.SemiBold);
+        tryTitle.Margin = new Thickness(0, 14, 0, 4);
+        _privacy.Children.Add(Ui.Card(Ui.Stack(master, explain, categories, termsTitle, terms, termsHint, _termProblems, tryTitle, _tryIn,
+            Ui.Secondary("What a model that isn't private would get:", 11.5), _tryOut)));
+        UpdateTermProblems();
+        UpdateTry();
+    }
+
+    private void UpdateTermProblems()
+    {
+        var bad = SensitiveDetector.InvalidTerms(_model.Config.Privacy.TermLines);
+        _termProblems.Text = bad.Count == 0 ? "" : $"Not a valid regular expression, so not used: {string.Join(", ", bad)}";
+        _termProblems.Visibility = bad.Count == 0 ? Visibility.Collapsed : Visibility.Visible;
+    }
+
+    /// <summary>The "Try it" box: exactly what the shield would send for the text typed.</summary>
+    private void UpdateTry()
+    {
+        var privacy = _model.Config.Privacy;
+        if (_tryIn.Text.Length == 0)
+        {
+            _tryOut.Text = "";
+            return;
+        }
+        if (!privacy.Mask)
+        {
+            _tryOut.Text = "(The shield is off: the text goes as it is.)";
+            return;
+        }
+        IReadOnlyList<string> vault;
+        try { vault = _model.Host.Vault.ValuesForRedaction().Select(v => v.Value).ToList(); }
+        catch (Exception) { vault = []; }
+        var detector = new SensitiveDetector(privacy.Categories, privacy.TermLines, vault);
+        _tryOut.Text = new ShieldMap().Mask(_tryIn.Text, detector);
+    }
+
+    // MARK: - Actions
 
     private void Edit(ProviderProfile provider)
     {
@@ -226,30 +409,40 @@ public sealed class ModelsPage : UserControl
         }
     }
 
-    private async Task TestAsync()
+    /// <summary>Ask every model that is on whether it answers; each row shows how it did.</summary>
+    private async Task TestAllAsync()
     {
-        if (_model.Config.ActiveProvider is not { } provider)
-        {
-            _status.Text = "No active route.";
-            return;
-        }
+        if (_testing) return;
+        _testing = true;
+        _status.SetResourceReference(TextBlock.ForegroundProperty, "TextFillColorSecondaryBrush");
         _status.Text = "Testing…";
-        try
+        var routes = _model.Config.Providers.Where(p => p.IsEnabled || p.RouteId == _model.Config.ActiveRoute).ToList();
+        var results = await Task.WhenAll(routes.Select(async route =>
         {
-            var client = ProviderClients.Create(provider);
-            var models = await client.ListModelsAsync();
-            var info = await client.ModelInfoAsync();
-            var window = info.ContextWindow is { } w ? $", {w:N0}-token window" : "";
-            _status.Text = provider.Kind == ProviderKind.Bedrock
-                ? $"✔ Connected to Amazon Bedrock — {models.Count} model(s) in {BedrockRegions.NameOf(provider.AwsRegion ?? BedrockRegions.Default)}{window}."
-                : $"✔ Connected — {models.Count} model(s) served{window}.";
-            _status.SetResourceReference(TextBlock.ForegroundProperty, "SystemFillColorSuccessBrush");
-        }
-        catch (Exception error)
-        {
-            _status.Text = AgentHost.Describe(error);
-            _status.SetResourceReference(TextBlock.ForegroundProperty, "SystemFillColorCriticalBrush");
-        }
+            var profile = route.DeepCopy();
+            var key = _model.Config.ApiKey(route);
+            profile.ApiKey = key.Length == 0 ? null : key;
+            try
+            {
+                var client = ProviderClients.Create(profile);
+                var models = await client.ListModelsAsync();
+                var info = await client.ModelInfoAsync();
+                var window = info.ContextWindow is { } w ? $", {w:N0}-token window" : "";
+                return (route, new AppModel.RouteCheck(true, profile.Kind == ProviderKind.Bedrock
+                    ? $"Connected to Amazon Bedrock — {models.Count} model(s){window}"
+                    : $"Connected — {models.Count} model(s) served{window}", DateTimeOffset.Now));
+            }
+            catch (Exception error)
+            {
+                return (route, new AppModel.RouteCheck(false, AgentHost.Describe(error), DateTimeOffset.Now));
+            }
+        }));
+        foreach (var (route, check) in results) _model.RouteChecks[route.RouteId] = check;
+        var failed = results.Count(r => !r.Item2.Ok);
+        _status.Text = failed == 0 ? $"✔ All {results.Length} answered." : $"{failed} of {results.Length} didn't answer — hover a red dot for why.";
+        _status.SetResourceReference(TextBlock.ForegroundProperty, failed == 0 ? "SystemFillColorSuccessBrush" : "SystemFillColorCriticalBrush");
+        _testing = false;
+        Rebuild();
     }
 }
 
@@ -268,6 +461,9 @@ public sealed class ProviderEditorWindow : Window
     private readonly TextBox _context = Ui.Field(placeholder: "auto", width: 120);
     private readonly ComboBox _thinking = new() { MinWidth = 260 };
     private readonly CheckBox _vision = new() { Content = "The model can read images" };
+    private readonly CheckBox _interactiveOnly = new() { Content = "Interactive use only (plan terms)" };
+    /// <summary>The self-signed certificate this route trusts (null once forgotten).</summary>
+    private string? _pin;
     private readonly TextBox _headers = Ui.Field(mono: true);
     private readonly TextBlock _status = Ui.Secondary("");
     private readonly StackPanel _keyRow;
@@ -303,6 +499,9 @@ public sealed class ProviderEditorWindow : Window
         foreach (var level in ThinkingLevels.All)
             _thinking.Items.Add(new ComboBoxItem { Content = $"{level.Label()} — {level.Blurb()}", Tag = level.RawValue(), IsSelected = profile.ReasoningEffort == level.RawValue() });
         _vision.IsChecked = profile.Vision ?? true;
+        _interactiveOnly.IsChecked = profile.IsInteractiveOnly;
+        _interactiveOnly.ToolTip = "The plan's terms allow only interactive use (the Qwen Coding Plan): the task queue and other unattended work won't run on it as the primary.";
+        _pin = profile.PinnedCertificate;
         _headers.AcceptsReturn = true;
         _headers.Height = 70;
         _headers.VerticalScrollBarVisibility = ScrollBarVisibility.Auto;
@@ -336,6 +535,24 @@ public sealed class ProviderEditorWindow : Window
             Labeled("Temperature", _temperature),
             Labeled("Max output tokens", _maxTokens),
             _vision)));
+        form.Children.Add(Ui.Section("Use"));
+        var use = Ui.Stack(_interactiveOnly);
+        if (_pin is { } pin)
+        {
+            var pinText = Ui.Secondary($"Trusts this server's own certificate (SHA-256 {CertificateProbe.Shorten(pin)}).", 12);
+            pinText.ToolTip = pin;
+            var forget = Ui.LinkButton("Forget", () => { });
+            forget.Click += (_, _) =>
+            {
+                _pin = null;
+                pinText.Text = "The certificate will be forgotten when you save: only certificates Windows trusts will be accepted.";
+                forget.IsEnabled = false;
+            };
+            var pinRow = Ui.Stack(Orientation.Horizontal, pinText, forget);
+            pinRow.Margin = new Thickness(0, 8, 0, 0);
+            use.Children.Add(pinRow);
+        }
+        form.Children.Add(Ui.Card(use));
         form.Children.Add(Ui.Section("Custom headers"));
         form.Children.Add(Ui.Card(Ui.Stack(_headers, Ui.Secondary("One per line, as Name: value. Sent with every request."))));
 
@@ -389,8 +606,8 @@ public sealed class ProviderEditorWindow : Window
             .Select(line => line.Split(':', 2))
             .Where(parts => parts.Length == 2 && parts[0].Trim().Length > 0)
             .ToDictionary(parts => parts[0].Trim(), parts => parts[1].Trim());
-        // Everything the form doesn't show carries over (the pinned certificate, whether the route serves subagents, and how
-        // many at a time) — a fresh profile would silently drop them.
+        // Everything the form doesn't show carries over (whether the route serves subagents and how many at a time, whether it
+        // is on, a backup, private) — a fresh profile would silently drop them.
         return _original with
         {
             Kind = SelectedKind,
@@ -406,6 +623,8 @@ public sealed class ProviderEditorWindow : Window
             CustomHeaders = headers.Count == 0 ? null : headers,
             AwsProfile = SelectedKind == ProviderKind.Bedrock ? _original.AwsProfile : null,
             AwsRegion = SelectedKind == ProviderKind.Bedrock ? _original.AwsRegion : null,
+            InteractiveOnly = _interactiveOnly.IsChecked == true ? true : null,
+            PinnedCertificate = _pin,
         };
     }
 
