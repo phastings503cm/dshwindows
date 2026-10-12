@@ -555,6 +555,7 @@ public partial class MainWindow : Window
             InputBindings.Add(new KeyBinding(new RelayCommand(action), key, modifiers));
 
         Bind(Key.N, ModifierKeys.Control, () => NewChat());
+        Bind(Key.N, ModifierKeys.Control | ModifierKeys.Shift, NewPlainChat);
         Bind(Key.O, ModifierKeys.Control, Model.ChooseProject);
         Bind(Key.S, ModifierKeys.Control, Model.Code.SaveActive);
         Bind(Key.S, ModifierKeys.Control | ModifierKeys.Shift, Model.Code.SaveAll);
@@ -581,6 +582,13 @@ public partial class MainWindow : Window
     private void NewChat()
     {
         Model.NewChat();
+        FocusComposer();
+    }
+
+    /// <summary>A regular chat, without a project — even while one is open.</summary>
+    private void NewPlainChat()
+    {
+        Model.NewPlainChat();
         FocusComposer();
     }
 
@@ -643,6 +651,7 @@ public partial class MainWindow : Window
     private void ShowShortcuts() => Dialog.Info("Keyboard shortcuts", string.Join("\n", new[]
     {
         "Ctrl+N\tNew chat",
+        "Ctrl+Shift+N\tNew chat without a project",
         "Ctrl+O\tOpen folder",
         "Ctrl+L\tFocus the chat input",
         "Enter\tSend  ·  Shift+Enter: new line",
@@ -805,6 +814,7 @@ public partial class MainWindow : Window
     // MARK: - Menu handlers
 
     private void NewChat_Click(object sender, RoutedEventArgs e) => NewChat();
+    private void NewPlainChat_Click(object sender, RoutedEventArgs e) => NewPlainChat();
     private void OpenFolder_Click(object sender, RoutedEventArgs e) => Model.ChooseProject();
     private void CloseFolder_Click(object sender, RoutedEventArgs e) => Model.CloseProject();
     private void NewTerminal_Click(object sender, RoutedEventArgs e) => NewTerminal();
@@ -908,8 +918,8 @@ public partial class MainWindow : Window
     }
 
     private void About_Click(object sender, RoutedEventArgs e) => Dialog.Info("About DSH",
-        $"DSH for Windows {AppInfo.Version}\n\nA native coding agent: it talks to any OpenAI-compatible model server " +
-        "and works in your project folder with file, search, and shell tools, asking before anything risky.\n\n" +
+        $"DSH for Windows {AppInfo.Version}\n\nA native AI assistant and coding agent: chat with any OpenAI-compatible model server, " +
+        "or open a project folder and it works there with file, search, and shell tools, asking before anything risky.\n\n" +
         $"Data folder: {AppPaths.Root}\n{UpdateChecker.ReleasesPage.Replace("/latest", "")}");
 
     private void SidebarSplitter_DragCompleted(object sender, DragCompletedEventArgs e)

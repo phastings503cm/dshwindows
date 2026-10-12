@@ -20,6 +20,7 @@
                 <Menu x:Name="MainMenu" DockPanel.Dock="Left" VerticalAlignment="Center" Background="Transparent">
                     <MenuItem Header="_File">
                         <MenuItem Header="_New Chat" InputGestureText="Ctrl+N" Click="NewChat_Click" />
+                        <MenuItem Header="New Chat _Without a Project" InputGestureText="Ctrl+Shift+N" Click="NewPlainChat_Click" />
                         <MenuItem Header="_Open Folder…" InputGestureText="Ctrl+O" Click="OpenFolder_Click" />
                         <MenuItem x:Name="RecentMenu" Header="Open _Recent" SubmenuOpened="RecentMenu_Opened">
                             <MenuItem Header="(none)" IsEnabled="False" />

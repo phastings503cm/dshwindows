@@ -18,6 +18,10 @@ public sealed partial class AgentHost
     private readonly Dictionary<string, ShieldReport> _pendingShield = new();
     /// <summary>Chats whose current turn already said it ran on a backup.</summary>
     private readonly HashSet<string> _failoverNoted = new();
+    private IReadOnlyList<PluginManifest>? _userPlugins;
+
+    /// <summary>The user's own plugins (a chat without a project gets no project ones).</summary>
+    private IReadOnlyList<PluginManifest> UserPlugins() => _userPlugins ??= PluginLoader.Load(null).Plugins;
 
     /// <summary>The shield's settings now (null when it is switched off), reporting to <paramref name="sessionId"/>'s chat.</summary>
     private ShieldOptions? ShieldFor(string? sessionId)

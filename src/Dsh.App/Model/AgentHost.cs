@@ -45,6 +45,8 @@ public sealed partial class AgentHost : ObservableObject
     private readonly Dictionary<string, CancellationTokenSource> _runs = new();
     private readonly Dictionary<string, ComputerGrants> _grants = new();
     private readonly string _basePrompt;
+    /// <summary>A test gave its own system prompt: every chat uses it, with or without a project.</summary>
+    private readonly bool _customPrompt;
     /// <summary>Route id → context window learned from a server probe.</summary>
     private readonly Dictionary<string, int> _probedContext = new();
     /// <summary>Route id → what the server said it serves, and when we last asked.</summary>
@@ -86,6 +88,7 @@ public sealed partial class AgentHost : ObservableObject
         Log = log;
         _dispatcher = dispatcher;
         _basePrompt = systemPrompt ?? DefaultSystemPrompt;
+        _customPrompt = systemPrompt is not null;
         SkillLocations = skillLocations ?? SkillLocations.Standard;
         Vault = vault ?? new CredentialVault();
         _queueFile = queueFile ?? TaskQueue.DefaultFilePath;
@@ -189,6 +192,7 @@ public sealed partial class AgentHost : ObservableObject
     /// <summary>Re-read instructions, skills, and plugins from disk.</summary>
     public void RefreshProjectContext()
     {
+        _userPlugins = null;
         if (ProjectContext?.Root is { } root) AdoptProject(root);
         else
         {
@@ -231,6 +235,9 @@ public sealed partial class AgentHost : ObservableObject
         Log.Delete(id);
         _pendingShield.Remove(id);
         if (Session(id) is { } vm) Sessions.Remove(vm);
+        // A chat without a project takes its scratch folder with it — unless a queue task it added still works there.
+        var scratch = PlainChat.Folder(id);
+        if (!Sessions.Any(s => string.Equals(s.Cwd, scratch, StringComparison.OrdinalIgnoreCase))) PlainChat.Delete(id);
         if (SelectedId == id) SelectedId = Sessions.FirstOrDefault()?.Id;
     }
 
@@ -353,27 +360,31 @@ public sealed partial class AgentHost : ObservableObject
     private Engine BuildEngine(SessionVM vm, IProviderClient client, int window, ThinkingLevel? thinking, SkillState skillState)
     {
         var sessionId = vm.Id;
-        var workspace = vm.WorkspacePath ?? PermissionPolicy.HomeDirectory;
+        // A chat without a project is a regular conversation: it works in a scratch folder of its own, made on first use.
+        var plain = vm.WorkspacePath is null;
+        var workspace = plain ? PlainChat.Ensure(vm.WorkingFolder) : vm.WorkingFolder;
         var policy = new PermissionPolicy(vm.Preset, workspace);
         var profile = client.Profile;
         var shell = Config.ResolvedAgentShell;
 
         // Project instructions + skills + plugin tools are what make this a harness rather than a
         // chat window.
-        var context = ProjectContext is { } pc && SamePath(pc.Root, workspace)
-            ? pc
-            : (vm.WorkspacePath is null
-                ? Dsh.Core.ProjectContext.UserOnly(SkillLocations) // no folder: still your own instructions
-                : Dsh.Core.ProjectContext.Load(workspace, SkillLocations, Config.SkillSources));
+        var context = plain
+            ? Dsh.Core.ProjectContext.UserOnly(SkillLocations) // no project: still your own instructions
+            : ProjectContext is { } pc && SamePath(pc.Root, workspace)
+                ? pc
+                : Dsh.Core.ProjectContext.Load(workspace, SkillLocations, Config.SkillSources);
         // A big MEMORY.md would take the window over: keep its opening and make the rest searchable.
         if (context is not null && Config.MemoryEnabled) context = MemoryInstructions.Slim(context, Memory);
-        var environment = Dsh.Core.ProjectContext.EnvironmentBlock(workspace, profile.Model, vm.Preset, shell);
-        var prompt = _basePrompt + "\n\n" + (context?.PromptSupplement(environment, includeSkills: false) ?? environment);
+        var environment = Dsh.Core.ProjectContext.EnvironmentBlock(workspace, profile.Model, vm.Preset, shell, scratch: plain);
+        var basePrompt = _customPrompt ? _basePrompt : PlainChat.BasePrompt(vm.WorkspacePath, workspace, _basePrompt);
+        var prompt = basePrompt + "\n\n" + (context?.PromptSupplement(environment, includeSkills: false) ?? environment);
         // Skills: always-on rules, the ones the user selected for this chat, and a catalog the
         // model can load from with use_skill.
         if (skillState.Result.Text.Length > 0) prompt += "\n\n" + skillState.Result.Text;
-        // Long-term memory: how to use it, and the few pinned notes (searched notes ride with each message).
-        if (MemoryPromptFor(workspace, vm.Preset != PermissionPreset.Plan) is { Length: > 0 } memorySection) prompt += "\n\n" + memorySection;
+        // Long-term memory: how to use it, and the few pinned notes (searched notes ride with each message). A regular chat
+        // has no project, so its notes are the ones for every chat.
+        if (MemoryPromptFor(vm.WorkspacePath, vm.Preset != PermissionPreset.Plan) is { Length: > 0 } memorySection) prompt += "\n\n" + memorySection;
         // The credentials the agent may use, by name — never a value.
         if (VaultPrompt.Section(Vault.All, shell.Kind) is { Length: > 0 } vaultSection) prompt += "\n\n" + vaultSection;
         if (vm.Preset == PermissionPreset.Plan)
@@ -393,7 +404,8 @@ public sealed partial class AgentHost : ObservableObject
         var agents = CatalogFor(vm);
         var builtins = ToolRegistry.Standard(0, shell, agents, servers).Adding(ExtraTools.Processes());
         if (Config.ComputerToolsEnabled) builtins = builtins.Adding(ExtraTools.Machine());
-        var extra = new List<IToolExecutor>(PluginLoader.Tools(Plugins, builtins.Names));
+        // A regular chat has no project, so no project plugins: only the user's own.
+        var extra = new List<IToolExecutor>(PluginLoader.Tools(plain ? UserPlugins() : Plugins, builtins.Names));
         if (skillState.Active.Count > 0) extra.Add(new UseSkillTool(skillState.Active));
         extra.Add(new VaultSearchTool(Vault));
         extra.AddRange(ToolRegistry.BackgroundAgentTools());
@@ -1140,7 +1152,7 @@ public sealed partial class AgentHost : ObservableObject
 
     /// <summary>Every skill visible from a chat's project (shadowed ones included).</summary>
     public IReadOnlyList<Skill> Skills(SessionVM? vm) =>
-        SkillCatalog.LoadAll(vm?.WorkspacePath ?? ProjectContext?.Root, SkillLocations, Config.SkillSources);
+        SkillCatalog.LoadAll(vm is null ? ProjectContext?.Root : vm.WorkspacePath, SkillLocations, Config.SkillSources);
 
     public SkillSelection Selection(string sessionId)
     {

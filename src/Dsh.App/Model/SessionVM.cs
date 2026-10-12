@@ -65,7 +65,10 @@ public sealed partial class ToolEntryVM(string name, string preview, string? id 
     public bool IsRunning => IsOk is null;
     public bool Failed => IsOk == false;
     public bool HasOutput => !string.IsNullOrEmpty(Output);
-    public string Label => Icons.ToolLabel(Name);
+    /// <summary>The model loaded one of the user's skills: shown as the skill it is, not as a tool call.</summary>
+    public bool IsSkill => Name == "use_skill";
+    /// <summary>"Using the pdf skill" for a skill; the tool's label otherwise.</summary>
+    public string Label => !IsSkill ? Icons.ToolLabel(Name) : Preview.Length > 0 && Preview != Name ? $"Using the {Preview} skill" : "Using a skill";
     public string Glyph => Icons.ForTool(Name);
 }
 
@@ -164,7 +167,14 @@ public sealed partial class SessionVM : ObservableObject
 
     public bool IsIdle => !Running;
     public bool IsEmpty => Entries.Count == 0;
-    public string? WorkspacePath => string.IsNullOrEmpty(Cwd) ? null : Cwd;
+    /// <summary>The project folder this chat works in; null for a chat without a project (a regular chat). A queue task a
+    /// regular chat added works in that chat's scratch folder, which is not a project either.</summary>
+    public string? WorkspacePath => string.IsNullOrEmpty(Cwd) || PlainChat.IsScratch(Cwd) ? null : Cwd;
+    /// <summary>A regular chat: no project folder.</summary>
+    public bool IsPlain => WorkspacePath is null;
+    /// <summary>Where the agent works: the project folder, or (a regular chat) the chat's own scratch folder — or, for a
+    /// queue task a regular chat added, that chat's.</summary>
+    public string WorkingFolder => WorkspacePath ?? (string.IsNullOrEmpty(Cwd) ? PlainChat.Folder(Id) : Cwd);
     public string? ProjectName => WorkspacePath is { } p ? System.IO.Path.GetFileName(p.TrimEnd('\\', '/')) : null;
     public string UpdatedLabel => Formatting.Relative(UpdatedAt);
 

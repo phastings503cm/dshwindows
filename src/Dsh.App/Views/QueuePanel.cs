@@ -372,8 +372,9 @@ public sealed class QueuePanel : UserControl
             var folderGlyph = Ui.Glyph(Icons.Folder, 11, "TextFillColorTertiaryBrush");
             folderGlyph.Margin = new Thickness(0, 0, 5, 0);
             folder.Children.Add(folderGlyph);
-            folder.Children.Add(Ui.Text(Path.GetFileName(cwd.TrimEnd('\\', '/')) is { Length: > 0 } name ? name : cwd, 11.5,
-                brushKey: "TextFillColorTertiaryBrush", wrap: false));
+            // A task a chat without a project added works in that chat's scratch folder.
+            var label = PlainChat.IsScratch(cwd) ? "a chat's scratch folder" : Path.GetFileName(cwd.TrimEnd('\\', '/')) is { Length: > 0 } name ? name : cwd;
+            folder.Children.Add(Ui.Text(label, 11.5, brushKey: "TextFillColorTertiaryBrush", wrap: false));
             panel.Children.Add(folder);
         }
         if (task.Details.Length > 0)

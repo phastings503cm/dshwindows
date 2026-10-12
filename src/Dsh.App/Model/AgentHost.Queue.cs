@@ -891,7 +891,8 @@ public sealed partial class AgentHost
             return $"Error: this chat has already queued {count} tasks — the limit. Ask the user before queuing more.";
         _agentQueuedCount[sessionId] = count + 1;
         var vm = Session(sessionId);
-        var cwd = vm?.WorkspacePath ?? ProjectContext?.Root;
+        // A regular chat's task works in that chat's scratch folder, like the chat itself.
+        var cwd = vm is null ? ProjectContext?.Root : vm.IsPlain ? vm.WorkingFolder : vm.WorkspacePath;
         var task = Queue.Add(title, details, front, cwd);
         Queue.Note(task.Id, $"Queued by the agent in “{vm?.Title ?? "a chat"}”.");
         var position = Queue.Position(task.Id) ?? 0;

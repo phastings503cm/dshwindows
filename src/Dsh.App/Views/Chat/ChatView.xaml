@@ -101,9 +101,9 @@
                         </Grid.ColumnDefinitions>
                         <TextBlock x:Name="Glyph" Style="{StaticResource Glyph}" FontSize="12" Text="{Binding Glyph}" HorizontalAlignment="Left"
                                    Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
-                        <TextBlock Grid.Column="1" Text="{Binding Label}" FontSize="12" FontWeight="SemiBold" Margin="0,0,8,0"
+                        <TextBlock x:Name="LabelText" Grid.Column="1" Text="{Binding Label}" FontSize="12" FontWeight="SemiBold" Margin="0,0,8,0"
                                    VerticalAlignment="Center" Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
-                        <TextBlock Grid.Column="2" Text="{Binding Preview, Converter={StaticResource HeadTruncate}, ConverterParameter=90}"
+                        <TextBlock x:Name="PreviewText" Grid.Column="2" Text="{Binding Preview, Converter={StaticResource HeadTruncate}, ConverterParameter=90}"
                                    Style="{StaticResource MonoText}" VerticalAlignment="Center" TextTrimming="CharacterEllipsis"
                                    ToolTip="{Binding Preview}" />
                         <TextBlock Grid.Column="3" Text="{Binding Summary, Converter={StaticResource OneLine}}" Style="{StaticResource MetaText}"
@@ -141,6 +141,13 @@
                 </StackPanel>
             </Border>
             <DataTemplate.Triggers>
+                <!-- A skill the model loaded reads as the skill ("Using the pdf skill"), not as a tool call. -->
+                <DataTrigger Binding="{Binding IsSkill}" Value="True">
+                    <Setter TargetName="PreviewText" Property="Visibility" Value="Collapsed" />
+                    <Setter TargetName="LabelText" Property="Foreground" Value="{DynamicResource AccentTextFillColorPrimaryBrush}" />
+                    <Setter TargetName="Glyph" Property="Foreground" Value="{DynamicResource AccentTextFillColorPrimaryBrush}" />
+                    <Setter TargetName="Card" Property="Background" Value="{DynamicResource SubtleFillColorSecondaryBrush}" />
+                </DataTrigger>
                 <DataTrigger Binding="{Binding IsOk}" Value="True">
                     <Setter TargetName="Glyph" Property="Foreground" Value="{DynamicResource SystemFillColorSuccessBrush}" />
                 </DataTrigger>
@@ -353,6 +360,16 @@
                         </DataTemplate>
                     </ItemsControl.ItemTemplate>
                 </ItemsControl>
+                <!-- A regular chat (no project): code work is a click away, not a suggestion. -->
+                <Button x:Name="OpenFolderLink" Style="{StaticResource SubtleButton}" HorizontalAlignment="Left" Padding="4,2" Margin="0,0,0,2"
+                        Click="OpenFolder_Click" Visibility="Collapsed" ToolTip="Open a project folder (Ctrl+O)">
+                    <StackPanel Orientation="Horizontal">
+                        <TextBlock Style="{StaticResource Glyph}" FontSize="12" Text="{x:Static infra:Icons.OpenFolder}" Margin="0,0,6,0"
+                                   VerticalAlignment="Center" Foreground="{DynamicResource AccentTextFillColorPrimaryBrush}" />
+                        <TextBlock Text="Open a folder to work on code" FontSize="12.5" VerticalAlignment="Center"
+                                   Foreground="{DynamicResource AccentTextFillColorPrimaryBrush}" />
+                    </StackPanel>
+                </Button>
                 <TextBlock Style="{StaticResource MetaText}" Margin="2,8,0,0" TextWrapping="Wrap"
                            Text="Type / for commands and skills. Drop files or paste an image to attach them. Shift+Enter adds a line." />
             </StackPanel>

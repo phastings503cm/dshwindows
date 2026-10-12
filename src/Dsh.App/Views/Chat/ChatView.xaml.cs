@@ -270,22 +270,45 @@ public partial class ChatView : UserControl
         Starter.Visibility = empty ? Visibility.Visible : Visibility.Collapsed;
         Transcript.Visibility = empty ? Visibility.Collapsed : Visibility.Visible;
         if (!empty || _session is not { } session) return;
-        StarterTitle.Text = session.ProjectName ?? "No project open";
         StarterSubtitle.Text = _model.Config.ActiveProvider is { } provider ? $"Running on {provider.DisplayName}" : "No model configured";
-        Suggestions.ItemsSource = session.WorkspacePath is null
-            ?
-            [
-                new Suggestion(Icons.OpenFolder, "Open a project folder so I can read and edit its files", OpensFolder: true),
-                new Suggestion(Icons.Info, "What can you do?"),
-            ]
-            : new List<Suggestion>
-            {
-                new(Icons.Globe, "Give me a tour of this codebase — the entry points and how it fits together"),
-                new(Icons.Wrench, "Find and fix any bugs you can verify with the tests"),
-                new(Icons.Document, "Write a README section describing how to build and run this"),
-                new(Icons.CheckList, "What would you improve first in this project, and why?"),
-            };
+        // A chat without a project is a regular chat: general openers (and a skill or two), and a quiet way to open a folder.
+        StarterTitle.Text = session.ProjectName ?? session.Title;
+        OpenFolderLink.Visibility = session.IsPlain ? Visibility.Visible : Visibility.Collapsed;
+        Suggestions.ItemsSource = session.IsPlain ? PlainOpeners(session) : new List<Suggestion>
+        {
+            new(Icons.Globe, "Give me a tour of this codebase — the entry points and how it fits together"),
+            new(Icons.Wrench, "Find and fix any bugs you can verify with the tests"),
+            new(Icons.Document, "Write a README section describing how to build and run this"),
+            new(Icons.CheckList, "What would you improve first in this project, and why?"),
+        };
     }
+
+    /// <summary>What a regular chat offers to start with: general openers, and up to two of the user's skills.</summary>
+    private List<Suggestion> PlainOpeners(SessionVM session)
+    {
+        var openers = new List<Suggestion>
+        {
+            new(Icons.Lightbulb, "Explain something simply"),
+            new(Icons.Edit, "Help me write or rewrite something"),
+            new(Icons.Globe, "Summarise a web page"),
+            new(Icons.CheckList, "Plan something with me"),
+        };
+        try
+        {
+            var disabled = _model.Config.DisabledSkills;
+            foreach (var skill in _model.Host.Skills(session)
+                         .Where(s => !s.Shadowed && s.ModelInvocable && !s.AlwaysApply && !disabled.Contains(s.Id))
+                         .Take(2))
+                openers.Add(new Suggestion(Icons.Education, $"Use the {skill.Name} skill"));
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            // No skills to offer; the general openers stand.
+        }
+        return openers;
+    }
+
+    private void OpenFolder_Click(object sender, RoutedEventArgs e) => _model.ChooseProject();
 
     private void UpdateGate()
     {
@@ -773,7 +796,8 @@ public partial class ChatView : UserControl
         try
         {
             if (Path.IsPathRooted(preview)) return Path.GetFullPath(preview);
-            return _session?.WorkspacePath is { } root ? Path.GetFullPath(Path.Combine(root, preview)) : null;
+            // (A chat without a project works in its scratch folder.)
+            return _session?.WorkingFolder is { } root ? Path.GetFullPath(Path.Combine(root, preview)) : null;
         }
         catch (Exception ex) when (ex is ArgumentException or NotSupportedException or PathTooLongException)
         {

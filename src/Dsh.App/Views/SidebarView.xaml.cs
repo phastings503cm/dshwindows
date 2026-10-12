@@ -231,6 +231,8 @@ public partial class SidebarView : UserControl
 
     private void NewChat_Click(object sender, RoutedEventArgs e) => _model.NewChat();
 
+    private void NewPlainChat_Click(object sender, RoutedEventArgs e) => _model.NewPlainChat();
+
     private void Settings_Click(object sender, RoutedEventArgs e) => _model.ShowSettings();
 
     private void Skills_Click(object sender, RoutedEventArgs e) => _model.ShowSettings(SettingsTab.Skills);

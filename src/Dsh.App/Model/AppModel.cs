@@ -132,7 +132,7 @@ public sealed partial class AppModel : ObservableObject
 
         if (!activateSession) return;
         // Return to this project's most recent chat rather than piling up empty ones.
-        if (Host.Sessions.FirstOrDefault(s => SamePath(s.Cwd, path)) is { } existing) Select(existing.Id);
+        if (Host.Sessions.FirstOrDefault(s => SamePath(s.WorkspacePath, path)) is { } existing) Select(existing.Id);
         else NewChat();
     }
 
@@ -163,13 +163,23 @@ public sealed partial class AppModel : ObservableObject
         Host.Hydrate(session);
         // Make sure the context gauge has a number before the user asks.
         Host.EnsureContextProbe();
-        // Following a chat into its project keeps both modes in step.
-        if (session.Cwd is { } cwd && !SamePath(cwd, Project) && Directory.Exists(cwd)) OpenProject(cwd, activateSession: false);
+        // Following a chat into its project keeps both modes in step. (A chat without a project has none to follow; its
+        // scratch folder is not a project.)
+        if (session.WorkspacePath is { } cwd && !SamePath(cwd, Project) && Directory.Exists(cwd)) OpenProject(cwd, activateSession: false);
     }
 
     public SessionVM NewChat()
     {
         var session = Host.NewSession(Project);
+        Host.EnsureContextProbe();
+        return session;
+    }
+
+    /// <summary>A regular chat, with no project folder — even while a project is open.</summary>
+    public SessionVM NewPlainChat()
+    {
+        Mode = WorkspaceMode.Chat;
+        var session = Host.NewSession(null);
         Host.EnsureContextProbe();
         return session;
     }
