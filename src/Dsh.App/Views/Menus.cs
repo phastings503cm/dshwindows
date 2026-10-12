@@ -82,7 +82,7 @@ public static class Menus
                 var item = Item(provider.DisplayName, () =>
                 {
                     if (config.ActiveRoute == route) return;
-                    config.ActiveRoute = route;
+                    config.MakePrimary(route);
                     model.Host.ResetRouteCache();
                 }, provider.IsPrivateRoute ? Icons.Lock : Icons.Shield);
                 item.ToolTip = (role == RouteRole.Primary ? "The primary model: it answers you. " : "Make this the primary model. ") +

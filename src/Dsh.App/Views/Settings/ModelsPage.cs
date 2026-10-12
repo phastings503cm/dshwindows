@@ -98,7 +98,7 @@ public sealed class ModelsPage : UserControl
     {
         var config = _model.Config;
         var primary = provider.RouteId == config.ActiveRoute;
-        var enabled = provider.IsEnabled || primary;
+        var enabled = provider.IsEnabled;
 
         void Changed(bool fleet = true)
         {
@@ -124,10 +124,21 @@ public sealed class ModelsPage : UserControl
         remove.SetResourceReference(StyleProperty, "IconButton");
         remove.Click += (_, _) =>
         {
-            if (!Dialog.Confirm($"Remove {provider.DisplayName}?", "Its saved API key is removed too.", "Remove", destructive: true)) return;
+            var others = config.Providers.Any(p => p.RouteId != provider.RouteId && p.IsEnabled);
+            if (primary && others)
+            {
+                Dialog.Info("Pick another primary first",
+                    $"{provider.Name} is the primary model, which answers you. Make another model the primary, then remove this one.");
+                return;
+            }
+            var message = primary
+                ? "Its saved API key is removed too. It's the only model that's on, so the setup wizard opens to set up another."
+                : "Its saved API key is removed too.";
+            if (!Dialog.Confirm($"Remove {provider.DisplayName}?", message, "Remove", destructive: true)) return;
             config.RemoveProvider(provider);
             try { SecretStore.Delete(SecretStore.ProviderTarget(provider.RouteId)); } catch (Exception) { }
             _model.Host.ResetRouteCache();
+            if (config.ActiveRoute is null) _model.ShowWizard();
         };
         actions.Children.Add(remove);
 
@@ -147,12 +158,14 @@ public sealed class ModelsPage : UserControl
             Changed();
         };
         controls.Children.Add(on);
-        var asPrimary = new RadioButton { Content = "Primary", GroupName = "primary-route", IsChecked = primary, IsEnabled = enabled, Margin = new Thickness(0, 0, 16, 4) };
-        asPrimary.ToolTip = "The primary model answers you (and runs the main agent).";
+        var asPrimary = new RadioButton { Content = "Primary", GroupName = "primary-route", IsChecked = primary, Margin = new Thickness(0, 0, 16, 4) };
+        asPrimary.ToolTip = enabled
+            ? "The primary model answers you (and runs the main agent)."
+            : "Make it the primary model, which answers you (it's switched on too).";
         asPrimary.Checked += (_, _) =>
         {
             if (config.ActiveRoute == provider.RouteId) return;
-            config.ActiveRoute = provider.RouteId;
+            config.MakePrimary(provider.RouteId);
             _model.Host.ResetRouteCache();
             Dispatcher.BeginInvoke(Rebuild);
         };
@@ -227,6 +240,9 @@ public sealed class ModelsPage : UserControl
         controls.Children.Add(isPrivate);
         if (provider.IsInteractiveOnly)
             controls.Children.Add(WithMargin(Ui.Secondary("interactive use only", 12), new Thickness(0, 4, 16, 4)));
+        if (primary && !enabled)
+            controls.Children.Add(WithMargin(Ui.Status("Switched off, but it's the primary: switch it on, or make another model primary.", "SystemFillColorCautionBrush"),
+                new Thickness(0, 4, 16, 4)));
         if (_model.RouteChecks.TryGetValue(provider.RouteId, out var check))
         {
             var dot = new System.Windows.Shapes.Ellipse { Width = 8, Height = 8, Margin = new Thickness(0, 0, 5, 0), VerticalAlignment = VerticalAlignment.Center };

@@ -32,8 +32,7 @@ public sealed class SwapperConnectGuide : IWizardGuide
         _host = host;
         _dispatcher = host.Window.Dispatcher;
         _loginMode = login;
-        // A route that answers you already exists: a new box helps out by default.
-        _use = model.Config.ActiveProvider is null ? RouteUse.Primary : RouteUse.Subagent;
+        _use = DefaultUse();
     }
 
     public SwapperPage Page { get; private set; } = SwapperPage.Paste;
@@ -107,6 +106,9 @@ public sealed class SwapperConnectGuide : IWizardGuide
         {
             case SwapperPage.Check:
                 if (_status is null && !_checking) _ = CheckAsync();
+                break;
+            case SwapperPage.Role:
+                if (!_useChosen) _use = DefaultUse();
                 break;
             case SwapperPage.Done:
                 if (!_saved && !_saving) _ = SaveAsync();
@@ -550,7 +552,27 @@ public sealed class SwapperConnectGuide : IWizardGuide
     // MARK: - How DSH uses it
 
     private RouteUse _use;
+    /// <summary>The user picked a role (the default no longer applies).</summary>
+    private bool _useChosen;
     private bool _private = true;
+
+    /// <summary>The route this box already has (pasted again, or set up by the DGX Spark guide), if any.</summary>
+    private ProviderProfile? ExistingRoute =>
+        Box is { } box ? _model.Config.Providers.FirstOrDefault(p => SwapperConnection.SameBase(p.BaseUrl, box.ApiBase)) : null;
+
+    /// <summary>A box pasted again keeps its role (the primary stays the primary); a new box answers you when nothing else
+    /// does yet, and otherwise helps out with side tasks.</summary>
+    private RouteUse DefaultUse()
+    {
+        var config = _model.Config;
+        if (ExistingRoute is { } existing)
+        {
+            if (existing.RouteId == config.ActiveRoute) return RouteUse.Primary;
+            if (existing.SubagentWorker) return RouteUse.Subagent;
+            if (existing.IsBackup) return RouteUse.Backup;
+        }
+        return config.ActiveProvider is null ? RouteUse.Primary : RouteUse.Subagent;
+    }
 
     private UIElement RolePage()
     {
@@ -561,11 +583,14 @@ public sealed class SwapperConnectGuide : IWizardGuide
             panel.Children.Add(Choice(glyph, title, detail, _use == use, () =>
             {
                 _use = use;
+                _useChosen = true;
                 _host.Render();
             }));
         Use(RouteUse.Primary, Icons.Chat, "Primary", "It answers you, and runs the main agent.");
         Use(RouteUse.Subagent, Icons.People, "Subagent", "It takes side tasks the primary hands out, in parallel.");
         Use(RouteUse.Backup, Icons.Sync, "Backup", "It takes over when the primary stops answering.");
+        if (_use != RouteUse.Primary && ExistingRoute is { } existing && existing.RouteId == _model.Config.ActiveRoute)
+            panel.Children.Add(Note(Tone.Info, "It's your primary model now, and stays so: to hand that over, make another model primary in Settings › AI Models."));
         var isPrivate = Ui.Check("Private — your own hardware", _private, on => _private = on);
         isPrivate.Margin = new Thickness(0, 10, 0, 0);
         isPrivate.FontWeight = FontWeights.SemiBold;
@@ -593,9 +618,12 @@ public sealed class SwapperConnectGuide : IWizardGuide
         {
             var config = _model.Config;
             var model = status.ActiveModel?.ServedId ?? (_chosen is { } key ? status.AllModels.GetValueOrDefault(key)?.ServedId : null) ?? box.Model ?? "model";
-            // A route at this box's model address already (from the DGX Spark guide, say) is updated, not doubled.
-            var existing = config.Providers.FirstOrDefault(p => SwapperConnection.SameBase(p.BaseUrl, box.ApiBase));
+            // A route at this box's model address already (the code pasted again, the DGX Spark guide's) is updated in place:
+            // its address, key, certificate and model are the box's now, and everything else the user set on it stays — its
+            // context, thinking, headers, how many subagents at a time, and its roles. The primary stays the primary.
+            var existing = ExistingRoute;
             var route = existing?.DeepCopy() ?? new ProviderProfile(ProviderKind.OpenAICompat, box.Name, box.ApiBase, model);
+            route.BaseUrl = box.ApiBase;
             route.Model = model;
             route.ApiKey = null;
             route.PinnedCertificate = box.Fingerprint.Length > 0 ? box.Fingerprint : route.PinnedCertificate;
@@ -603,14 +631,9 @@ public sealed class SwapperConnectGuide : IWizardGuide
             route.Enabled = null;
             if (_use == RouteUse.Subagent) route.SubagentWorker = true;
             if (_use == RouteUse.Backup) route.Backup = true;
-            if (existing is not null && existing.RouteId != route.RouteId)
-            {
-                config.RemoveProvider(existing);
-                try { SecretStore.Delete(SecretStore.ProviderTarget(existing.RouteId)); } catch (Exception) { }
-            }
-            if (_use == RouteUse.Primary || config.ActiveRoute is null || existing is not null && existing.RouteId == config.ActiveRoute) config.Activate(route);
-            else config.Store(route);
-            config.SetApiKey(box.ApiKey ?? "", route);
+            // (Another box that would make the same route id gets a name of its own rather than overwriting that route.)
+            route = config.ReplaceProvider(existing?.RouteId, route, box.ApiKey ?? "");
+            if (_use == RouteUse.Primary || config.ActiveRoute is null) config.MakePrimary(route.RouteId);
             _route = route;
 
             // The box itself, for switching models: the one already known at this address is updated.
@@ -663,7 +686,8 @@ public sealed class SwapperConnectGuide : IWizardGuide
         if (_saving && !_saved) panel.Children.Add(Busy("Saving…"));
         if (_saved)
         {
-            var use = _use switch
+            var primary = _route is { } saved && saved.RouteId == _model.Config.ActiveRoute;
+            var use = primary ? "It's your primary model now: new messages go to it." : _use switch
             {
                 RouteUse.Primary => "It's your primary model now: new messages go to it.",
                 RouteUse.Subagent => "It takes subagents' side tasks.",

@@ -172,15 +172,69 @@ public sealed partial class AppConfig : ObservableObject
 
     public bool IsConfigured => ActiveProvider is not null;
 
-    /// <summary>Make this provider the active route (adding or replacing it).</summary>
+    /// <summary>Make this provider the active route (adding or replacing it). The primary is always on.</summary>
     public void Activate(ProviderProfile provider)
     {
         var copy = provider.DeepCopy();
         copy.ApiKey = null;
+        if (copy.Enabled == false) copy.Enabled = null;
         var index = Providers.ToList().FindIndex(p => p.RouteId == copy.RouteId);
         if (index >= 0) Providers[index] = copy; else Providers.Add(copy);
         ActiveRoute = copy.RouteId;
         OnPropertyChanged(nameof(ActiveProvider));
+    }
+
+    /// <summary>Make the stored route <paramref name="routeId"/> the primary (switching it on if it was off).</summary>
+    public void MakePrimary(string routeId)
+    {
+        var index = Providers.ToList().FindIndex(p => p.RouteId == routeId);
+        if (index < 0) return;
+        if (Providers[index].Enabled == false)
+        {
+            var on = Providers[index].DeepCopy();
+            on.Enabled = null;
+            Providers[index] = on;
+        }
+        ActiveRoute = routeId;
+    }
+
+    /// <summary>A name for a route serving <paramref name="model"/> that no other route has with that model (route ids are
+    /// "name|model"): <paramref name="name"/> itself, else "name 2", "name 3"…</summary>
+    public string UniqueRouteName(string name, string model, string? exceptRouteId = null)
+    {
+        bool Taken(string candidate) => Providers.Any(p => p.RouteId != exceptRouteId && p.RouteId == $"{candidate}|{model}");
+        if (!Taken(name)) return name;
+        for (var n = 2; ; n++)
+        {
+            if (!Taken($"{name} {n}")) return $"{name} {n}";
+        }
+    }
+
+    /// <summary>Put <paramref name="updated"/> where the route <paramref name="oldRouteId"/> was — the same place in the
+    /// list, still the primary if it was — or add it when there was none. A route with the same id that isn't this one is
+    /// never overwritten: the new one gets a name of its own. Its key is <paramref name="apiKey"/> when given, else the
+    /// one it had (moved along when its id changed). Returns the route as stored.</summary>
+    public ProviderProfile ReplaceProvider(string? oldRouteId, ProviderProfile updated, string? apiKey = null)
+    {
+        var copy = updated.DeepCopy();
+        copy.ApiKey = null;
+        copy.Name = UniqueRouteName(copy.Name, copy.Model, oldRouteId);
+        var list = Providers.ToList();
+        var index = oldRouteId is null ? -1 : list.FindIndex(p => p.RouteId == oldRouteId);
+        var old = index >= 0 ? list[index] : null;
+        var wasPrimary = old is not null && ActiveRoute == old.RouteId;
+        if (wasPrimary && copy.Enabled == false) copy.Enabled = null;
+        var key = apiKey ?? (old is null ? null : ApiKey(old));
+        if (index >= 0) Providers[index] = copy; else Providers.Add(copy);
+        if (key is not null) SetApiKey(key, copy);
+        if (old is not null && old.RouteId != copy.RouteId)
+        {
+            lock (_keyLock) _keyCache.Remove(old.RouteId);
+            try { SecretStore.Delete(SecretStore.ProviderTarget(old.RouteId)); } catch (Exception) { }
+        }
+        if (wasPrimary) ActiveRoute = copy.RouteId;
+        OnPropertyChanged(nameof(ActiveProvider));
+        return copy;
     }
 
     /// <summary>Add or replace a route without changing which one is active (editing a spare or a subagent server must not make it the main model).</summary>
@@ -193,11 +247,13 @@ public sealed partial class AppConfig : ObservableObject
         OnPropertyChanged(nameof(ActiveProvider));
     }
 
+    /// <summary>Remove a route. When it was the primary, the first route that is on takes over — or none (and the setup
+    /// wizard asks for one): a switched-off route never becomes the primary by itself.</summary>
     public void RemoveProvider(ProviderProfile provider)
     {
         var existing = Providers.FirstOrDefault(p => p.RouteId == provider.RouteId);
         if (existing is not null) Providers.Remove(existing);
-        if (ActiveRoute == provider.RouteId) ActiveRoute = Providers.FirstOrDefault()?.RouteId;
+        if (ActiveRoute == provider.RouteId) ActiveRoute = Providers.FirstOrDefault(p => p.IsEnabled)?.RouteId;
         OnPropertyChanged(nameof(ActiveProvider));
     }
 
