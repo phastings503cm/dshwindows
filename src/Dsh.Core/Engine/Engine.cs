@@ -1031,6 +1031,7 @@ public sealed class Engine
             case "goal_blocked": return S("reason") is { } why ? TextUtil.Prefix(why, 80) : "goal blocked";
             case "agent":
                 return S("description") ?? (S("prompt") is { } p ? TextUtil.Prefix(p, 80) : null) ?? "subagent";
+            case "use_skill": return S("name") ?? call.Name;
             case "glob": return S("pattern") ?? call.Name;
             case "grep": return S("pattern") ?? call.Name;
             case "read_many_files": return S("paths") ?? call.Name;
