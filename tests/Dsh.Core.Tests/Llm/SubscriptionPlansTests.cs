@@ -173,6 +173,20 @@ public sealed class SubscriptionPlansTests
         Assert.True(SubscriptionPlans.AlwaysThinks("zai/glm-5.3"));
     }
 
+    [Theory]
+    [InlineData("https://api.z.ai/api/coding/paas/v4", "glm-4.6", true)]       // Z.ai's servers: every model
+    [InlineData("https://open.bigmodel.cn/api/paas/v4", "glm-4.6", true)]
+    [InlineData("https://coding-intl.dashscope.aliyuncs.com/v1", "glm-5", true)] // a GLM-5 model anywhere
+    [InlineData("http://192.168.1.42:8000/v1", "glm-5.3", true)]
+    [InlineData("https://coding-intl.dashscope.aliyuncs.com/v1", "qwen3.7-plus", false)]
+    [InlineData("https://notz.ai.example.com/v1", "glm-4.6", false)]
+    public void GlmRulesFollowTheHostAndTheModel(string baseUrl, string model, bool expected)
+    {
+        Assert.Equal(expected, SubscriptionPlans.UsesGlmRules(baseUrl, model));
+        // Off on Z.ai never switches thinking off there.
+        if (expected) Assert.Equal("low", Body(model, ThinkingLevel.Off, baseUrl)["reasoning_effort"]!.GetValue<string>());
+    }
+
     [Fact]
     public void DshSaysWhoItIsHonestly()
     {

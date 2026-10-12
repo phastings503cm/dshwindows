@@ -412,7 +412,7 @@ public sealed class SelfTest
         // The shield's chip: what was masked before the request went to a model that isn't private (counts, never values).
         if (chat.Entries.LastOrDefault(e => e.Id == reply) is MessageEntryVM masked)
         {
-            var report = new ShieldReport("Kimi Code", new Dictionary<SensitiveKind, int> { [SensitiveKind.Email] = 2, [SensitiveKind.Secret] = 1 }, false);
+            var report = new ShieldReport("Kimi Code", new Dictionary<SensitiveKind, int> { [SensitiveKind.Email] = 2, [SensitiveKind.Secret] = 1 });
             masked.Shield = report.Summary;
             masked.ShieldDetails = report.Details;
         }

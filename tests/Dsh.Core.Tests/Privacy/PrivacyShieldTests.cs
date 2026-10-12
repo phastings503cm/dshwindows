@@ -211,8 +211,10 @@ public sealed class PrivacyShieldTests
             Assert.Same(binary, attachments[2]);
             return FakeProviderClient.Text("ok");
         }, Options(r => report = r));
-        Assert.True(report!.HadImages);
+        Assert.Equal(2, report!.Unchecked); // the picture and the binary file went as they were
         Assert.Equal(1, report.Counts[SensitiveKind.Email]);
+        Assert.EndsWith(" · 2 attachments not checked", report.Summary);
+        Assert.Contains("Not checked, sent as they are: 2 pictures or files that aren't plain text.", report.Details);
     }
 
     [Fact]
@@ -226,7 +228,7 @@ public sealed class PrivacyShieldTests
         Assert.Equal("Masked 2 emails and 1 key before sending to Kimi Code", report.Summary);
         Assert.DoesNotContain("ann@x.io", report.Details);
         Assert.Contains("2 emails", report.Details);
-        Assert.False(report.HadImages);
+        Assert.Equal(0, report.Unchecked);
 
         Assert.Null(ShieldReport.Describe(new Dictionary<SensitiveKind, int>(), "x"));
         Assert.Equal("Masked 1 key before sending to Kimi Code",

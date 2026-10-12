@@ -776,8 +776,8 @@ public sealed class OpenAiClient : IProviderClient
     {
         if (ThinkingLevelFor(request) is not { } level) return;
         // GLM-5 always thinks: switching thinking off fails the request, so Off asks for the least of it, in the words
-        // it accepts (low, high, max).
-        if (SubscriptionPlans.AlwaysThinks(string.IsNullOrEmpty(request.Model) ? Profile.Model : request.Model))
+        // it accepts (low, high, max). Z.ai's own servers take the same words for every model.
+        if (SubscriptionPlans.UsesGlmRules(Profile.BaseUrl, string.IsNullOrEmpty(request.Model) ? Profile.Model : request.Model))
         {
             body["reasoning_effort"] = SubscriptionPlans.GlmEffort(level);
             return;

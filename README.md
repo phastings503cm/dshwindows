@@ -201,20 +201,28 @@ rewrite the task without them.
 **Mask sensitive data before sending it to models that aren't private** (on by default, in **Settings ›
 AI Models › Sensitive data**). Before a request leaves this PC for a model that isn't private, DSH
 replaces sensitive values with placeholders such as `⟦EMAIL_1⟧` — in the system prompt, every message,
-tool results and earlier tool calls — and tells the model to use them as written. What comes back has
-the real values put back before you, the tools or the transcript see it, so the model can still work
-with them; nothing is stored. The same value keeps its placeholder from turn to turn.
+tool results, earlier tool calls and text attachments — and tells the model to use them as written. What
+comes back has the real values put back before you, the tools or the transcript see it, so the model can
+still work with them; nothing is stored. The same value keeps its placeholder from turn to turn, and once a
+value has been recognised anywhere in the conversation, every other place it turns up is masked too — in a
+reply, a command or a tool's output, even run together with other text (`-phunter22x`).
 
 - **What is masked** — each a switch: secrets and keys (private keys, AWS, GitHub, OpenAI, Anthropic,
-  Slack, Google, Stripe and Spark Swapper keys, JWTs, bearer tokens, passwords in URLs and
-  `password = …`-style settings), email addresses, phone numbers, ID and card numbers (US SSNs, card
-  numbers that pass the Luhn check, IBANs that pass theirs), IP addresses (off by default), and **custom
-  terms**: one per line — client names, project code names — matched without regard to case on whole
-  words, or a regular expression after `re:`. Values in the Credentials Vault are always masked.
+  Slack, Google, Stripe and Spark Swapper keys, JWTs, bearer tokens, passwords in URLs, `password = …` and
+  `"password": "…"` settings and `.env` lines — a bare value only when it looks like one, so code such as
+  `let token: String` or `password = user_password` is left alone), email addresses, phone numbers, ID and
+  card numbers (US SSNs, IBANs that pass their check, and card numbers that pass the Luhn check and start
+  like a real card network's), IP addresses (off by default), and **custom terms**: one per line — client
+  names, project code names — matched without regard to case on whole words, or a regular expression
+  after `re:`. Values in the Credentials Vault are always masked, even with the switch off.
 - **Try it** shows exactly what a model that isn't private would receive for the text you type.
 - A reply whose request had anything masked carries a small shield: *Masked 2 emails and 1 key before
   sending to Kimi Code* (hover for the categories — never the values).
-- Pictures can't be checked: the first time a chat sends one to a model that isn't private, it says so.
+- Text attachments are checked whatever they were saved as (UTF-8, UTF-16, Windows "ANSI"). Pictures and
+  files that aren't plain text (PDFs, Office documents) can't be: the first time a chat sends one to a model
+  that isn't private it says so, and the shield's chip counts them as not checked.
+- A Bedrock turn's saved reasoning, which Claude sees again word for word, isn't sent back if it holds a
+  sensitive value (a turn made while the route was private, say).
 
 ## Subscription plans
 

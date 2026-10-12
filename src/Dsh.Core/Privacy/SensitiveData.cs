@@ -41,6 +41,9 @@ public readonly record struct SensitiveMatch(int Start, int Length, SensitiveKin
 
 public static partial class SensitiveKinds
 {
+    /// <summary>How long one pattern may spend on one search before it gives up (on that text only).</summary>
+    internal const int MatchTimeoutMs = 250;
+
     public static string Prefix(this SensitiveKind kind) => kind switch
     {
         SensitiveKind.Secret => "SECRET",
@@ -68,7 +71,7 @@ public static partial class SensitiveKinds
     public static string Placeholder(SensitiveKind kind, int number) => $"⟦{kind.Prefix()}_{number}⟧";
 
     /// <summary>A placeholder anywhere in text.</summary>
-    [GeneratedRegex(@"⟦(SECRET|EMAIL|PHONE|ID|CARD|IP|TERM)_(\d{1,6})⟧", RegexOptions.CultureInvariant)]
+    [GeneratedRegex(@"⟦(SECRET|EMAIL|PHONE|ID|CARD|IP|TERM)_(\d{1,6})⟧", RegexOptions.CultureInvariant, SensitiveKinds.MatchTimeoutMs)]
     public static partial Regex PlaceholderPattern();
 
     /// <summary>"key", "email", … — for "Masked 2 emails and 1 key".</summary>
@@ -110,6 +113,8 @@ public sealed partial class SensitiveDetector
 
     private readonly SensitiveCategories _categories;
     private readonly IReadOnlyList<Regex> _terms;
+    /// <summary>Which custom terms' expressions took too long once (and are skipped from then on).</summary>
+    private readonly bool[] _termTimedOut;
     private readonly IReadOnlyList<string> _vault;
 
     /// <param name="customTerms">One term per entry: matched case-insensitively on word boundaries; an entry starting
@@ -119,6 +124,7 @@ public sealed partial class SensitiveDetector
     {
         _categories = categories;
         _terms = categories.HasFlag(SensitiveCategories.CustomTerms) ? CompileTerms(customTerms ?? []) : [];
+        _termTimedOut = new bool[_terms.Count];
         _vault = (vaultSecrets ?? []).Where(v => v.Length >= 4).Distinct(StringComparer.Ordinal).OrderByDescending(v => v.Length).ToList();
     }
 
@@ -149,10 +155,10 @@ public sealed partial class SensitiveDetector
 
     // MARK: Patterns
 
-    [GeneratedRegex(@"-----BEGIN [A-Z ]*PRIVATE KEY-----", RegexOptions.CultureInvariant)]
+    [GeneratedRegex(@"-----BEGIN [A-Z ]*PRIVATE KEY-----", RegexOptions.CultureInvariant, SensitiveKinds.MatchTimeoutMs)]
     private static partial Regex PrivateKeyBegin();
 
-    [GeneratedRegex(@"-----END [A-Z ]*PRIVATE KEY-----", RegexOptions.CultureInvariant)]
+    [GeneratedRegex(@"-----END [A-Z ]*PRIVATE KEY-----", RegexOptions.CultureInvariant, SensitiveKinds.MatchTimeoutMs)]
     private static partial Regex PrivateKeyEnd();
 
     /// <summary>Key formats that identify themselves: the whole match is the secret.</summary>
@@ -171,39 +177,80 @@ public sealed partial class SensitiveDetector
     ];
 
     /// <summary>"Bearer &lt;token&gt;": the token is the secret (16 characters or more).</summary>
-    [GeneratedRegex(@"\bBearer\s+([A-Za-z0-9._~+/\-=]{16,})", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
+    [GeneratedRegex(@"\bBearer\s+([A-Za-z0-9._~+/\-=]{16,})", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant, SensitiveKinds.MatchTimeoutMs)]
     private static partial Regex BearerToken();
 
     /// <summary>scheme://user:PASSWORD@host: the password is the secret.</summary>
-    [GeneratedRegex(@"\b[A-Za-z][A-Za-z0-9+.\-]*://[^\s/:@]+:([^\s/@]+)@", RegexOptions.CultureInvariant)]
+    [GeneratedRegex(@"\b[A-Za-z][A-Za-z0-9+.\-]*://[^\s/:@]+:([^\s/@]+)@", RegexOptions.CultureInvariant, SensitiveKinds.MatchTimeoutMs)]
     private static partial Regex UrlPassword();
 
-    /// <summary>password = …, api_key: …, token=…, "password": "…" (JSON, YAML): the value is the secret.</summary>
-    [GeneratedRegex(@"(password|passwd|pwd|secret|api[_-]?key|token|access[_-]?key)[""']?\s*[:=]\s*[""']?([^\s""']{6,})",
-        RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
+    /// <summary>password = …, api_key: …, token=…, "password": "…" (JSON, YAML): the value is the secret. A quoted value
+    /// always is; a bare one only when it looks like one (<see cref="IsBareSecret"/>) — <c>let token: String</c>,
+    /// <c>const token = getToken();</c> and <c>password = user_password</c> are code, not secrets.</summary>
+    [GeneratedRegex(@"(?:password|passwd|pwd|secret|api[_-]?key|token|access[_-]?key)[""']?\s*[:=]\s*(?:""(?<dq>[^""\n]{6,})""|'(?<sq>[^'\n]{6,})'|(?<bare>[^\s""'`;,(){}\[\]<>]{6,}))",
+        RegexOptions.IgnoreCase | RegexOptions.CultureInvariant | RegexOptions.ExplicitCapture, SensitiveKinds.MatchTimeoutMs)]
     private static partial Regex Assignment();
 
-    [GeneratedRegex(@"[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}", RegexOptions.CultureInvariant)]
+    /// <summary>A line of an env file or a shell export: <c>DB_PASSWORD=…</c>, <c>export GITHUB_TOKEN=…</c>. The value is
+    /// always the secret.</summary>
+    [GeneratedRegex(@"^[ \t]*(?:export[ \t]+)?[A-Z0-9_]*(?:PASSWORD|PASSWD|SECRET|TOKEN|API_KEY|ACCESS_KEY)[A-Z0-9_]*[ \t]*=[ \t]*(?<value>\S+)",
+        RegexOptions.Multiline | RegexOptions.CultureInvariant | RegexOptions.ExplicitCapture, SensitiveKinds.MatchTimeoutMs)]
+    private static partial Regex EnvLine();
+
+    /// <summary>Names of types, and other words a declaration puts where a value would be.</summary>
+    private static readonly HashSet<string> TypeWords = new(StringComparer.Ordinal)
+    {
+        "String", "string", "str", "Int", "int", "Integer", "Bool", "bool", "boolean", "Boolean", "number", "Number", "any", "Any",
+        "Data", "Date", "URL", "Object", "object", "None", "null", "nil", "true", "false", "undefined", "Optional", "SecureString",
+        "char", "bytes", "Buffer", "Uint8Array", "Secret", "Token", "Password", "Credential", "Credentials",
+    };
+
+    [GeneratedRegex(@"^[A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)+$", RegexOptions.CultureInvariant, SensitiveKinds.MatchTimeoutMs)]
+    private static partial Regex DottedPath();
+
+    [GeneratedRegex(@"^[A-Z][a-z0-9]+(?:[A-Z][a-z0-9]*)+$", RegexOptions.CultureInvariant, SensitiveKinds.MatchTimeoutMs)]
+    private static partial Regex PascalCase();
+
+    [GeneratedRegex(@"^[a-z]+(?:[A-Z][a-z0-9]*)+$", RegexOptions.CultureInvariant, SensitiveKinds.MatchTimeoutMs)]
+    private static partial Regex CamelCase();
+
+    [GeneratedRegex(@"^[a-z]+(?:_[a-z0-9]+)+$", RegexOptions.CultureInvariant, SensitiveKinds.MatchTimeoutMs)]
+    private static partial Regex SnakeCase();
+
+    /// <summary>Whether a bare (unquoted) assigned value is a secret rather than code: not a type, a dotted path or an
+    /// identifier, and either with a digit or a symbol in it, or a run of eight or more letters all in one case.
+    /// (Its trailing ?, ! or . is left out first: <c>String?</c>, the end of a sentence.)</summary>
+    internal static bool IsBareSecret(string value)
+    {
+        var v = value.TrimEnd('?', '!', '.');
+        if (v.Length == 0 || TypeWords.Contains(v)) return false;
+        if (DottedPath().IsMatch(v) || PascalCase().IsMatch(v) || CamelCase().IsMatch(v) || SnakeCase().IsMatch(v)) return false;
+        if (v.Any(char.IsAsciiDigit)) return true;
+        if (v.Any(c => !char.IsAsciiLetter(c) && c != '_')) return true;
+        return v.Length >= 8 && (v.All(char.IsAsciiLetterLower) || v.All(char.IsAsciiLetterUpper));
+    }
+
+    [GeneratedRegex(@"[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}", RegexOptions.CultureInvariant, SensitiveKinds.MatchTimeoutMs)]
     private static partial Regex Email();
 
-    [GeneratedRegex(@"\+[1-9]\d{7,14}", RegexOptions.CultureInvariant)]
+    [GeneratedRegex(@"\+[1-9]\d{7,14}", RegexOptions.CultureInvariant, SensitiveKinds.MatchTimeoutMs)]
     private static partial Regex E164();
 
     /// <summary>North American numbers written with separators: (555) 123-4567, 555.123.4567, 555-123-4567.</summary>
-    [GeneratedRegex(@"\(?\d{3}\)?[\s.\-]\d{3}[\s.\-]\d{4}", RegexOptions.CultureInvariant)]
+    [GeneratedRegex(@"\(?\d{3}\)?[\s.\-]\d{3}[\s.\-]\d{4}", RegexOptions.CultureInvariant, SensitiveKinds.MatchTimeoutMs)]
     private static partial Regex Nanp();
 
-    [GeneratedRegex(@"\b\d{3}-\d{2}-\d{4}\b", RegexOptions.CultureInvariant)]
+    [GeneratedRegex(@"\b\d{3}-\d{2}-\d{4}\b", RegexOptions.CultureInvariant, SensitiveKinds.MatchTimeoutMs)]
     private static partial Regex Ssn();
 
     /// <summary>13–19 digits, optionally in groups split by single spaces or dashes; kept only when Luhn agrees.</summary>
-    [GeneratedRegex(@"\b\d(?:[ \-]?\d){12,30}\b", RegexOptions.CultureInvariant)]
+    [GeneratedRegex(@"\b\d(?:[ \-]?\d){12,30}\b", RegexOptions.CultureInvariant, SensitiveKinds.MatchTimeoutMs)]
     private static partial Regex CardCandidate();
 
-    [GeneratedRegex(@"\b[A-Z]{2}\d{2}[A-Z0-9]{11,30}\b", RegexOptions.CultureInvariant)]
+    [GeneratedRegex(@"\b[A-Z]{2}\d{2}[A-Z0-9]{11,30}\b", RegexOptions.CultureInvariant, SensitiveKinds.MatchTimeoutMs)]
     private static partial Regex Iban();
 
-    [GeneratedRegex(@"(?<![\d.vV])(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})(?!\.?\d)", RegexOptions.CultureInvariant)]
+    [GeneratedRegex(@"(?<![\d.vV])(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})(?!\.?\d)", RegexOptions.CultureInvariant, SensitiveKinds.MatchTimeoutMs)]
     private static partial Regex Ipv4();
 
     // MARK: Finding
@@ -219,79 +266,129 @@ public sealed partial class SensitiveDetector
             if (length > 0) found.Add(new SensitiveMatch(start, length, kind));
         }
 
-        try
+        foreach (var value in _vault)
         {
-            foreach (var value in _vault)
-            {
-                for (var at = text.IndexOf(value, StringComparison.Ordinal); at >= 0; at = text.IndexOf(value, at + value.Length, StringComparison.Ordinal))
-                    Add(at, value.Length, SensitiveKind.Secret);
-            }
-            if (_categories.HasFlag(SensitiveCategories.Secrets)) FindSecrets(text, Add);
-            if (_categories.HasFlag(SensitiveCategories.Emails))
-                foreach (Match m in Email().Matches(text)) Add(m.Index, m.Length, SensitiveKind.Email);
-            if (_categories.HasFlag(SensitiveCategories.Phones))
-            {
-                foreach (Match m in E164().Matches(text)) Add(m.Index, m.Length, SensitiveKind.Phone);
-                foreach (Match m in Nanp().Matches(text)) Add(m.Index, m.Length, SensitiveKind.Phone);
-            }
-            if (_categories.HasFlag(SensitiveCategories.Ids)) FindIds(text, Add);
-            if (_categories.HasFlag(SensitiveCategories.Ips))
-            {
-                foreach (Match m in Ipv4().Matches(text))
-                {
-                    if (!Enumerable.Range(1, 4).All(g => int.Parse(m.Groups[g].ValueSpan, System.Globalization.CultureInfo.InvariantCulture) <= 255)) continue;
-                    if (m.Value is "127.0.0.1" or "0.0.0.0") continue;
-                    Add(m.Index, m.Length, SensitiveKind.Ip);
-                }
-            }
-            foreach (var term in _terms)
-                foreach (Match m in term.Matches(text)) Add(m.Index, m.Length, SensitiveKind.Term);
+            for (var at = text.IndexOf(value, StringComparison.Ordinal); at >= 0; at = text.IndexOf(value, at + value.Length, StringComparison.Ordinal))
+                Add(at, value.Length, SensitiveKind.Secret);
         }
-        catch (RegexMatchTimeoutException)
+        if (_categories.HasFlag(SensitiveCategories.Secrets)) FindSecrets(text, Add);
+        if (_categories.HasFlag(SensitiveCategories.Emails))
+            Each(Email(), text, m => Add(m.Index, m.Length, SensitiveKind.Email));
+        if (_categories.HasFlag(SensitiveCategories.Phones))
         {
-            // Text that defeats a pattern keeps what was found before it.
+            Each(E164(), text, m => Add(m.Index, m.Length, SensitiveKind.Phone));
+            Each(Nanp(), text, m => Add(m.Index, m.Length, SensitiveKind.Phone));
+        }
+        if (_categories.HasFlag(SensitiveCategories.Ids)) FindIds(text, Add);
+        if (_categories.HasFlag(SensitiveCategories.Ips))
+        {
+            Each(Ipv4(), text, m =>
+            {
+                if (!Enumerable.Range(1, 4).All(g => int.Parse(m.Groups[g].ValueSpan, System.Globalization.CultureInfo.InvariantCulture) <= 255)) return;
+                if (m.Value is "127.0.0.1" or "0.0.0.0") return;
+                Add(m.Index, m.Length, SensitiveKind.Ip);
+            });
+        }
+        for (var i = 0; i < _terms.Count; i++)
+        {
+            // A term's own expression that once took too long is set aside: it would cost the same on every text.
+            if (Volatile.Read(ref _termTimedOut[i])) continue;
+            if (!Each(_terms[i], text, m => Add(m.Index, m.Length, SensitiveKind.Term))) Volatile.Write(ref _termTimedOut[i], true);
         }
         return Resolve(found, Placeholders(text));
     }
 
+    /// <summary>Every match of <paramref name="pattern"/> in <paramref name="text"/>, handed to <paramref name="use"/>. A
+    /// pattern that takes too long on this text gives up (false), keeping what it had found; the others still run.</summary>
+    private static bool Each(Regex pattern, string text, Action<Match> use)
+    {
+        try
+        {
+            for (var m = pattern.Match(text); m.Success; m = m.NextMatch()) use(m);
+            return true;
+        }
+        catch (RegexMatchTimeoutException)
+        {
+            return false;
+        }
+    }
+
     private static void FindSecrets(string text, Action<int, int, SensitiveKind> add)
     {
-        foreach (Match begin in PrivateKeyBegin().Matches(text))
-        {
-            var end = PrivateKeyEnd().Match(text, begin.Index + begin.Length);
-            int stop;
-            if (end.Success) stop = end.Index + end.Length;
-            else
-            {
-                // A block cut off before its END line: mask through the end of its body.
-                stop = begin.Index + begin.Length;
-                while (stop < text.Length && (char.IsAsciiLetterOrDigit(text[stop]) || text[stop] is '+' or '/' or '=' or '\r' or '\n' or ' ' or '\t'))
-                    stop++;
-            }
-            add(begin.Index, stop - begin.Index, SensitiveKind.Secret);
-        }
+        Each(PrivateKeyBegin(), text, begin => PrivateKey(text, begin, add));
         foreach (var format in KeyFormats)
-            foreach (Match m in format.Matches(text)) add(m.Index, m.Length, SensitiveKind.Secret);
-        foreach (Match m in BearerToken().Matches(text)) add(m.Groups[1].Index, m.Groups[1].Length, SensitiveKind.Secret);
-        foreach (Match m in UrlPassword().Matches(text))
+            Each(format, text, m => add(m.Index, m.Length, SensitiveKind.Secret));
+        Each(BearerToken(), text, m => add(m.Groups[1].Index, m.Groups[1].Length, SensitiveKind.Secret));
+        Each(UrlPassword(), text, m =>
         {
             var password = m.Groups[1];
             if (!IsPlaceholderValue(password.Value)) add(password.Index, password.Length, SensitiveKind.Secret);
-        }
-        foreach (Match m in Assignment().Matches(text))
+        });
+        Each(Assignment(), text, m =>
         {
-            var value = m.Groups[2];
+            Group value;
+            if (m.Groups["dq"] is { Success: true } dq) value = dq;
+            else if (m.Groups["sq"] is { Success: true } sq) value = sq;
+            else
+            {
+                value = m.Groups["bare"];
+                if (!IsBareSecret(value.Value)) return;
+                // The end of a sentence isn't part of the secret ("my password: hunter22x.").
+                var bare = value.Value.TrimEnd('?', '!', '.');
+                if (!IsPlaceholderValue(bare)) add(value.Index, bare.Length, SensitiveKind.Secret);
+                return;
+            }
             if (!IsPlaceholderValue(value.Value)) add(value.Index, value.Length, SensitiveKind.Secret);
+        });
+        Each(EnvLine(), text, m =>
+        {
+            var value = m.Groups["value"];
+            var (start, length) = (value.Index, value.Length);
+            // A quoted value is the text between the quotes.
+            if (length >= 2 && text[start] is '"' or '\'' && text[start + length - 1] == text[start])
+            {
+                start++;
+                length -= 2;
+            }
+            if (length > 0 && !IsPlaceholderValue(text.Substring(start, length))) add(start, length, SensitiveKind.Secret);
+        });
+    }
+
+    /// <summary>A private key block from its BEGIN line through its END line (or, cut off, the end of its body).</summary>
+    private static void PrivateKey(string text, Match begin, Action<int, int, SensitiveKind> add)
+    {
+        int stop;
+        Match end;
+        try
+        {
+            end = PrivateKeyEnd().Match(text, begin.Index + begin.Length);
         }
+        catch (RegexMatchTimeoutException)
+        {
+            end = Match.Empty;
+        }
+        if (end.Success) stop = end.Index + end.Length;
+        else
+        {
+            // A block cut off before its END line: mask through the end of its body.
+            stop = begin.Index + begin.Length;
+            while (stop < text.Length && (char.IsAsciiLetterOrDigit(text[stop]) || text[stop] is '+' or '/' or '=' or '\r' or '\n' or ' ' or '\t'))
+                stop++;
+        }
+        add(begin.Index, stop - begin.Index, SensitiveKind.Secret);
     }
 
     private static void FindIds(string text, Action<int, int, SensitiveKind> add)
     {
-        foreach (Match m in Ssn().Matches(text)) add(m.Index, m.Length, SensitiveKind.Id);
-        foreach (Match m in Iban().Matches(text))
+        Each(Ssn(), text, m => add(m.Index, m.Length, SensitiveKind.Id));
+        Each(Iban(), text, m =>
+        {
             if (IbanValid(m.Value)) add(m.Index, m.Length, SensitiveKind.Id);
-        foreach (Match m in CardCandidate().Matches(text))
+        });
+        Each(CardCandidate(), text, m =>
+        {
             if (CardWithin(m.Value) is var (offset, length)) add(m.Index + offset, length, SensitiveKind.Card);
+        });
     }
 
     /// <summary>A stand-in rather than a real value: ***, &lt;your key&gt;, ${TOKEN}, xxxxxx, changeme, your-api-key — or a
@@ -307,8 +404,13 @@ public sealed partial class SensitiveDetector
         if (v.Equals("changeme", StringComparison.OrdinalIgnoreCase)) return true;
         if (v.StartsWith("your-", StringComparison.OrdinalIgnoreCase) || v.StartsWith("your_", StringComparison.OrdinalIgnoreCase)) return true;
         if (v.Contains('⟦')) return true;
+        // A reference to where the value lives, not the value: $DB_PASSWORD, $env:API_KEY, %TOKEN%.
+        if (VariableReference().IsMatch(v)) return true;
         return false;
     }
+
+    [GeneratedRegex(@"^(?:\$(?:env:)?[A-Za-z_][A-Za-z0-9_]*|%[A-Za-z_][A-Za-z0-9_]*%)$", RegexOptions.CultureInvariant, SensitiveKinds.MatchTimeoutMs)]
+    private static partial Regex VariableReference();
 
     /// <summary>The card number inside a run of digits (14–19 of them, starting like a card network's numbers and
     /// passing Luhn): the whole run, or a run of whole groups from its start or its end (a card written next to other
@@ -395,24 +497,66 @@ public sealed partial class SensitiveDetector
         return BigInteger.Parse(number.ToString(), System.Globalization.CultureInfo.InvariantCulture) % 97 == 1;
     }
 
-    /// <summary>Where the placeholders already in the text are (nothing may be matched inside them).</summary>
-    private static List<(int Start, int End)> Placeholders(string text)
+    /// <summary>Where the placeholders already in the text are (nothing may be matched inside them), in order.</summary>
+    internal static List<(int Start, int End)> Placeholders(string text)
     {
         if (!text.Contains('⟦')) return [];
-        return SensitiveKinds.PlaceholderPattern().Matches(text).Select(m => (m.Index, m.Index + m.Length)).ToList();
+        var found = new List<(int Start, int End)>();
+        Each(SensitiveKinds.PlaceholderPattern(), text, m => found.Add((m.Index, m.Index + m.Length)));
+        return found;
     }
 
-    /// <summary>Longest first; a match that overlaps one already taken, or a placeholder, is dropped.</summary>
-    private static IReadOnlyList<SensitiveMatch> Resolve(List<SensitiveMatch> found, List<(int Start, int End)> placeholders)
+    /// <summary>The matches to keep, in order: where matches overlap the longest wins (then the earliest, then the first
+    /// found), and a match that touches a placeholder already there is dropped. One sort and one sweep: overlapping
+    /// matches form small clusters, and only within a cluster are lengths compared.</summary>
+    internal static IReadOnlyList<SensitiveMatch> Resolve(List<SensitiveMatch> found, List<(int Start, int End)> placeholders)
     {
         if (found.Count == 0) return [];
-        var taken = new List<SensitiveMatch>();
-        foreach (var match in found.Select((m, order) => (m, order)).OrderByDescending(x => x.m.Length).ThenBy(x => x.m.Start).ThenBy(x => x.order).Select(x => x.m))
+        var order = new int[found.Count];
+        for (var i = 0; i < order.Length; i++) order[i] = i;
+        Array.Sort(order, (a, b) =>
         {
-            if (placeholders.Any(p => match.Start < p.End && p.Start < match.End)) continue;
-            if (taken.Any(t => match.Start < t.End && t.Start < match.End)) continue;
-            taken.Add(match);
+            var x = found[a];
+            var y = found[b];
+            if (x.Start != y.Start) return x.Start.CompareTo(y.Start);
+            if (x.Length != y.Length) return y.Length.CompareTo(x.Length);
+            return a.CompareTo(b);
+        });
+        var kept = new List<SensitiveMatch>(found.Count);
+        var cluster = new List<int>();
+        var clusterEnd = int.MinValue;
+        var next = 0; // the first placeholder that could still overlap
+        foreach (var index in order)
+        {
+            var match = found[index];
+            while (next < placeholders.Count && placeholders[next].End <= match.Start) next++;
+            if (next < placeholders.Count && placeholders[next].Start < match.End) continue;
+            if (cluster.Count > 0 && match.Start >= clusterEnd) Settle(found, cluster, kept);
+            cluster.Add(index);
+            clusterEnd = cluster.Count == 1 ? match.End : Math.Max(clusterEnd, match.End);
         }
-        return taken.OrderBy(m => m.Start).ToList();
+        Settle(found, cluster, kept);
+        return kept;
+    }
+
+    /// <summary>One cluster of overlapping matches: longest first, each kept unless it overlaps one kept before it.</summary>
+    private static void Settle(List<SensitiveMatch> found, List<int> cluster, List<SensitiveMatch> kept)
+    {
+        if (cluster.Count == 1)
+        {
+            kept.Add(found[cluster[0]]);
+        }
+        else if (cluster.Count > 1)
+        {
+            var taken = new List<SensitiveMatch>();
+            foreach (var index in cluster.OrderByDescending(i => found[i].Length).ThenBy(i => found[i].Start).ThenBy(i => i))
+            {
+                var match = found[index];
+                if (taken.Any(t => match.Start < t.End && t.Start < match.End)) continue;
+                taken.Add(match);
+            }
+            kept.AddRange(taken.OrderBy(m => m.Start));
+        }
+        cluster.Clear();
     }
 }

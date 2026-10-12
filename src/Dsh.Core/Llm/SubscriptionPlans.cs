@@ -314,6 +314,16 @@ public static partial class SubscriptionPlans
     public static bool AlwaysThinks(string? model) =>
         model is not null && model.Split('/')[^1].StartsWith("glm-5", StringComparison.OrdinalIgnoreCase);
 
+    /// <summary>Whether a route follows GLM's thinking rules (<see cref="AlwaysThinks"/>, <see cref="GlmEffort"/>): any GLM-5
+    /// model wherever it is served, and anything on Z.ai's own servers (api.z.ai, open.bigmodel.cn).</summary>
+    public static bool UsesGlmRules(string? baseUrl, string? model)
+    {
+        if (AlwaysThinks(model)) return true;
+        if (!Uri.TryCreate(baseUrl, UriKind.Absolute, out var uri)) return false;
+        var host = uri.Host.ToLowerInvariant();
+        return host is "z.ai" or "bigmodel.cn" || host.EndsWith(".z.ai", StringComparison.Ordinal) || host.EndsWith(".bigmodel.cn", StringComparison.Ordinal);
+    }
+
     /// <summary>The effort word a GLM-5 model takes for a thinking level: Off and Low → low, Medium and High → high,
     /// Max → max.</summary>
     public static string GlmEffort(ThinkingLevel level) => level switch

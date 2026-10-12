@@ -11,8 +11,8 @@ namespace Dsh.App.Model;
 
 public sealed partial class AgentHost
 {
-    /// <summary>Said once per chat when a picture goes to a model that isn't private.</summary>
-    public const string ImagesNotice = "Images are sent as they are — DSH can't check pictures for sensitive details.";
+    /// <summary>Said once per chat when a picture or a file that isn't plain text goes to a model that isn't private.</summary>
+    public const string UncheckedNotice = ShieldReport.UncheckedNotice;
 
     /// <summary>Chat → what the shield masked in the request whose reply is about to be shown.</summary>
     private readonly Dictionary<string, ShieldReport> _pendingShield = new();
@@ -72,10 +72,10 @@ public sealed partial class AgentHost
     private void OnShieldReport(string sessionId, ShieldReport report)
     {
         if (Session(sessionId) is not { } vm) return;
-        if (report.HadImages && !vm.Entries.OfType<MessageEntryVM>().Any(m => m.Text == ImagesNotice))
+        if (report.Unchecked > 0 && !vm.Entries.OfType<MessageEntryVM>().Any(m => m.Text == UncheckedNotice))
         {
-            vm.Note(ImagesNotice);
-            Log.RecordItem(sessionId, "notice", ImagesNotice);
+            vm.Note(UncheckedNotice);
+            Log.RecordItem(sessionId, "notice", UncheckedNotice);
         }
         if (report.Total > 0) _pendingShield[sessionId] = report;
         else _pendingShield.Remove(sessionId);

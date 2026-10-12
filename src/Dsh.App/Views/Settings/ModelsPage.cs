@@ -37,6 +37,10 @@ public sealed class ModelsPage : UserControl
     private readonly StackPanel _privacy = new();
     private readonly TextBox _tryIn = Ui.Field(placeholder: "Type or paste something to see what a model that isn't private would get");
     private readonly TextBox _tryOut = Ui.Field(mono: true);
+    private readonly TextBlock _tryLabel = Ui.Secondary("What a model that isn't private would get:", 11.5);
+    /// <summary>"Try it" works a moment after typing stops, off the UI thread (a pasted spreadsheet can be big).</summary>
+    private readonly System.Windows.Threading.DispatcherTimer _tryTimer = new() { Interval = TimeSpan.FromMilliseconds(300) };
+    private int _tryRun;
     private readonly TextBlock _termProblems = Ui.Status("", "SystemFillColorCautionBrush");
     private bool _testing;
 
@@ -348,7 +352,7 @@ public sealed class ModelsPage : UserControl
         var tryTitle = Ui.Text("Try it", 12.5, FontWeights.SemiBold);
         tryTitle.Margin = new Thickness(0, 14, 0, 4);
         _privacy.Children.Add(Ui.Card(Ui.Stack(master, explain, categories, termsTitle, terms, termsHint, _termProblems, tryTitle, _tryIn,
-            Ui.Secondary("What a model that isn't private would get:", 11.5), _tryOut)));
+            _tryLabel, _tryOut)));
         UpdateTermProblems();
         UpdateTry();
     }
@@ -360,25 +364,53 @@ public sealed class ModelsPage : UserControl
         _termProblems.Visibility = bad.Count == 0 ? Visibility.Collapsed : Visibility.Visible;
     }
 
-    /// <summary>The "Try it" box: exactly what the shield would send for the text typed.</summary>
+    /// <summary>The "Try it" box: exactly what the shield would send for the text typed — once typing pauses.</summary>
     private void UpdateTry()
     {
+        _tryTimer.Stop();
+        _tryTimer.Tick -= OnTryTimer;
+        _tryTimer.Tick += OnTryTimer;
+        _tryTimer.Start();
+    }
+
+    private void OnTryTimer(object? sender, EventArgs e)
+    {
+        _tryTimer.Stop();
+        _ = RunTryAsync();
+    }
+
+    private async Task RunTryAsync()
+    {
+        var run = ++_tryRun;
         var privacy = _model.Config.Privacy;
-        if (_tryIn.Text.Length == 0)
+        var text = _tryIn.Text;
+        IReadOnlyList<string> vault;
+        try { vault = _model.Host.Vault.ValuesForRedaction().Select(v => v.Value).ToList(); }
+        catch (Exception) { vault = []; }
+        // With the switch off, the Credentials Vault's values are still masked; nothing else is.
+        _tryLabel.Text = privacy.Mask
+            ? "What a model that isn't private would get:"
+            : vault.Count > 0
+                ? "The switch is off, so only values from the Credentials Vault are masked. A model that isn't private would get:"
+                : "The switch is off, so the text goes as it is:";
+        if (text.Length == 0)
         {
             _tryOut.Text = "";
             return;
         }
-        if (!privacy.Mask)
+        var detector = privacy.Mask
+            ? new SensitiveDetector(privacy.Categories, privacy.TermLines, vault)
+            : new SensitiveDetector(SensitiveCategories.None, vaultSecrets: vault);
+        string masked;
+        try
         {
-            _tryOut.Text = "(The shield is off: the text goes as it is.)";
-            return;
+            masked = await Task.Run(() => new ShieldMap().Mask(text, detector));
         }
-        IReadOnlyList<string> vault;
-        try { vault = _model.Host.Vault.ValuesForRedaction().Select(v => v.Value).ToList(); }
-        catch (Exception) { vault = []; }
-        var detector = new SensitiveDetector(privacy.Categories, privacy.TermLines, vault);
-        _tryOut.Text = new ShieldMap().Mask(_tryIn.Text, detector);
+        catch (Exception error)
+        {
+            masked = $"(Couldn't check it: {error.Message})";
+        }
+        if (run == _tryRun) _tryOut.Text = masked;
     }
 
     // MARK: - Actions
