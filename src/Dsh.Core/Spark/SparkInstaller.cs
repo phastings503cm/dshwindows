@@ -345,6 +345,12 @@ public sealed class SparkInstaller(ISparkConnection connection, string password)
           say "Spark Swapper manages the HTTPS front."
           exit 0
         fi
+        # Spark Swapper 2.0 and later set the front up themselves, requiring the model API key (some of
+        # its models have no key of their own): let it.
+        if [[ -x /usr/local/sbin/spark-swapper-front ]]; then
+          say "Letting Spark Swapper set up the HTTPS front (it requires the API key)..."
+          exec /usr/local/sbin/spark-swapper-front
+        fi
         if [[ ! -s $CERT || ! -s $KEY ]]; then
           echo "Spark Swapper's certificate is missing ($CERT). Install Spark Swapper first." >&2
           exit 2

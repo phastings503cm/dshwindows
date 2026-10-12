@@ -589,4 +589,15 @@ public sealed class SwapperConnectTests
         Assert.True(check < script.IndexOf("apt-get", StringComparison.Ordinal));
         Assert.True(check < script.IndexOf("cat > \"$CONF\"", StringComparison.Ordinal));
     }
+
+    [Fact]
+    public void TheFrontScriptLetsSparkSwapperTwoSetUpItsOwnFront()
+    {
+        var script = SparkInstaller.ModelFrontScript;
+        var handOff = script.IndexOf("exec /usr/local/sbin/spark-swapper-front", StringComparison.Ordinal);
+        Assert.True(handOff > 0);
+        // Before DSH installs nginx or writes its own (key-less) front.
+        Assert.True(handOff < script.IndexOf("apt-get", StringComparison.Ordinal));
+        Assert.True(handOff < script.IndexOf("cat > \"$CONF\"", StringComparison.Ordinal));
+    }
 }
