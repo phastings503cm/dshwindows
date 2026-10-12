@@ -60,7 +60,7 @@ public partial class MainWindow : Window
         model.Config.PropertyChanged += OnConfigChanged;
         model.Spark.PropertyChanged += (_, e) =>
         {
-            if (e.PropertyName is nameof(SparkController.Status) or nameof(SparkController.IsSwitching)) UpdateModelLabel();
+            if (e.PropertyName is nameof(SparkController.Revision) or nameof(SparkController.IsSwitching)) UpdateModelLabel();
             if (e.PropertyName is nameof(SparkController.ConfirmTarget) && model.Spark.ConfirmTarget is not null)
                 Dispatcher.BeginInvoke(ConfirmSparkSwap);
         };
@@ -68,6 +68,8 @@ public partial class MainWindow : Window
         model.SettingsRequested += (tab, action) => ShowSettings(tab, action);
         model.WizardRequested += ShowWizard;
         model.BedrockGuideRequested += ShowBedrockGuide;
+        model.SwapperGuideRequested += ShowSwapperGuide;
+        model.PlanGuideRequested += ShowPlanGuide;
         model.MemoryRequested += ShowMemory;
         model.ExternalImportRequested += ShowExternalImport;
         model.MemoriesRequested += ShowMemories;
@@ -225,7 +227,8 @@ public partial class MainWindow : Window
         ModelLabel.Text = provider is null ? "No model" : served ?? provider.Model;
         ModelButton.ToolTip = provider is null
             ? "No model configured — run the setup wizard"
-            : $"{provider.DisplayName}\n{provider.BaseUrl}" + (Model.Spark.IsSwitching ? "\nThe Spark is switching models…" : "");
+            : $"{provider.DisplayName}\n{provider.BaseUrl}" + (provider.IsPrivateRoute ? "\nPrivate" : "\nNot private: sensitive details are masked") +
+              (Model.Spark.IsSwitchingFor(provider) ? $"\n{Model.Spark.BoxFor(provider)?.Name} is switching models…" : "");
     }
 
     private void UpdatePreset()
@@ -360,6 +363,7 @@ public partial class MainWindow : Window
         }
         if (open && QueueShown && Body.ActualWidth > 0 && RoomForPanels() < PanelLayout.PlanMin + PanelLayout.QueueMin) SetQueuePanel(false);
         _planPanel.Visibility = open ? Visibility.Visible : Visibility.Collapsed;
+        Model.PlanPanelVisible = open;
         PlanSplitter.Visibility = open ? Visibility.Visible : Visibility.Collapsed;
         PlanColumn.MinWidth = open ? PanelLayout.PlanMin : 0;
         PlanColumn.Width = new GridLength(open ? PanelLayout.Clamp(Model.Config.PlanPanelWidth, PanelLayout.PlanMin, PanelLayout.PlanMax) : 0);
@@ -422,26 +426,25 @@ public partial class MainWindow : Window
         }
     }
 
-    /// <summary>Switching what the Spark serves takes minutes and affects every client, so ask.</summary>
+    /// <summary>Switching what a box serves takes minutes and affects every client, so ask.</summary>
     private async void ConfirmSparkSwap()
     {
         var spark = Model.Spark;
-        if (spark.ConfirmTarget is not { } target) return;
-        var current = spark.Status?.ActiveModel?.Title;
-        var eta = target.Key.Contains("flash", StringComparison.OrdinalIgnoreCase) ? "about 11 minutes" : "a few minutes";
+        if (spark.ConfirmTarget is not { } target || spark.ConfirmBox is not { } box) return;
+        var current = box.Status?.ActiveModel?.Title;
         var message = (current is null ? "" : $"{current} stops, then ") +
-                      $"{target.Title} loads ({eta}, {target.Context:N0}-token context). OpenClaw and every chat here follow it " +
+                      $"{target.Title} loads ({SwapperSetupFlows.SwitchTime(target)}, {target.EffectiveContext:N0}-token context). OpenClaw and every chat here follow it " +
                       "automatically; if it fails to load, the previous model comes back.";
         spark.ConfirmTarget = null;
-        if (!Dialog.Confirm($"Switch the Spark to {target.Title}?", message, "Switch")) return;
-        if (await spark.SwapAsync(target.Key) is { } error) Dialog.Info("Couldn't switch the Spark", error);
+        if (!Dialog.Confirm($"Switch {box.Name} to {target.Title}?", message, "Switch")) return;
+        if (await spark.SwapAsync(box, target.Key) is { } error) Dialog.Info($"Couldn't switch {box.Name}", error);
     }
 
     // MARK: - Top bar menus
 
     private void ModelButton_Click(object sender, RoutedEventArgs e)
     {
-        if (Model.Spark.IsConfigured && Model.Spark.Status is null) _ = Model.Spark.RefreshAsync();
+        if (Model.Spark.Boxes.Any(b => b.Status is null)) _ = Model.Spark.RefreshAsync();
         Menus.Open(Menus.Model(Model), (FrameworkElement)sender);
     }
 
@@ -556,6 +559,7 @@ public partial class MainWindow : Window
             InputBindings.Add(new KeyBinding(new RelayCommand(action), key, modifiers));
 
         Bind(Key.N, ModifierKeys.Control, () => NewChat());
+        Bind(Key.N, ModifierKeys.Control | ModifierKeys.Shift, NewPlainChat);
         Bind(Key.O, ModifierKeys.Control, Model.ChooseProject);
         Bind(Key.S, ModifierKeys.Control, Model.Code.SaveActive);
         Bind(Key.S, ModifierKeys.Control | ModifierKeys.Shift, Model.Code.SaveAll);
@@ -582,6 +586,13 @@ public partial class MainWindow : Window
     private void NewChat()
     {
         Model.NewChat();
+        FocusComposer();
+    }
+
+    /// <summary>A regular chat, without a project — even while one is open.</summary>
+    private void NewPlainChat()
+    {
+        Model.NewPlainChat();
         FocusComposer();
     }
 
@@ -644,6 +655,7 @@ public partial class MainWindow : Window
     private void ShowShortcuts() => Dialog.Info("Keyboard shortcuts", string.Join("\n", new[]
     {
         "Ctrl+N\tNew chat",
+        "Ctrl+Shift+N\tNew chat without a project",
         "Ctrl+O\tOpen folder",
         "Ctrl+L\tFocus the chat input",
         "Enter\tSend  ·  Shift+Enter: new line",
@@ -681,6 +693,28 @@ public partial class MainWindow : Window
         var owner = OwnedWindows.OfType<Window>().FirstOrDefault(w => w.IsActive) ?? this;
         var wizard = new SetupWizardWindow(Model) { Owner = owner };
         wizard.StartBedrockGuide(page, route);
+        wizard.ShowDialog();
+        UpdateModelLabel();
+        UpdateBanner();
+    }
+
+    /// <summary>"Connect my Spark Swapper" in the setup window, over whatever window is in front (Settings, say).</summary>
+    public void ShowSwapperGuide(bool login)
+    {
+        var owner = OwnedWindows.OfType<Window>().FirstOrDefault(w => w.IsActive) ?? this;
+        var wizard = new SetupWizardWindow(Model) { Owner = owner };
+        wizard.StartSwapperGuide(login);
+        wizard.ShowDialog();
+        UpdateModelLabel();
+        UpdateBanner();
+    }
+
+    /// <summary>"Connect a subscription plan" in the setup window.</summary>
+    public void ShowPlanGuide(string? plan)
+    {
+        var owner = OwnedWindows.OfType<Window>().FirstOrDefault(w => w.IsActive) ?? this;
+        var wizard = new SetupWizardWindow(Model) { Owner = owner };
+        wizard.StartPlanGuide(plan);
         wizard.ShowDialog();
         UpdateModelLabel();
         UpdateBanner();
@@ -784,6 +818,7 @@ public partial class MainWindow : Window
     // MARK: - Menu handlers
 
     private void NewChat_Click(object sender, RoutedEventArgs e) => NewChat();
+    private void NewPlainChat_Click(object sender, RoutedEventArgs e) => NewPlainChat();
     private void OpenFolder_Click(object sender, RoutedEventArgs e) => Model.ChooseProject();
     private void CloseFolder_Click(object sender, RoutedEventArgs e) => Model.CloseProject();
     private void NewTerminal_Click(object sender, RoutedEventArgs e) => NewTerminal();
@@ -891,8 +926,8 @@ public partial class MainWindow : Window
     }
 
     private void About_Click(object sender, RoutedEventArgs e) => Dialog.Info("About DSH",
-        $"DSH for Windows {AppInfo.Version}\n\nA native coding agent: it talks to any OpenAI-compatible model server " +
-        "and works in your project folder with file, search, and shell tools, asking before anything risky.\n\n" +
+        $"DSH for Windows {AppInfo.Version}\n\nA native AI assistant and coding agent: chat with any OpenAI-compatible model server, " +
+        "or open a project folder and it works there with file, search, and shell tools, asking before anything risky.\n\n" +
         $"Data folder: {AppPaths.Root}\n{UpdateChecker.ReleasesPage.Replace("/latest", "")}");
 
     private void SidebarSplitter_DragCompleted(object sender, DragCompletedEventArgs e)

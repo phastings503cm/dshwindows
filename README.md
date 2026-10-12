@@ -6,8 +6,9 @@
 
 <p align="center">
   A native Windows coding agent that <em>is</em> the harness. It runs the tool loop itself and talks
-  straight to an OpenAI-compatible model server — a DGX Spark on your LAN, a local Ollama or
-  LM Studio, a hosted provider, or Amazon Bedrock. No Node, no sidecar process, no web view.
+  straight to an OpenAI-compatible model server — a DGX Spark or Strix Halo on your LAN, a local
+  Ollama or LM Studio, a GLM, Kimi, Qwen or OpenAI plan, or Amazon Bedrock. No Node, no sidecar
+  process, no web view.
 </p>
 
 ---
@@ -52,6 +53,8 @@ pin a permission preset, and optionally open a project folder.
 
 | Backend | Address | Notes |
 |---|---|---|
+| Spark Swapper (DGX Spark or Strix Halo) | a connection code | **My Spark Swapper** — see *Connecting a Spark Swapper* |
+| Z.ai GLM, Kimi, Qwen, OpenAI plans | hosted | **A subscription or API plan** — see *Subscription plans* |
 | DGX Spark / vLLM / SGLang / llama.cpp | `http://<host>:<port>/v1` | Port `8002` on a Spark set up with the guide |
 | Ollama | `http://127.0.0.1:11434/v1` | Start the Ollama app or `ollama serve` |
 | LM Studio | `http://127.0.0.1:1234/v1` | Developer › Start Server |
@@ -69,6 +72,40 @@ written as XML in plain text are recovered and run.
 **Find Servers on My Network** on the connection step scans this PC and your network (each /24 your
 PC is on, up to 1,024 hosts) for vLLM, SGLang, llama.cpp, Ollama, LM Studio and DGX Sparks, and fills
 in the address of the one you pick.
+
+## Connecting a Spark Swapper
+
+[Spark Swapper](https://github.com/gnubyte/DGX-Spark-Swapper) 2.0 runs on a DGX Spark or an AMD Strix
+Halo box, and gives out *connection codes*: on its page (`https://<box>:8999`) choose **Connect**, then
+**Connect DSH**, and copy the code. In DSH choose **My Spark Swapper (DGX Spark or Strix Halo)** on the
+wizard's first page — or **Settings › Model servers › Add with a connection code…**, or **Settings › AI
+Models › Add › Spark Swapper (connection code)…** — and paste it:
+
+1. **Check it** — DSH connects with the code's certificate fingerprint pinned (the box must show exactly
+   that certificate) and says what the box is serving.
+2. **Pick the model** — the box's models with their context and speed (*27 tok/s measured here*,
+   *~58 tok/s*, or an estimate). A model the box doesn't have yet is marked *Not installed* with its
+   download size and time; **Install on <box>** installs it, DSH follows the install, and then offers to
+   start it. Picking another installed model offers to switch the box now (or keep what it serves).
+3. **How should DSH use it?** — primary, subagent or backup (see *AI Models*), and private: it's your own
+   hardware.
+4. **Save and say hello** — the model route (`https://<box>:11443/v1` with the certificate pinned) and the
+   box itself, for switching models. The app token and the model's key go to Windows Credential Manager,
+   never the settings file.
+
+A Swapper older than 2.0 has no connection codes: **Connect with an address and login instead** takes its
+address (a bare host name or IP is fine), username and password. A 2.0 Swapper trades that login for an
+app token labelled *DSH on <this PC>*, so the password isn't kept.
+
+**Settings › Model servers** lists every box — DGX Spark or Strix Halo, online or not, what it serves and
+its context, the Swapper version — with **Open its web page**, **Rename** and **Remove**, and each box's
+models with **Switch**, or **Install on <box>** for one it doesn't have yet. The model menu under the
+composer has a section per box (models that aren't installed are greyed out); picking a model asks that
+box to switch, and every route at that box's address follows the new model. `/swap` lists every box's
+models; `/swap <model>` switches the box behind the primary model, and `/swap <box> <model>` picks the box
+by name. A Swapper that was reset, or that revoked DSH's token, is reported as such, with a button to
+paste a fresh code. A Spark set up in an earlier version (one *Settings › DGX Spark* page) moves over by
+itself, password and all.
 
 ## Setting up a DGX Spark
 
@@ -92,19 +129,22 @@ closed at any point and picks up where you left off.
    (the host key is trusted on first use and remembered in `known_hosts.json`), runs
    [Spark Swapper](https://github.com/gnubyte/DGX-Spark-Swapper)'s one-line installer in a terminal,
    answers `sudo`'s password prompt itself (never shown or saved), and adds an nginx HTTPS front for
-   the model API on port 11443 if there isn't one.
+   the model API on port 11443 if there isn't one (Spark Swapper 2.0 writes its own, which DSH leaves
+   alone).
 4. **The padlock warning** — what a self-signed certificate is, why browsers say *Your connection
    isn't private*, why that's fine for your own Spark, and its fingerprint (checked against the
    certificate file on the Spark over SSH). DSH pins it; optionally Windows trusts it too.
 5. **Your Swapper login** — creates Spark Swapper's admin account right away (the first visitor
    becomes admin).
-6. **Get a model running** — installs what's missing through the Swapper's Provisioning API and
-   starts a model, following the Spark's log.
+6. **Get a model running** — the Swapper's models with their context and speed; one that isn't
+   installed yet shows its download size and time, and **Install and start** installs it through the
+   Swapper (following the Spark's log) before starting it.
 7. **Connect DSH** — fetches the model's API key, saves the route
-   `https://<spark>:11443/v1` with the certificate pinned, sets up Settings › DGX Spark (so `/swap`
-   works), and says hello.
+   `https://<spark>:11443/v1` with the certificate pinned, adds the Spark to Settings › Model servers
+   (so `/swap` works) — with an app token from Spark Swapper 2.0 in place of your Swapper password —
+   and says hello.
 
-Later: manage the Spark at `https://<spark>:8999` or in Settings › DGX Spark; switch models with
+Later: manage the Spark at `https://<spark>:8999` or in Settings › Model servers; switch models with
 `/swap`. Update Spark Swapper by running the guide again (*It's already set up* → *Reinstall or
 update*); reset a forgotten Swapper login on the Spark with `sudo spark-swapper-reset-login`. Spark
 Swapper logs: `journalctl -u spark-swapper -f` on the Spark.
@@ -112,10 +152,33 @@ Swapper logs: `journalctl -u spark-swapper -f` on the Spark.
 The guide's pictures are drawn by `src/Dsh.App/Assets/Guide/make_art.py`; the Spark Swapper
 screenshots in them are from its repository (MIT, see `SWAPPER-SCREENSHOTS-LICENSE.txt` there).
 
-## Two or more model servers
+## AI Models: primary, subagents and backups
+
+**Settings › AI Models** lists every model route, each with an **On** switch and its roles:
+
+- **Primary** (exactly one) answers you: the main agent talks to it.
+- **Subagent** — subagents run there (below).
+- **Backup** — *use if the primary fails*. When the primary doesn't answer a turn before saying anything
+  (no connection, a timeout, 401/403, 404, 408, 429 or a server error), the same request goes to each
+  backup in turn, and the chat says *Spark didn't answer (HTTP 503), so this turn ran on Kimi Code.*
+  A turn is never switched halfway through; if every backup fails too, the usual outage retries take
+  over. Subagents don't use backups — the fleet moves their tasks itself.
+- **Private** (the lock) — the model may see sensitive data; every other model gets it masked (see
+  *Sensitive data*). A route is private by default only when its address is on your own network:
+  `localhost`, a private, link-local or Tailscale (100.64.0.0/10) address, a single-label host name, or
+  a name ending in `.local`, `.lan`, `.home`, `.home.arpa`, `.internal` or `.ts.net`. Everything else —
+  Bedrock and every plan included — is not private unless you switch it on.
+
+A route that is off is never used and stays in the list, greyed; the primary can't be switched off
+until another route is primary. **Add** offers a Spark Swapper (connection code), a subscription plan,
+Amazon Bedrock, or any other OpenAI-compatible server; **Test All** checks every route that is on and
+shows the result as a dot beside it. The model menu under the composer groups routes the same way
+(Primary, Subagents, Backups, Other), with a lock or a shield beside each.
+
+### Two or more model servers
 
 Add a second DGX Spark (or any other OpenAI-compatible server) as another route in **Settings ›
-Models** and tick **Use for subagents** on it. The route you are chatting with stays the *primary* — the main
+AI Models** and tick **Subagent** on it. The route you are chatting with stays the *primary* — the main
 agent talks to it — and the ticked routes become *workers*: subagents (`agent`, `delegate`, background
 agents) run on the workers, least busy first and several at a time (the count is set per server),
 while the main agent carries on with the primary. When every worker is busy, subagents may use the
@@ -127,10 +190,70 @@ models are listed, and editing a route never makes it the main model. Each worke
 is asked which model it is serving right now, so a Spark that swapped models is still used correctly.
 The Plan panel shows where each subagent runs, and `/agents` lists the servers with how busy each is.
 
+The main agent is told which servers are private. Servers that aren't private must not receive
+sensitive data: the agent describes their tasks in general terms, and sets `sensitive: true` on `agent`
+or `delegate` when a task needs the real details — that task then runs only on a private server (or on a
+private primary, when subagents may use it); with none free, the agent is told to do it itself or
+rewrite the task without them.
+
+### Sensitive data
+
+**Mask sensitive data before sending it to models that aren't private** (on by default, in **Settings ›
+AI Models › Sensitive data**). Before a request leaves this PC for a model that isn't private, DSH
+replaces sensitive values with placeholders such as `⟦EMAIL_1⟧` — in the system prompt, every message,
+tool results, earlier tool calls and text attachments — and tells the model to use them as written. What
+comes back has the real values put back before you, the tools or the transcript see it, so the model can
+still work with them; nothing is stored. The same value keeps its placeholder from turn to turn, and once a
+value has been recognised anywhere in the conversation, every other place it turns up is masked too — in a
+reply, a command or a tool's output, even run together with other text (`-phunter22x`).
+
+- **What is masked** — each a switch: secrets and keys (private keys, AWS, GitHub, OpenAI, Anthropic,
+  Slack, Google, Stripe and Spark Swapper keys, JWTs, bearer tokens, passwords in URLs, `password = …` and
+  `"password": "…"` settings and `.env` lines — a bare value only when it looks like one, so code such as
+  `let token: String` or `password = user_password` is left alone), email addresses, phone numbers, ID and
+  card numbers (US SSNs, IBANs that pass their check, and card numbers that pass the Luhn check and start
+  like a real card network's), IP addresses (off by default), and **custom terms**: one per line — client
+  names, project code names — matched without regard to case on whole words, or a regular expression
+  after `re:` (they are saved encrypted for your Windows account, not in plain text). Values in the
+  Credentials Vault are always masked, even with the switch off.
+- **Try it** shows exactly what a model that isn't private would receive for the text you type.
+- A reply whose request had anything masked carries a small shield: *Masked 2 emails and 1 key before
+  sending to Kimi Code* (hover for the categories — never the values).
+- Text attachments are checked whatever they were saved as (UTF-8, UTF-16, Windows "ANSI"). Pictures and
+  files that aren't plain text (PDFs, Office documents) can't be: the first time a chat sends one to a model
+  that isn't private it says so, and the shield's chip counts them as not checked.
+- A Bedrock turn's saved reasoning, which Claude sees again word for word, isn't sent back if it holds a
+  sensitive value (a turn made while the route was private, say).
+
+## Subscription plans
+
+**A subscription or API plan — GLM, Kimi, Qwen, OpenAI** on the wizard's first page, or **Settings ›
+AI Models › Add › Subscription plan…**, walks through connecting one:
+
+| Plan | Notes |
+|---|---|
+| Z.ai — GLM Coding Plan, and pay-as-you-go API | International or China (BigModel). GLM-5.3 always thinks; DSH never asks it not to. |
+| Kimi Code (subscription), and Moonshot pay-as-you-go API | Overseas or China. DSH tells Kimi who is calling (`DSH/<version> (Windows)`) and never poses as another tool; if Kimi refuses that, the guide suggests the Moonshot API. |
+| OpenAI API | A ChatGPT Plus or Pro subscription doesn't include API access — the API is billed separately. |
+| Qwen — Alibaba Cloud Coding Plan, and Model Studio pay-as-you-go | International or China. Coding Plan keys start with `sk-sp-`. |
+
+Pick the plan and region; the guide shows where to get the key, step by step (with a button to open
+the page), checks the key you paste — saying what's wrong when it isn't accepted: the wrong region or
+endpoint, a plan that doesn't allow this app, a usage limit — lets you pick the model (the
+recommended one first), asks how DSH should use it (primary, subagent, backup, or just add it), saves
+the route and says hello through it. The key goes to Windows Credential Manager. Plans are online
+services, so they aren't private: DSH masks sensitive data before sending (*Sensitive data*, above).
+
+Alibaba allows the Qwen Coding Plan only for interactive use, so its route is marked **Interactive use
+only (plan terms)** (a switch in the route editor, for any route): while it is the primary, a chat's
+task list won't start (or stops before its next task) and a `/goal` doesn't carry on by itself — make
+another model primary for unattended work — and unattended work never falls back to it as a backup or
+sends subagents to it. Chats, and the subagents they start, are fine.
+
 ## Using Amazon Bedrock
 
 On the wizard's first page, **Use Amazon Bedrock with my AWS account (guided)** — or **Settings ›
-Models › Add Amazon Bedrock…** — starts a guide for people who have never used the AWS CLI. All it
+AI Models › Add › Amazon Bedrock…** — starts a guide for people who have never used the AWS CLI. All it
 needs is an AWS account you can sign in to on the website.
 
 1. **The AWS CLI.** DSH looks for it and installs it if it's missing (or updates it if it's too old
@@ -163,7 +286,7 @@ Requests are signed with SigV4 using short-lived credentials the AWS CLI exports
 (`aws configure export-credentials`), refreshed before they expire; nothing secret is stored in
 DSH's settings. Chats use Bedrock's Converse API with streaming, tools, images, prompt caching for
 Claude and Nova, and Claude's extended thinking. When the sign-in runs out, the banner offers **Sign
-in to AWS…** (the browser opens, and your next message goes through); **Settings › Models** has
+in to AWS…** (the browser opens, and your next message goes through); **Settings › AI Models** has
 **Sign in again** and **Change…** (another model, Region or account) for each Bedrock route.
 
 Need a **Bedrock API key** for another tool? The guide's last page can create one from your sign-in
@@ -175,12 +298,23 @@ To remove DSH's sign-in: `aws logout --profile dsh-bedrock`.
 ## The window
 
 **Chat** (Ctrl+1) — the transcript interleaves messages and tool calls in the order they happened,
-each tool card expandable to its full output. Every message — yours, the agent's, and the app's notices
-— shows the date and time it was sent on this PC's clock, in your Windows date and time format (hover it
-for the full date and UTC offset). Markdown renders with headings, code blocks (with
-copy), lists, quotes and tables. **Enter** sends, **Shift+Enter** adds a line. Drop files on the chat
-or paste an image (Ctrl+V) to attach it. Under the composer: the chat's permission preset, the model
-menu (with DGX Spark model switching), thinking level, skills, and a live context gauge.
+each tool card expandable to its full output (a skill the agent uses shows as *Using the <name>
+skill*). Every message — yours, the agent's, and the app's notices — shows the date and time it was sent
+on this PC's clock, in your Windows date and time format (hover it for the full date and UTC offset).
+Markdown renders with headings, code blocks (with copy), lists, quotes and tables. **Enter** sends,
+**Shift+Enter** adds a line. Drop files on the chat or paste an image (Ctrl+V) to attach it. Under the
+composer: the chat's permission preset, the model menu (with switching on each Spark Swapper box),
+thinking level, skills, and a live context gauge.
+
+**Chats without a project** (File › New Chat Without a Project, Ctrl+Shift+N, or the chat button in the
+sidebar — even while a folder is open) are regular conversations: the model is told no project folder
+is needed and answers directly, using the web, your skills and long-term memory when they help. Your own
+instruction files, skills and plugins apply; a project's don't. When something needs files or
+commands, the chat works in a scratch folder of its own, `%APPDATA%\DSH\Chats\<chat id>` — made on
+first use, treated by the permission preset like a project folder, and moved to the Recycle Bin when the
+chat is deleted. Its task list runs in the chat too, so its tasks work in that folder. Its first screen
+offers openers like *Explain something simply* or *Summarise a web page* (and your skills), with a link
+to open a folder for code.
 
 **Code** (Ctrl+2) — a VS Code-shaped workspace with the agent beside it:
 
@@ -208,7 +342,8 @@ looking at: what it is doing right now, the goal it is on, the steps of its plan
 goes, a plan proposed in *Plan only* mode, and the subagents it has running and which model server each
 is on. It reads the agent's `todo_write` list, or a plan written in a reply ("Here's my plan: 1. …
 2. … 3. …"). It opens by itself the first time a chat makes a plan; a checkbox at the bottom turns that
-off.
+off. While it is open, the plan card in the transcript shrinks to one line (*Plan updated — 3 of 7 done
+· Show*), so the plan isn't shown twice.
 
 ## Permissions
 
@@ -310,7 +445,7 @@ Press Stop to give up. Nothing already done is lost: tool calls that ran stay in
 | `/compact [focus]` | Summarizes the conversation now. Long chats also compact automatically at 75% of the window. |
 | `/think off\|low\|medium\|high\|max\|default` | Thinking level for this chat. |
 | `/context` | Window size, usage, and where the window figure came from. |
-| `/swap [model]` | Lists the DGX Spark's models, or switches what it serves. |
+| `/swap [box] [model]` | Lists every Spark Swapper box's models, or switches one: the box behind the primary model, or the box named. |
 | `/skills` · `/skill <name>` · `/skill new <what>` · `/<name> args` | List skills, select one for this chat, have the model write one, or run one. |
 | `/remember <note>` · `/memory [search]` | Save a note to long-term memory, or open the remembered-notes window (with a search word: list the matches). |
 | `/agents` | The kinds of subagent, the model servers they run on, and what is running now. |
@@ -426,8 +561,9 @@ window. The switch is at the top of the notes window.
 **Instruction files** in the project root are loaded into every prompt: `AGENTS.md`, `QWEN.md`,
 `CLAUDE.md`, `.claude/CLAUDE.md`, `CLAUDE.local.md`, `.cursorrules`, `DSH.md`, `MEMORY.md`, and
 today's `memory/YYYY-MM-DD.md`. Your own instruction files in `%APPDATA%\DSH\instructions` (any `*.md`)
-are loaded into every prompt in every project, ahead of the project's. **Session › Memory & Skills…**
-(Ctrl+Shift+M) edits them all and shows the exact system prompt.
+are loaded into every prompt in every project, ahead of the project's — and in chats without a project.
+**Session › Memory & Skills…** (Ctrl+Shift+M) edits them all and shows the exact system prompt; in a chat
+without a project it shows your own files and skills.
 
 **Skills** are folders with a `SKILL.md` — the format Claude Code, Cursor and Agent Skills share, so
 DSH reads their folders in place (`.claude`, `.cursor`, `.agents`, `.qwen`, and `%USERPROFILE%`
@@ -462,7 +598,8 @@ with the computer-use tools.
 | What | Where |
 |---|---|
 | Settings, conversations, skills, plugins, crash logs | `%APPDATA%\DSH` (or the portable `data` folder; `DSH_HOME` overrides both) |
-| API keys, Spark password | Windows Credential Manager (`DSH/…` entries) |
+| API keys, Spark Swapper app tokens and passwords | Windows Credential Manager (`DSH/…` entries; a Swapper's under `DSH/swapper/<id>`) |
+| Scratch folders of chats without a project | `%APPDATA%\DSH\Chats\<chat id>` |
 | Your instructions (every project) | `%APPDATA%\DSH\instructions\*.md` |
 | Remembered notes | `%APPDATA%\DSH\memory\memories.jsonl` |
 | Your subagent types | `%APPDATA%\DSH\agents\*.md` |

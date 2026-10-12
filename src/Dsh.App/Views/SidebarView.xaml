@@ -85,6 +85,10 @@
         <DockPanel Grid.Row="2" Margin="0,6,8,2">
             <Button DockPanel.Dock="Right" Style="{StaticResource IconButton}" Content="{x:Static infra:Icons.Add}" FontSize="12"
                     MinWidth="26" MinHeight="26" Padding="5" Click="NewChat_Click" ToolTip="New chat (Ctrl+N)" VerticalAlignment="Bottom" />
+            <Button DockPanel.Dock="Right" Style="{StaticResource IconButton}" Content="{x:Static infra:Icons.Chat}" FontSize="12"
+                    MinWidth="26" MinHeight="26" Padding="5" Click="NewPlainChat_Click" VerticalAlignment="Bottom"
+                    ToolTip="New chat without a project (Ctrl+Shift+N) — a regular conversation, even while a folder is open"
+                    AutomationProperties.Name="New chat without a project" />
             <TextBlock Style="{StaticResource SectionHeader}" Text="CHATS" />
         </DockPanel>
 

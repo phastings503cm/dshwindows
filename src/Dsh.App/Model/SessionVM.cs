@@ -29,6 +29,13 @@ public sealed partial class MessageEntryVM(MessageRole role, string text, string
 {
     public MessageRole Role { get; } = role;
     [ObservableProperty] private string _text = text;
+    /// <summary>On an assistant reply from a model that isn't private: what the shield masked before sending
+    /// ("Masked 2 emails and 1 key before sending to Kimi Code") — counts, never values. Null: nothing was masked.</summary>
+    [ObservableProperty] [NotifyPropertyChangedFor(nameof(HasShield))] private string? _shield;
+    /// <summary>The categories behind <see cref="Shield"/>, for its tooltip.</summary>
+    [ObservableProperty] private string? _shieldDetails;
+
+    public bool HasShield => Shield is not null;
 
     public bool IsUser => Role == MessageRole.User;
     public bool IsAssistant => Role == MessageRole.Assistant;
@@ -58,15 +65,26 @@ public sealed partial class ToolEntryVM(string name, string preview, string? id 
     public bool IsRunning => IsOk is null;
     public bool Failed => IsOk == false;
     public bool HasOutput => !string.IsNullOrEmpty(Output);
-    public string Label => Icons.ToolLabel(Name);
+    /// <summary>The model loaded one of the user's skills: shown as the skill it is, not as a tool call.</summary>
+    public bool IsSkill => Name == "use_skill";
+    /// <summary>"Using the pdf skill" for a skill; the tool's label otherwise.</summary>
+    public string Label => !IsSkill ? Icons.ToolLabel(Name) : Preview.Length > 0 && Preview != Name ? $"Using the {Preview} skill" : "Using a skill";
     public string Glyph => Icons.ForTool(Name);
 }
 
 /// <summary>The agent's task list.</summary>
-public sealed class TodosEntryVM(IReadOnlyList<TodoItem> items) : ChatEntryVM(null, null)
+public sealed partial class TodosEntryVM(IReadOnlyList<TodoItem> items) : ChatEntryVM(null, null)
 {
     public IReadOnlyList<TodoItem> Items { get; } = items;
     public string Progress => $"{Items.Count(i => i.Status == TodoStatus.Completed)}/{Items.Count}";
+    /// <summary>"Plan updated — 3 of 7 done": the one line the card shrinks to while the plan panel shows the plan.</summary>
+    public string Summary => $"Plan updated — {Items.Count(i => i.Status == TodoStatus.Completed)} of {Items.Count} done";
+    /// <summary>The plan panel is open, so the card is a single line (unless the user asked to see it here).</summary>
+    [ObservableProperty] [NotifyPropertyChangedFor(nameof(ShowCompact))] private bool _compact;
+    /// <summary>The user pressed "Show" on the single line.</summary>
+    [ObservableProperty] [NotifyPropertyChangedFor(nameof(ShowCompact))] private bool _expanded;
+
+    public bool ShowCompact => Compact && !Expanded;
 }
 
 /// <summary>A record that the older part of a conversation was summarized to fit the context
@@ -157,7 +175,14 @@ public sealed partial class SessionVM : ObservableObject
 
     public bool IsIdle => !Running;
     public bool IsEmpty => Entries.Count == 0;
-    public string? WorkspacePath => string.IsNullOrEmpty(Cwd) ? null : Cwd;
+    /// <summary>The project folder this chat works in; null for a chat without a project (a regular chat). A scratch folder
+    /// is never a project.</summary>
+    public string? WorkspacePath => string.IsNullOrEmpty(Cwd) || PlainChat.IsScratch(Cwd) ? null : Cwd;
+    /// <summary>A regular chat: no project folder.</summary>
+    public bool IsPlain => WorkspacePath is null;
+    /// <summary>Where the agent works — in this chat's turns and its task list alike: the project folder, or (a regular chat)
+    /// the chat's own scratch folder.</summary>
+    public string WorkingFolder => WorkspacePath ?? (PlainChat.IsScratch(Cwd) ? Cwd! : PlainChat.Folder(Id));
     public string? ProjectName => WorkspacePath is { } p ? System.IO.Path.GetFileName(p.TrimEnd('\\', '/')) : null;
     public string UpdatedLabel => Formatting.Relative(UpdatedAt);
 

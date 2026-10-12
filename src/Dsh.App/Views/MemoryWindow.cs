@@ -14,10 +14,13 @@ namespace Dsh.App.Views;
 
 /// <summary>Project memory and skills. Both are just files in the project, so they diff and review
 /// like anything else in the repo. This app assembles the system prompt itself, so what the System
-/// prompt tab shows is literally what the model is told.</summary>
+/// prompt tab shows is literally what the model is told. In a chat without a project (or with no project
+/// open) it shows what applies to every chat: your own instruction files and skills.</summary>
 public sealed class MemoryWindow : Window
 {
     private readonly AppModel _model;
+    /// <summary>The project shown: the open chat's, else the open folder; null = your own, for every chat.</summary>
+    private readonly string? _project;
     private readonly ContentControl _page = new() { Focusable = false };
     private readonly RadioButton _instructions = new() { Content = "Instructions", GroupName = "memory", IsChecked = true };
     private readonly RadioButton _skills = new() { Content = "Skills", GroupName = "memory" };
@@ -35,8 +38,9 @@ public sealed class MemoryWindow : Window
         ShowInTaskbar = false;
         SetResourceReference(BackgroundProperty, "SolidBackgroundFillColorBaseBrush");
 
+        _project = model.Host.Selected is { } chat ? chat.WorkspacePath : model.Project;
         var header = new DockPanel { Margin = new Thickness(20, 14, 20, 10) };
-        var project = Ui.Secondary(model.ProjectName ?? "No project open");
+        var project = Ui.Secondary(_project is { } folder ? System.IO.Path.GetFileName(folder.TrimEnd('\\', '/')) : "Yours — for every chat");
         project.VerticalAlignment = VerticalAlignment.Center;
         DockPanel.SetDock(project, Dock.Right);
         header.Children.Add(project);
@@ -74,15 +78,7 @@ public sealed class MemoryWindow : Window
         root.Children.Add(_page);
         Content = root;
 
-        if (model.Project is null)
-        {
-            tabHost.Visibility = Visibility.Collapsed;
-            _page.Content = NoProject();
-        }
-        else
-        {
-            ShowTab();
-        }
+        ShowTab();
         PreviewKeyDown += (_, e) =>
         {
             if (e.Key == Key.Escape)
@@ -93,36 +89,35 @@ public sealed class MemoryWindow : Window
         };
     }
 
-    private UIElement NoProject() => new Border
-    {
-        Padding = new Thickness(40),
-        Child = Ui.Stack(Ui.Subtitle("No project open"), Ui.Secondary("Memory and skills belong to a project folder."),
-            new Border { Height = 12 },
-            Ui.Button("Open Folder…", () =>
-            {
-                _model.ChooseProject();
-                if (_model.Project is not null)
-                {
-                    Close();
-                    _model.ShowMemory();
-                }
-            }, accent: true)),
-    };
-
     private void ShowTab()
     {
-        if (_model.Project is null) return;
         if (_skills.IsChecked == true) _page.Content = new SkillsManagerPage(_model, null);
         else if (_prompt.IsChecked == true) _page.Content = PromptPreview();
         else _page.Content = Instructions(null);
     }
 
+    /// <summary>The instruction files in force here: the project's (with your own), or — no project — your own.</summary>
+    private IReadOnlyList<InstructionFile> Files() =>
+        _project is null
+            ? ProjectContext.UserInstructionFiles(_model.Host.SkillLocations)
+            : _model.Host.ProjectContext is { } context && string.Equals(context.Root, _project, StringComparison.OrdinalIgnoreCase)
+                ? context.Instructions
+                : ProjectContext.Load(_project, _model.Host.SkillLocations, _model.Config.SkillSources).Instructions;
+
     private UIElement Instructions(InstructionFile? editing)
     {
-        var files = _model.Host.ProjectContext?.Instructions ?? [];
+        var files = Files();
         if (editing is not null) return Editor(editing);
         var list = new StackPanel();
-        if (files.Count == 0)
+        if (files.Count == 0 && _project is null)
+        {
+            list.Children.Add(Ui.Card(Ui.Stack(
+                Ui.Text("No instructions of your own yet", 14, FontWeights.SemiBold),
+                Ui.Secondary("Your own instruction files (any .md in DSH's instructions folder) are loaded into every chat — with a project or without. Write down how you like things done, or bring your instructions over from Claude Code and Cursor."),
+                new Border { Height = 10 },
+                Ui.Buttons(Ui.Button("Write My Instructions", NewUserInstructions, accent: true), Ui.Button("From Claude Code & Cursor…", BringIn)))));
+        }
+        else if (files.Count == 0)
         {
             list.Children.Add(Ui.Card(Ui.Stack(
                 Ui.Text("No instruction files", 14, FontWeights.SemiBold),
@@ -147,7 +142,7 @@ public sealed class MemoryWindow : Window
             };
             list.Children.Add(row);
         }
-        if (files.Count > 0)
+        if (files.Count > 0 && _project is not null)
         {
             var scaffold = Ui.LinkButton("Set Up Memory Scaffold", SetUpMemory);
             scaffold.HorizontalAlignment = HorizontalAlignment.Left;
@@ -215,9 +210,28 @@ public sealed class MemoryWindow : Window
         ShowTab();
     }
 
+    /// <summary>Start your own instruction file (instructions.md in your instructions folder) and open it to edit.</summary>
+    private void NewUserInstructions()
+    {
+        try
+        {
+            var folder = Directory.CreateDirectory(_model.Host.SkillLocations.UserInstructions).FullName;
+            var path = Path.Combine(folder, "instructions.md");
+            if (!File.Exists(path))
+                File.WriteAllText(path, "# My instructions\n\nHow I like things done, in every chat:\n\n- \n", TextUtil.Utf8NoBom);
+            _model.Host.RefreshProjectContext();
+            var file = Files().FirstOrDefault(f => string.Equals(f.Path, path, StringComparison.OrdinalIgnoreCase));
+            _page.Content = Instructions(file);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            Dialog.Info("Couldn't create the file", ex.Message);
+        }
+    }
+
     private void SetUpMemory()
     {
-        if (_model.Project is not { } project) return;
+        if (_project is not { } project) return;
         try
         {
             ProjectContext.SetUpMemory(project);
@@ -244,10 +258,19 @@ public sealed class MemoryWindow : Window
 
     private string PromptText()
     {
-        if (_model.Project is not { } project) return "Open a project to see its prompt.";
         var model = _model.Config.ActiveProvider?.Model ?? "model";
+        if (_project is not { } project)
+        {
+            // A chat without a project: the regular-conversation prompt, your own instructions, the chat's scratch folder.
+            var scratch = _model.Host.Selected is { IsPlain: true } chat ? chat.WorkingFolder : PlainChat.Folder("<chat id>");
+            var plainEnvironment = ProjectContext.EnvironmentBlock(scratch, model, _model.Config.AsPreset, _model.Config.ResolvedAgentShell, scratch: true);
+            return PlainChat.SystemPrompt("Windows", scratch) + "\n\n" +
+                   ProjectContext.UserOnly(_model.Host.SkillLocations).PromptSupplement(plainEnvironment, includeSkills: false);
+        }
         var environment = ProjectContext.EnvironmentBlock(project, model, _model.Config.AsPreset, _model.Config.ResolvedAgentShell);
-        var supplement = _model.Host.ProjectContext?.PromptSupplement(environment) ?? environment;
-        return AgentHost.DefaultSystemPrompt + "\n\n" + supplement;
+        var context = _model.Host.ProjectContext is { } open && string.Equals(open.Root, project, StringComparison.OrdinalIgnoreCase)
+            ? open
+            : ProjectContext.Load(project, _model.Host.SkillLocations, _model.Config.SkillSources);
+        return AgentHost.DefaultSystemPrompt + "\n\n" + context.PromptSupplement(environment);
     }
 }

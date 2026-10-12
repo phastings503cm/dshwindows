@@ -52,7 +52,7 @@ public static class AwsAccounts
     public static async Task<AwsSignInResult> SignInAgainAsync(string profile, string? region, CancellationToken cancellationToken = default)
     {
         if (Cli() is not { } cli)
-            return new(AwsSignInOutcome.Failed, "The AWS CLI isn't installed on this PC any more. Run the Amazon Bedrock setup again (Settings › Models) — it reinstalls it.");
+            return new(AwsSignInOutcome.Failed, "The AWS CLI isn't installed on this PC any more. Run the Amazon Bedrock setup again (Settings › AI Models) — it reinstalls it.");
         var signIn = new AwsSignIn(cli);
         var result = await signIn.LoginAsync(profile, region ?? BedrockRegions.Default, cancellationToken: cancellationToken).ConfigureAwait(false);
         if (result.Outcome == AwsSignInOutcome.UseSsoLogin)
@@ -66,6 +66,6 @@ public static class AwsAccounts
     {
         public Task<AwsCredentials> GetAsync(bool forceRefresh = false, CancellationToken cancellationToken = default) =>
             throw new AwsSignInRequiredException(profile,
-                "The AWS CLI isn't installed on this PC any more, so DSH can't sign in to AWS. Run the Amazon Bedrock setup again (Settings › Models) — it reinstalls it.");
+                "The AWS CLI isn't installed on this PC any more, so DSH can't sign in to AWS. Run the Amazon Bedrock setup again (Settings › AI Models) — it reinstalls it.");
     }
 }

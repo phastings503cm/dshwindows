@@ -161,21 +161,22 @@ public sealed record ProjectContext(string Root, IReadOnlyList<InstructionFile> 
         }
     }
 
-    /// <summary>Machine facts the model would otherwise guess at.</summary>
+    /// <summary>Machine facts the model would otherwise guess at. <paramref name="scratch"/>: the folder is a chat's
+    /// scratch folder (a chat with no project), not a project.</summary>
     public static string EnvironmentBlock(string workspace, string model, PermissionPreset preset,
-                                          AgentShell? shell = null, IEnumerable<string>? extraLines = null)
+                                          AgentShell? shell = null, IEnumerable<string>? extraLines = null, bool scratch = false)
     {
         var lines = new List<string>
         {
             "--- Environment ---",
-            $"Project folder: {workspace}",
+            scratch ? $"This chat's scratch folder: {workspace}" : $"Project folder: {workspace}",
             $"Platform: {PlatformInfo.Description}",
             $"Shell for run_shell_command: {(shell ?? AgentShell.Default).DisplayName}",
             $"Today's date: {DayStamp()}",
             $"Model: {model}",
             $"Permission preset: {preset.RawValue()}",
         };
-        if (GitBranch(workspace) is { } branch) lines.Add($"Git branch: {branch}");
+        if (!scratch && GitBranch(workspace) is { } branch) lines.Add($"Git branch: {branch}");
         if (extraLines is not null) lines.AddRange(extraLines);
         return string.Join("\n", lines);
     }

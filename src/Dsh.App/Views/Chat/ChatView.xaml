@@ -28,13 +28,26 @@
                           Fill="{DynamicResource TextFillColorSecondaryBrush}" />
                     <TextBlock x:Name="MarkerGlyph" Style="{StaticResource Glyph}" FontSize="14" Visibility="Collapsed" />
                 </Grid>
-                <Border x:Name="Bubble" Grid.Row="1" Grid.Column="1" CornerRadius="8" HorizontalAlignment="Stretch">
-                    <Grid>
-                        <chat:MarkdownPresenter x:Name="Rich" Markdown="{Binding Text}" FontSize="14" />
-                        <TextBox x:Name="Plain" Style="{StaticResource SelectableText}" Text="{Binding Text, Mode=OneWay}" FontSize="14"
-                                 Visibility="Collapsed" />
-                    </Grid>
-                </Border>
+                <StackPanel Grid.Row="1" Grid.Column="1">
+                    <Border x:Name="Bubble" CornerRadius="8" HorizontalAlignment="Stretch">
+                        <Grid>
+                            <chat:MarkdownPresenter x:Name="Rich" Markdown="{Binding Text}" FontSize="14" />
+                            <TextBox x:Name="Plain" Style="{StaticResource SelectableText}" Text="{Binding Text, Mode=OneWay}" FontSize="14"
+                                     Visibility="Collapsed" />
+                        </Grid>
+                    </Border>
+                    <!-- What the privacy shield masked before this reply's request went to a model that isn't private. -->
+                    <Border Style="{StaticResource Chip}" HorizontalAlignment="Left" Margin="0,6,0,0"
+                            Visibility="{Binding HasShield, Converter={StaticResource BoolToVisibility}}"
+                            ToolTip="{Binding ShieldDetails}">
+                        <StackPanel Orientation="Horizontal">
+                            <TextBlock Style="{StaticResource Glyph}" FontSize="11" Text="{x:Static infra:Icons.Shield}" Margin="0,0,6,0"
+                                       VerticalAlignment="Center" Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
+                            <TextBlock Text="{Binding Shield}" FontSize="11.5" VerticalAlignment="Center"
+                                       Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
+                        </StackPanel>
+                    </Border>
+                </StackPanel>
             </Grid>
             <DataTemplate.Triggers>
                 <DataTrigger Binding="{Binding Role}" Value="{x:Static model:MessageRole.User}">
@@ -97,9 +110,9 @@
                         <TextBlock x:Name="Glyph" Style="{StaticResource Glyph}" FontSize="12" Text="{Binding Glyph}" HorizontalAlignment="Left"
                                    Foreground="{DynamicResource TextFillColorSecondaryBrush}"
                                    ToolTip="{Binding At, Converter={StaticResource Stamp}}" />
-                        <TextBlock Grid.Column="1" Text="{Binding Label}" FontSize="12" FontWeight="SemiBold" Margin="0,0,8,0"
+                        <TextBlock x:Name="LabelText" Grid.Column="1" Text="{Binding Label}" FontSize="12" FontWeight="SemiBold" Margin="0,0,8,0"
                                    VerticalAlignment="Center" Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
-                        <TextBlock Grid.Column="2" Text="{Binding Preview, Converter={StaticResource HeadTruncate}, ConverterParameter=90}"
+                        <TextBlock x:Name="PreviewText" Grid.Column="2" Text="{Binding Preview, Converter={StaticResource HeadTruncate}, ConverterParameter=90}"
                                    Style="{StaticResource MonoText}" VerticalAlignment="Center" TextTrimming="CharacterEllipsis"
                                    ToolTip="{Binding Preview}" />
                         <TextBlock Grid.Column="3" Text="{Binding Summary, Converter={StaticResource OneLine}}" Style="{StaticResource MetaText}"
@@ -137,6 +150,13 @@
                 </StackPanel>
             </Border>
             <DataTemplate.Triggers>
+                <!-- A skill the model loaded reads as the skill ("Using the pdf skill"), not as a tool call. -->
+                <DataTrigger Binding="{Binding IsSkill}" Value="True">
+                    <Setter TargetName="PreviewText" Property="Visibility" Value="Collapsed" />
+                    <Setter TargetName="LabelText" Property="Foreground" Value="{DynamicResource AccentTextFillColorPrimaryBrush}" />
+                    <Setter TargetName="Glyph" Property="Foreground" Value="{DynamicResource AccentTextFillColorPrimaryBrush}" />
+                    <Setter TargetName="Card" Property="Background" Value="{DynamicResource SubtleFillColorSecondaryBrush}" />
+                </DataTrigger>
                 <DataTrigger Binding="{Binding IsOk}" Value="True">
                     <Setter TargetName="Glyph" Property="Foreground" Value="{DynamicResource SystemFillColorSuccessBrush}" />
                 </DataTrigger>
@@ -158,9 +178,21 @@
             </DataTemplate.Triggers>
         </DataTemplate>
 
-        <!-- The agent's plan. -->
+        <!-- The agent's plan (one line while the plan panel shows it). -->
         <DataTemplate DataType="{x:Type model:TodosEntryVM}">
-            <Border Margin="28,0,0,12" Style="{StaticResource Card}">
+            <Grid>
+            <DockPanel x:Name="CompactPlan" Margin="28,0,0,12" LastChildFill="False" Visibility="Collapsed">
+                <TextBlock Style="{StaticResource Glyph}" FontSize="12" Text="{x:Static infra:Icons.CheckList}" Margin="0,0,8,0"
+                           VerticalAlignment="Center" Foreground="{DynamicResource TextFillColorSecondaryBrush}"
+                           ToolTip="{Binding At, Converter={StaticResource Stamp}}" />
+                <TextBlock Text="{Binding Summary}" Style="{StaticResource MetaText}" VerticalAlignment="Center" />
+                <TextBlock Text=" · " Style="{StaticResource MetaText}" VerticalAlignment="Center" />
+                <Button Style="{StaticResource SubtleButton}" Padding="3,0" VerticalAlignment="Center" Click="ShowTodoCard_Click"
+                        ToolTip="Show the plan here too">
+                    <TextBlock Text="Show" FontSize="11.5" Foreground="{DynamicResource AccentTextFillColorPrimaryBrush}" />
+                </Button>
+            </DockPanel>
+            <Border x:Name="FullPlan" Margin="28,0,0,12" Style="{StaticResource Card}">
                 <StackPanel>
                     <DockPanel Margin="0,0,0,6">
                         <TextBlock DockPanel.Dock="Right" Text="{Binding Progress}" Style="{StaticResource MetaText}" />
@@ -195,6 +227,13 @@
                     </ItemsControl>
                 </StackPanel>
             </Border>
+            </Grid>
+            <DataTemplate.Triggers>
+                <DataTrigger Binding="{Binding ShowCompact}" Value="True">
+                    <Setter TargetName="FullPlan" Property="Visibility" Value="Collapsed" />
+                    <Setter TargetName="CompactPlan" Property="Visibility" Value="Visible" />
+                </DataTrigger>
+            </DataTemplate.Triggers>
         </DataTemplate>
 
         <!-- The conversation was compacted to fit the context window. -->
@@ -349,6 +388,16 @@
                         </DataTemplate>
                     </ItemsControl.ItemTemplate>
                 </ItemsControl>
+                <!-- A regular chat (no project): code work is a click away, not a suggestion. -->
+                <Button x:Name="OpenFolderLink" Style="{StaticResource SubtleButton}" HorizontalAlignment="Left" Padding="4,2" Margin="0,0,0,2"
+                        Click="OpenFolder_Click" Visibility="Collapsed" ToolTip="Open a project folder (Ctrl+O)">
+                    <StackPanel Orientation="Horizontal">
+                        <TextBlock Style="{StaticResource Glyph}" FontSize="12" Text="{x:Static infra:Icons.OpenFolder}" Margin="0,0,6,0"
+                                   VerticalAlignment="Center" Foreground="{DynamicResource AccentTextFillColorPrimaryBrush}" />
+                        <TextBlock Text="Open a folder to work on code" FontSize="12.5" VerticalAlignment="Center"
+                                   Foreground="{DynamicResource AccentTextFillColorPrimaryBrush}" />
+                    </StackPanel>
+                </Button>
                 <TextBlock Style="{StaticResource MetaText}" Margin="2,8,0,0" TextWrapping="Wrap"
                            Text="Type / for commands and skills. Drop files or paste an image to attach them. Shift+Enter adds a line." />
             </StackPanel>

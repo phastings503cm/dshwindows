@@ -7,7 +7,7 @@ using Dsh.App.Model;
 
 namespace Dsh.App.Views;
 
-/// <summary>What chat mode shows with no chat selected: what this is, and the two ways in.</summary>
+/// <summary>What chat mode shows with no chat selected: what this is, and the two ways in — a chat, or a folder of code.</summary>
 public sealed class EmptyStateView : UserControl
 {
     public EmptyStateView(AppModel model)
@@ -29,8 +29,7 @@ public sealed class EmptyStateView : UserControl
         });
         var body = new TextBlock
         {
-            Text = "A native coding agent. Open a project folder, then start a chat — it reads, edits, searches and runs " +
-                   "commands in that folder, and asks before anything risky.",
+            Text = "Chat with your AI, or open a folder to work on code.",
             TextAlignment = TextAlignment.Center,
             TextWrapping = TextWrapping.Wrap,
             Margin = new Thickness(0, 8, 0, 18),
@@ -43,6 +42,7 @@ public sealed class EmptyStateView : UserControl
         open.Click += (_, _) => model.ChooseProject();
         var chat = new Button { Content = "New Chat", Padding = new Thickness(14, 6, 14, 6) };
         chat.SetResourceReference(StyleProperty, "AccentButtonStyle");
+        // A chat started from here is a regular conversation unless a folder is open.
         chat.Click += (_, _) => model.NewChat();
         buttons.Children.Add(open);
         buttons.Children.Add(chat);
@@ -50,7 +50,7 @@ public sealed class EmptyStateView : UserControl
 
         var hint = new TextBlock
         {
-            Text = "Ctrl+N new chat · Ctrl+O open folder · F1 shortcuts",
+            Text = "Ctrl+N new chat · Ctrl+Shift+N chat without a project · Ctrl+O open folder · F1 shortcuts",
             HorizontalAlignment = HorizontalAlignment.Center,
             Margin = new Thickness(0, 22, 0, 0),
             FontSize = 11.5,

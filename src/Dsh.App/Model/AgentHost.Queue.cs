@@ -147,7 +147,9 @@ public sealed partial class AgentHost
     /// <summary>Add a task to <paramref name="chatId"/>'s list (the back, or in front of its waiting tasks).</summary>
     public QueueTask QueueAdd(string chatId, string title, string details = "", bool atFront = false)
     {
-        var cwd = Session(chatId)?.WorkspacePath ?? ProjectContext?.Root;
+        // The task runs in its chat: a project chat's folder is noted on it, while a chat without a project works in its
+        // own scratch folder — the project open in the app has nothing to do with it.
+        var cwd = Session(chatId) is { } chat ? chat.WorkspacePath : ProjectContext?.Root;
         var task = Queue.Add(title, details, atFront, cwd, chatId);
         return Queue.Find(task.Id) ?? task;
     }
@@ -186,6 +188,13 @@ public sealed partial class AgentHost
         if (!Config.IsConfigured)
         {
             ChatNote(vm, "No model is configured — run the setup wizard, then start the task list.", error: true);
+            return;
+        }
+        // A plan whose terms allow only interactive use never works a task list (nor picks one up at the next launch).
+        if (InteractiveOnlyPrimary is { } interactive)
+        {
+            ChatNote(vm, QueueRefusal(interactive), error: true);
+            Config.SetQueueResume(chatId, false);
             return;
         }
         if (IsQueueRunning(chatId)) return;
@@ -267,6 +276,13 @@ public sealed partial class AgentHost
             while (QueueActive(chatId, run))
             {
                 if (Queue.NextTaskFor(chatId) is not { } task) break;
+                // The primary was changed to an interactive-only plan while the list ran: stop before the next task (the
+                // finally below forgets the list's resume-on-launch).
+                if (InteractiveOnlyPrimary is { } interactive)
+                {
+                    ChatNote(chatId, QueueRefusal(interactive), error: true);
+                    return;
+                }
                 var outcome = await WorkAsync(chatId, task.Id, run);
                 switch (outcome)
                 {
@@ -514,6 +530,14 @@ public sealed partial class AgentHost
             while (true)
             {
                 if (ct.IsCancellationRequested) return new GoalOutcome.Stopped();
+                // Under an interactive-only plan, nothing runs without the user: a queue task not at all, a /goal one round at
+                // a time (each reply of the user's takes it one round further).
+                if ((auto || kickedOff) && InteractiveOnlyPrimary is { } interactive)
+                {
+                    var why = auto ? QueueRefusal(interactive) : GoalRefusal(interactive);
+                    Notice(why, error: auto);
+                    return new GoalOutcome.Blocked(why);
+                }
                 string modelText, displayText;
                 if (!kickedOff)
                 {
@@ -737,7 +761,7 @@ public sealed partial class AgentHost
             : _engineKeys.TryGetValue(sessionId, out var key) ? key.Profile : null;
         if (ProfileKey(profile) == current) return null;
         _retryRoute[sessionId] = profile;
-        return (MakeClient(profile), profile.Model);
+        return (MakeChatClient(profile, sessionId), profile.Model);
     }
 
     // MARK: - Background agents
@@ -840,8 +864,8 @@ public sealed partial class AgentHost
         else if (start)
         {
             StartQueue(sessionId);
-            output += IsQueueRunning(sessionId)
-                ? " Started the list: it begins once this turn is over."
+            output += IsQueueRunning(sessionId) ? " Started the list: it begins once this turn is over."
+                : InteractiveOnlyPrimary is { } interactive ? $" The list couldn't start: {QueueRefusal(interactive)}"
                 : " The list couldn't start (no model configured?).";
         }
         else

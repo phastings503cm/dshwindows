@@ -45,6 +45,8 @@ public sealed partial class AgentHost : ObservableObject
     private readonly Dictionary<string, CancellationTokenSource> _runs = new();
     private readonly Dictionary<string, ComputerGrants> _grants = new();
     private readonly string _basePrompt;
+    /// <summary>A test gave its own system prompt: every chat uses it, with or without a project.</summary>
+    private readonly bool _customPrompt;
     /// <summary>Route id → context window learned from a server probe.</summary>
     private readonly Dictionary<string, int> _probedContext = new();
     /// <summary>Route id → what the server said it serves, and when we last asked.</summary>
@@ -69,7 +71,7 @@ public sealed partial class AgentHost : ObservableObject
 
     private sealed record EngineKey(string Profile, int Window, ThinkingLevel? Thinking, PermissionPreset Preset,
                                     int Skills, bool ComputerTools, bool Vision, string Shell, long Vault,
-                                    bool GoalMode, int Memory, string Agents);
+                                    bool GoalMode, int Memory, string Agents, string Routing, bool Unattended);
 
     /// <summary>Everything about skills one turn needs: what exists, what's on, and the prompt text.</summary>
     private sealed record SkillState(IReadOnlyList<Skill> All, IReadOnlyList<Skill> Active, SkillPromptResult Result, int Signature);
@@ -86,6 +88,7 @@ public sealed partial class AgentHost : ObservableObject
         Log = log;
         _dispatcher = dispatcher;
         _basePrompt = systemPrompt ?? DefaultSystemPrompt;
+        _customPrompt = systemPrompt is not null;
         SkillLocations = skillLocations ?? SkillLocations.Standard;
         Vault = vault ?? new CredentialVault();
         _queueFile = queueFile ?? TaskQueue.DefaultFilePath;
@@ -189,6 +192,7 @@ public sealed partial class AgentHost : ObservableObject
     /// <summary>Re-read instructions, skills, and plugins from disk.</summary>
     public void RefreshProjectContext()
     {
+        _userPlugins = null;
         if (ProjectContext?.Root is { } root) AdoptProject(root);
         else
         {
@@ -233,8 +237,21 @@ public sealed partial class AgentHost : ObservableObject
         Config.SetQueueResume(id, false);
         Config.SetSkillsFor(id, null);
         Log.Delete(id);
+        _pendingShield.Remove(id);
         if (Session(id) is { } vm) Sessions.Remove(vm);
+        // A chat without a project takes its scratch folder with it, to the Recycle Bin: its task list, which worked in the
+        // chat (and so in that folder), has just gone too.
+        ForgetScratch(id);
         if (SelectedId == id) SelectedId = Sessions.FirstOrDefault()?.Id;
+    }
+
+    /// <summary>Move chat <paramref name="chatId"/>'s scratch folder to the Recycle Bin — never while another chat still works in
+    /// it (one made for tasks from before task lists were per chat may have been given it).</summary>
+    private void ForgetScratch(string chatId)
+    {
+        var scratch = PlainChat.Folder(chatId).TrimEnd('\\', '/');
+        if (Sessions.Any(s => s.Cwd is { } cwd && string.Equals(cwd.TrimEnd('\\', '/'), scratch, StringComparison.OrdinalIgnoreCase))) return;
+        PlainChat.Delete(chatId);
     }
 
     public void RenameSession(string id, string title)
@@ -282,7 +299,15 @@ public sealed partial class AgentHost : ObservableObject
             switch (row.Kind)
             {
                 case "user": vm.AppendMessage(MessageRole.User, row.Text ?? "", row.At); break;
-                case "assistant": vm.AppendMessage(MessageRole.Assistant, row.Text ?? "", row.At); break;
+                case "assistant":
+                    vm.AppendMessage(MessageRole.Assistant, row.Text ?? "", row.At);
+                    // The shield's line rides in ArgSummary (an assistant row has no arguments).
+                    if (row.ArgSummary is { Length: > 0 } shield && vm.Entries[^1] is MessageEntryVM reply)
+                    {
+                        reply.Shield = shield;
+                        reply.ShieldDetails = shield;
+                    }
+                    break;
                 case "notice": vm.AppendMessage(MessageRole.Notice, row.Text ?? "", row.At); break;
                 case "error": vm.AppendMessage(MessageRole.Error, row.Text ?? "", row.At); break;
                 case "tool":
@@ -348,31 +373,40 @@ public sealed partial class AgentHost : ObservableObject
     private Engine BuildEngine(SessionVM vm, IProviderClient client, int window, ThinkingLevel? thinking, SkillState skillState)
     {
         var sessionId = vm.Id;
-        var workspace = vm.WorkspacePath ?? PermissionPolicy.HomeDirectory;
+        // A chat without a project is a regular conversation: it works in a scratch folder of its own, made on first use.
+        var plain = vm.WorkspacePath is null;
+        var workspace = plain ? PlainChat.Ensure(vm.WorkingFolder) : vm.WorkingFolder;
         var policy = new PermissionPolicy(vm.Preset, workspace);
         var profile = client.Profile;
         var shell = Config.ResolvedAgentShell;
 
         // Project instructions + skills + plugin tools are what make this a harness rather than a
         // chat window.
-        var context = ProjectContext is { } pc && SamePath(pc.Root, workspace)
-            ? pc
-            : (vm.WorkspacePath is null
-                ? Dsh.Core.ProjectContext.UserOnly(SkillLocations) // no folder: still your own instructions
-                : Dsh.Core.ProjectContext.Load(workspace, SkillLocations, Config.SkillSources));
+        var context = plain
+            ? Dsh.Core.ProjectContext.UserOnly(SkillLocations) // no project: still your own instructions
+            : ProjectContext is { } pc && SamePath(pc.Root, workspace)
+                ? pc
+                : Dsh.Core.ProjectContext.Load(workspace, SkillLocations, Config.SkillSources);
         // A big MEMORY.md would take the window over: keep its opening and make the rest searchable.
         if (context is not null && Config.MemoryEnabled) context = MemoryInstructions.Slim(context, Memory);
-        var environment = Dsh.Core.ProjectContext.EnvironmentBlock(workspace, profile.Model, vm.Preset, shell);
-        var prompt = _basePrompt + "\n\n" + (context?.PromptSupplement(environment, includeSkills: false) ?? environment);
+        var environment = Dsh.Core.ProjectContext.EnvironmentBlock(workspace, profile.Model, vm.Preset, shell, scratch: plain);
+        var basePrompt = _customPrompt ? _basePrompt : PlainChat.BasePrompt(vm.WorkspacePath, workspace, _basePrompt);
+        var prompt = basePrompt + "\n\n" + (context?.PromptSupplement(environment, includeSkills: false) ?? environment);
         // Skills: always-on rules, the ones the user selected for this chat, and a catalog the
         // model can load from with use_skill.
         if (skillState.Result.Text.Length > 0) prompt += "\n\n" + skillState.Result.Text;
-        // Long-term memory: how to use it, and the few pinned notes (searched notes ride with each message).
-        if (MemoryPromptFor(workspace, vm.Preset != PermissionPreset.Plan) is { Length: > 0 } memorySection) prompt += "\n\n" + memorySection;
+        // Long-term memory: how to use it, and the few pinned notes (searched notes ride with each message). A regular chat
+        // has no project, so its notes are the ones for every chat.
+        if (MemoryPromptFor(vm.WorkspacePath, vm.Preset != PermissionPreset.Plan) is { Length: > 0 } memorySection) prompt += "\n\n" + memorySection;
         // The credentials the agent may use, by name — never a value.
         if (VaultPrompt.Section(Vault.All, shell.Kind) is { Length: > 0 } vaultSection) prompt += "\n\n" + vaultSection;
         if (vm.Preset == PermissionPreset.Plan)
             prompt += "\n\n--- Plan mode ---\nDo not modify anything. Research and produce a plan, then call `exit_plan_mode` with it and stop.";
+        // With servers for subagents: which they are, which are private, and what that means for what they may be told.
+        var servers = SubagentServersNow();
+        if (SubagentServers.Section(servers) is { Length: > 0 } serverSection)
+            prompt += "\n\n--- Subagent servers ---\n" + serverSection +
+                      " When a task needs sensitive data, set `sensitive: true` on agent or delegate: it then runs only on a private server.";
         _systemPrompts[sessionId] = prompt;
 
         // Background processes: the model's own long-running programs (game engines, dev servers,
@@ -381,9 +415,10 @@ public sealed partial class AgentHost : ObservableObject
         // in a chat still asks (the engine's gate). Both count as built-ins, so a plugin can't take
         // over their names.
         var agents = CatalogFor(vm);
-        var builtins = ToolRegistry.Standard(0, shell, agents).Adding(ExtraTools.Processes());
+        var builtins = ToolRegistry.Standard(0, shell, agents, servers).Adding(ExtraTools.Processes());
         if (Config.ComputerToolsEnabled) builtins = builtins.Adding(ExtraTools.Machine());
-        var extra = new List<IToolExecutor>(PluginLoader.Tools(Plugins, builtins.Names));
+        // A regular chat has no project, so no project plugins: only the user's own.
+        var extra = new List<IToolExecutor>(PluginLoader.Tools(plain ? UserPlugins() : Plugins, builtins.Names));
         if (skillState.Active.Count > 0) extra.Add(new UseSkillTool(skillState.Active));
         extra.Add(new VaultSearchTool(Vault));
         extra.AddRange(ToolRegistry.BackgroundAgentTools());
@@ -435,6 +470,7 @@ public sealed partial class AgentHost : ObservableObject
             VaultGrants = VaultGrantsFor(sessionId),
             BackgroundAgents = BackgroundPool(sessionId),
             Fleet = Fleet,
+            Unattended = IsUnattended(sessionId),
             Roster = RosterFor(sessionId),
             AgentTypes = agents,
             Cache = CacheFor(sessionId),
@@ -899,15 +935,18 @@ public sealed partial class AgentHost : ObservableObject
         var shell = Config.ResolvedAgentShell;
         var key = new EngineKey(ProfileKey(profile), window, thinking, vm.Preset, skillState.Signature,
                                 Config.ComputerToolsEnabled, VisionOn(profile), shell.Executable, Vault.Revision,
-                                vm.Goal is not null, MemorySignature(vm), AgentsStampFor(vm));
+                                vm.Goal is not null, MemorySignature(vm), AgentsStampFor(vm), RoutingStamp(), IsUnattended(sessionId));
         if (_engineKeys.TryGetValue(sessionId, out var previous) && !string.Equals(ModelOf(previous.Profile), profile.Model, StringComparison.Ordinal))
             vm.Note($"The server is now serving `{profile.Model}` (was `{ModelOf(previous.Profile)}`) — switched to it, {Fmt.N(window)}-token window.");
         if (!_engines.TryGetValue(sessionId, out var engine) || _engineKeys.GetValueOrDefault(sessionId) != key)
         {
-            engine = BuildEngine(vm, MakeClient(profile), window, thinking, skillState);
+            engine = BuildEngine(vm, MakeChatClient(profile, sessionId), window, thinking, skillState);
             _engineKeys[sessionId] = key;
         }
         _retryRoute.Remove(sessionId);
+        // A turn reports its own backup and its own masking.
+        _failoverNoted.Remove(sessionId);
+        _pendingShield.Remove(sessionId);
         var input = _transcripts[sessionId].ToList();
 
         // Engine events arrive on a pool thread; hop to the UI thread so the timeline is only ever
@@ -962,8 +1001,10 @@ public sealed partial class AgentHost : ObservableObject
     /// so the engine is rebuilt exactly then and the server's prompt cache stays warm the rest of the time.</summary>
     private int MemorySignature(SessionVM vm) => MemoryPromptFor(vm.WorkspacePath, vm.Preset != PermissionPreset.Plan).GetHashCode();
 
-    /// <summary>Every model client the host makes goes through here, so tests can swap the network.</summary>
-    private IProviderClient MakeClient(ProviderProfile profile) => ProviderClients.Create(profile, HttpHandlerForTesting);
+    /// <summary>Every model client the host makes goes through here, so tests can swap the network. A route that isn't
+    /// private gets the sensitive-data shield (reporting to <paramref name="sessionId"/>'s chat, when given).</summary>
+    private IProviderClient MakeClient(ProviderProfile profile, string? sessionId = null) =>
+        ProviderClients.Create(profile, HttpHandlerForTesting, ShieldFor(sessionId));
 
     /// <summary>Tests: answer model requests from this handler instead of the network.</summary>
     public HttpMessageHandler? HttpHandlerForTesting { get; set; }
@@ -1023,10 +1064,23 @@ public sealed partial class AgentHost : ObservableObject
             }
 
             case EngineEvent.AssistantMessage m:
+            {
                 // Fold a turn's complete text if deltas never arrived, then close the bubble so any
                 // tool calls render after it.
-                if (vm.StreamingId is null && m.Text.Length > 0) vm.AppendMessage(MessageRole.Assistant, m.Text);
-                if (m.Text.Length > 0) Log.RecordItem(sessionId, "assistant", m.Text);
+                var replyId = vm.StreamingId;
+                if (vm.StreamingId is null && m.Text.Length > 0) replyId = vm.AppendMessage(MessageRole.Assistant, m.Text);
+                // What the shield masked for this reply shows on it (its request reported just before it ended).
+                ShieldReport? shield = null;
+                if (m.Text.Length > 0 && _pendingShield.Remove(sessionId, out var masked) && masked.Summary is { } summary)
+                {
+                    shield = masked;
+                    if (vm.Entries.LastOrDefault(e => e.Id == replyId) is MessageEntryVM reply)
+                    {
+                        reply.Shield = summary;
+                        reply.ShieldDetails = masked.Details;
+                    }
+                }
+                if (m.Text.Length > 0) Log.RecordItem(sessionId, "assistant", m.Text, argSummary: shield?.Summary);
                 vm.EndStreaming();
                 // A plan written in prose ("Here's my plan: 1. … 2. …") shows in the plan panel too, unless
                 // the agent is keeping a live todo list that is still in progress.
@@ -1040,6 +1094,7 @@ public sealed partial class AgentHost : ObservableObject
                     }
                 }
                 break;
+            }
 
             case EngineEvent.ToolStarted t:
                 vm.ClearReasoning();
@@ -1111,7 +1166,7 @@ public sealed partial class AgentHost : ObservableObject
 
     /// <summary>Every skill visible from a chat's project (shadowed ones included).</summary>
     public IReadOnlyList<Skill> Skills(SessionVM? vm) =>
-        SkillCatalog.LoadAll(vm?.WorkspacePath ?? ProjectContext?.Root, SkillLocations, Config.SkillSources);
+        SkillCatalog.LoadAll(vm is null ? ProjectContext?.Root : vm.WorkspacePath, SkillLocations, Config.SkillSources);
 
     public SkillSelection Selection(string sessionId)
     {
@@ -1528,7 +1583,7 @@ public sealed partial class AgentHost : ObservableObject
                     MessageRole.Assistant => "assistant",
                     MessageRole.Notice => "notice",
                     _ => "error",
-                }, m.Text, null, null, null, m.Role == MessageRole.Error, entry.At),
+                }, m.Text, null, m.Role == MessageRole.Assistant ? m.Shield : null, null, m.Role == MessageRole.Error, entry.At),
                 ToolEntryVM t => new LogItemRow(sessionId, seq, "tool", t.Summary, t.Name, t.Preview, t.Output, t.IsOk == false, entry.At),
                 // The removed count rides in ArgSummary so a reloaded divider still says how much
                 // was folded away.

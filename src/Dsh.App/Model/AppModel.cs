@@ -11,6 +11,7 @@ namespace Dsh.App.Model;
 /// <summary>Which half of the window is showing.</summary>
 public enum WorkspaceMode { Chat, Code }
 
+/// <summary>Settings pages. (<see cref="Spark"/> is the "Model servers" page: the Spark Swapper boxes.)</summary>
 public enum SettingsTab { General, Models, Spark, Skills, Plugins, Editor }
 
 public enum SkillsAction { Generate, Import, NewManual }
@@ -31,6 +32,13 @@ public sealed partial class AppModel : ObservableObject
     [ObservableProperty] [NotifyPropertyChangedFor(nameof(ProjectName))] private string? _project;
     /// <summary>A newer release is available (shown as a banner until dismissed).</summary>
     [ObservableProperty] private UpdateInfo? _update;
+    /// <summary>The plan panel is on screen (the transcript's plan card then shrinks to a line).</summary>
+    [ObservableProperty] private bool _planPanelVisible;
+
+    /// <summary>The last connection test of each route (Settings › AI Models shows it as a dot): route id → result.</summary>
+    public Dictionary<string, RouteCheck> RouteChecks { get; } = new(StringComparer.Ordinal);
+
+    public sealed record RouteCheck(bool Ok, string Detail, DateTimeOffset At);
 
     public sealed record UpdateInfo(string Version, string Url);
 
@@ -40,6 +48,10 @@ public sealed partial class AppModel : ObservableObject
     /// <summary>Open the setup window straight into the Amazon Bedrock guide, on the given page (for an
     /// existing Bedrock route, starting from its sign-in and Region).</summary>
     public event Action<Views.Guide.BedrockPage, ProviderProfile?>? BedrockGuideRequested;
+    /// <summary>Open the setup window on "Connect my Spark Swapper" (true: straight to the address-and-login form).</summary>
+    public event Action<bool>? SwapperGuideRequested;
+    /// <summary>Open the setup window on "Connect a subscription plan" (optionally with a plan already chosen).</summary>
+    public event Action<string?>? PlanGuideRequested;
     public event Action? MemoryRequested;
     public event Action? ExternalImportRequested;
     public event Action? MemoriesRequested;
@@ -56,13 +68,15 @@ public sealed partial class AppModel : ObservableObject
         Code = new CodeWorkspace(config, dispatcher);
         _mode = config.LastMode == "code" ? WorkspaceMode.Code : WorkspaceMode.Chat;
 
-        Host.IsServerSwitching = () => Spark.IsSwitching;
-        // Agents that reported while the Spark was busy switching models are heard as soon as it is done. (Every status poll
-        // raises IsSwitching, changed or not, so only the step from switching to not switching counts.)
+        // Only the primary model's own box switching holds the chats back (another box may switch freely).
+        Host.IsServerSwitching = () => Spark.IsSwitchingFor(Config.Providers.FirstOrDefault(p => p.RouteId == Config.ActiveRoute));
+        // Agents that reported while the primary's box was busy switching models are heard as soon as it is done — another
+        // box switching holds nothing back. (Every status poll raises IsSwitching, changed or not, so only the step from
+        // switching to not switching counts.)
         var edge = new SwitchEdge();
         Spark.PropertyChanged += (_, e) =>
         {
-            if (e.PropertyName == nameof(SparkController.IsSwitching) && edge.Finished(Spark.IsSwitching)) Host.ResumeAfterServerSwitch();
+            if (e.PropertyName == nameof(SparkController.IsSwitching) && edge.Finished(Host.IsServerSwitching?.Invoke() == true)) Host.ResumeAfterServerSwitch();
         };
         Host.OnSwapCommand = (arg, vm) => _ = Spark.HandleCommandAsync(arg, vm);
         // The agent's file writes drive the editor's live reload.
@@ -123,7 +137,7 @@ public sealed partial class AppModel : ObservableObject
 
         if (!activateSession) return;
         // Return to this project's most recent chat rather than piling up empty ones.
-        if (Host.Sessions.FirstOrDefault(s => SamePath(s.Cwd, path)) is { } existing) Select(existing.Id);
+        if (Host.Sessions.FirstOrDefault(s => SamePath(s.WorkspacePath, path)) is { } existing) Select(existing.Id);
         else NewChat();
     }
 
@@ -154,13 +168,23 @@ public sealed partial class AppModel : ObservableObject
         Host.Hydrate(session);
         // Make sure the context gauge has a number before the user asks.
         Host.EnsureContextProbe();
-        // Following a chat into its project keeps both modes in step.
-        if (session.Cwd is { } cwd && !SamePath(cwd, Project) && Directory.Exists(cwd)) OpenProject(cwd, activateSession: false);
+        // Following a chat into its project keeps both modes in step. (A chat without a project has none to follow; its
+        // scratch folder is not a project.)
+        if (session.WorkspacePath is { } cwd && !SamePath(cwd, Project) && Directory.Exists(cwd)) OpenProject(cwd, activateSession: false);
     }
 
     public SessionVM NewChat()
     {
         var session = Host.NewSession(Project);
+        Host.EnsureContextProbe();
+        return session;
+    }
+
+    /// <summary>A regular chat, with no project folder — even while a project is open.</summary>
+    public SessionVM NewPlainChat()
+    {
+        Mode = WorkspaceMode.Chat;
+        var session = Host.NewSession(null);
         Host.EnsureContextProbe();
         return session;
     }
@@ -196,6 +220,10 @@ public sealed partial class AppModel : ObservableObject
     public void ShowWizard() => WizardRequested?.Invoke();
     public void ShowBedrockGuide(Views.Guide.BedrockPage page = Views.Guide.BedrockPage.Welcome, ProviderProfile? route = null) =>
         BedrockGuideRequested?.Invoke(page, route);
+    /// <summary>"Connect my Spark Swapper": paste a connection code (or sign in with an address and login).</summary>
+    public void ShowSwapperGuide(bool login = false) => SwapperGuideRequested?.Invoke(login);
+    /// <summary>"Connect a subscription plan": GLM, Kimi, Qwen or OpenAI.</summary>
+    public void ShowPlanGuide(string? plan = null) => PlanGuideRequested?.Invoke(plan);
     public void ShowMemory() => MemoryRequested?.Invoke();
     /// <summary>Open "Bring in Claude Code &amp; Cursor".</summary>
     public void ShowExternalImport() => ExternalImportRequested?.Invoke();

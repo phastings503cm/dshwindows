@@ -39,6 +39,9 @@ public sealed record ToolContext
     /// <summary>The model servers subagents run on (workers first, the primary as overflow). Null = a
     /// subagent uses this run's own client.</summary>
     public AgentFleet? Fleet { get; init; }
+    /// <summary>The run is unattended (a chat's task list, a /goal carrying on by itself): its subagents never go to a server
+    /// whose plan allows only interactive use.</summary>
+    public bool Unattended { get; init; }
     /// <summary>Every subagent this chat has started, for the UI. Null = not tracked.</summary>
     public AgentRoster? Roster { get; init; }
     /// <summary>The kinds of subagent available (null = the built-in ones).</summary>
@@ -125,8 +128,10 @@ public sealed class ToolRegistry
     public static IReadOnlyList<IToolExecutor> BackgroundAgentTools() => [new AgentStatusTool(), new AgentStopTool()];
 
     /// <summary>The built-in tool set. The agent tool is only offered at the top level: subagents
-    /// don't spawn subagents (keeps the permission surface and cost predictable).</summary>
-    public static ToolRegistry Standard(int depth = 0, AgentShell? shell = null, AgentCatalog? agents = null)
+    /// don't spawn subagents (keeps the permission surface and cost predictable). <paramref name="servers"/>
+    /// are the subagent servers the agent tools describe, with their privacy.</summary>
+    public static ToolRegistry Standard(int depth = 0, AgentShell? shell = null, AgentCatalog? agents = null,
+                                        IReadOnlyList<SubagentServer>? servers = null)
     {
         var tools = new List<IToolExecutor>
         {
@@ -136,8 +141,8 @@ public sealed class ToolRegistry
         };
         if (depth == 0)
         {
-            tools.Add(new AgentTool(agents));
-            tools.Add(new DelegateTool(agents));
+            tools.Add(new AgentTool(agents, servers));
+            tools.Add(new DelegateTool(agents, servers));
         }
         return new ToolRegistry(tools);
     }

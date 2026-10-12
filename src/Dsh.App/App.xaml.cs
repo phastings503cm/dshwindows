@@ -60,6 +60,7 @@ public partial class App : Application
         FontResolver.Apply(Resources);
         // Deleting a skill is recoverable, like everything else deleted from the app.
         SkillManager.RecycleBin = ShellIntegration.MoveToRecycleBin;
+        PlainChat.RecycleBin = ShellIntegration.MoveToRecycleBin;
         // Bedrock routes sign requests with the AWS CLI's sign-in.
         AwsAccounts.Install();
         var config = new AppConfig();

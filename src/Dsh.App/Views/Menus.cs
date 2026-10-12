@@ -33,44 +33,67 @@ public static class Menus
         return item;
     }
 
-    /// <summary>The model in use, and one click to change it: the Spark's models (served by the
-    /// Spark Swapper) and the provider routes configured in Settings.</summary>
+    /// <summary>The model in use, and one click to change it: what each Spark Swapper box serves (picking a model asks that
+    /// box to switch), then the configured routes by role — Primary, Subagents, Backups, Other — each marked private (a
+    /// lock) or masked (a shield). Switched-off routes aren't offered.</summary>
     public static ContextMenu Model(AppModel model)
     {
         var menu = new ContextMenu();
         var spark = model.Spark;
-        if (spark.IsConfigured)
+        foreach (var box in spark.Boxes)
         {
-            menu.Items.Add(Header("DGX Spark — what it serves"));
-            if (spark.Status is { } status)
+            menu.Items.Add(Header($"{box.Name} — what it serves"));
+            if (box.Status is { } status)
             {
                 foreach (var m in status.Ordered)
                 {
-                    var suffix = m.Key == status.Active ? "  (serving)" : m.Running ? "  (loading)" : "";
-                    menu.Items.Add(Item($"{m.Title} — {ShortTokens(m.ServedContext ?? m.Context)}{suffix}", () => spark.Request(m),
-                        isChecked: m.Key == status.Active, enabled: m.Key != status.Active && !status.IsSwitching));
+                    var facts = new List<string> { ShortTokens(m.EffectiveContext) };
+                    if (m.Speed() is { } speed) facts.Add(speed);
+                    var suffix = m.Key == status.Active ? "  (serving)"
+                        : !m.IsInstalled ? "  · Not installed"
+                        : m.Running ? "  (loading)" : "";
+                    var item = Item($"{m.Title} — {string.Join(" · ", facts)}{suffix}", () => spark.Request(box, m),
+                        isChecked: m.Key == status.Active, enabled: m.IsInstalled && m.Key != status.Active && !status.IsSwitching);
+                    if (!m.IsInstalled)
+                    {
+                        item.ToolTip = $"Not installed — install it from Settings › Model servers{(m.InstallSummary is { } size ? $" ({size})" : "")}.";
+                        ToolTipService.SetShowOnDisabled(item, true);
+                    }
+                    menu.Items.Add(item);
                 }
             }
             else
             {
-                menu.Items.Add(new MenuItem { Header = spark.LastError ?? "Connecting to the Spark…", IsEnabled = false });
+                menu.Items.Add(new MenuItem { Header = box.LastError ?? $"Connecting to {box.Name}…", IsEnabled = false });
             }
+        }
+        if (spark.IsConfigured)
+        {
             menu.Items.Add(Item("Refresh", () => _ = spark.RefreshAsync(), Icons.Refresh));
             menu.Items.Add(new Separator());
         }
-        menu.Items.Add(Header("Providers"));
-        foreach (var provider in model.Config.Providers)
+        var config = model.Config;
+        foreach (var (role, routes) in RouteRoster.Groups(config.Providers, config.ActiveRoute))
         {
-            var route = provider.RouteId;
-            menu.Items.Add(Item(provider.DisplayName, () =>
+            menu.Items.Add(Header(role.Title()));
+            foreach (var provider in routes)
             {
-                model.Config.ActiveRoute = route;
-                model.Host.ResetRouteCache();
-            }, isChecked: route == model.Config.ActiveRoute));
+                var route = provider.RouteId;
+                var item = Item(provider.DisplayName, () =>
+                {
+                    if (config.ActiveRoute == route) return;
+                    config.MakePrimary(route);
+                    model.Host.ResetRouteCache();
+                }, provider.IsPrivateRoute ? Icons.Lock : Icons.Shield);
+                item.ToolTip = (role == RouteRole.Primary ? "The primary model: it answers you. " : "Make this the primary model. ") +
+                               (provider.IsPrivateRoute ? "Private — it may see sensitive data." : "Not private — sensitive details are masked before anything is sent.");
+                if (role == RouteRole.Primary) item.FontWeight = FontWeights.SemiBold;
+                menu.Items.Add(item);
+            }
         }
         menu.Items.Add(new Separator());
         menu.Items.Add(Item("Configure Models…", () => model.ShowSettings(SettingsTab.Models), Icons.Settings));
-        if (!spark.IsConfigured) menu.Items.Add(Item("Set Up Spark Model Switching…", () => model.ShowSettings(SettingsTab.Spark)));
+        if (!spark.IsConfigured) menu.Items.Add(Item("Connect a Spark Swapper…", () => model.ShowSwapperGuide(), Icons.Connect));
         menu.Items.Add(Item("Run Setup Wizard…", model.ShowWizard));
         return menu;
     }

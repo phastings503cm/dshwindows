@@ -16,7 +16,9 @@ namespace Dsh.App.Views.Wizard;
 /// assumes those three are done.
 ///
 /// Its first page also offers the DGX Spark guide (<see cref="SparkGuide"/>): a beginner's walk from a
-/// Spark in its box to a working connection, shown in this same window in place of the normal steps.</summary>
+/// Spark in its box to a working connection, shown in this same window in place of the normal steps — and
+/// the quicker guides: a Spark Swapper's connection code (<see cref="SwapperConnectGuide"/>), a subscription
+/// plan (<see cref="PlanGuide"/>), and Amazon Bedrock.</summary>
 public sealed class SetupWizardWindow : Window, IGuideHost
 {
     private enum Step { Welcome, Backend, Connection, Model, Tuning, Permissions, Project, Done }
@@ -142,6 +144,39 @@ public sealed class SetupWizardWindow : Window, IGuideHost
     {
         _guide?.Dispose();
         ShowGuide(new BedrockGuide(_model, this, page, route));
+    }
+
+    /// <summary>Show "Connect my Spark Swapper" in place of the normal steps (<paramref name="login"/>: start on the address
+    /// and login form).</summary>
+    public void StartSwapperGuide(bool login = false)
+    {
+        _guide?.Dispose();
+        ShowGuide(new SwapperConnectGuide(_model, this, login));
+    }
+
+    /// <summary>Show "Connect a subscription plan" in place of the normal steps.</summary>
+    public void StartPlanGuide(string? plan = null)
+    {
+        _guide?.Dispose();
+        ShowGuide(new PlanGuide(_model, this, plan));
+    }
+
+    /// <summary>For the self-test: "Connect my Spark Swapper" on <paramref name="page"/>, with sample state (its paste page in
+    /// the address-and-login form when <paramref name="login"/>).</summary>
+    internal void ShowSwapperDemo(SwapperPage page, bool login = false)
+    {
+        if (_guide is not SwapperConnectGuide) StartSwapperGuide();
+        ((SwapperConnectGuide)_guide!).ShowDemo(page, login);
+    }
+
+    /// <summary>For the self-test: the footer's Back button.</summary>
+    internal void SelfTestBack() => Back();
+
+    /// <summary>For the self-test: "Connect a subscription plan" on <paramref name="page"/>, with sample state.</summary>
+    internal void ShowPlanDemo(PlanPage page)
+    {
+        if (_guide is not PlanGuide) StartPlanGuide();
+        ((PlanGuide)_guide!).ShowDemo(page);
     }
 
     /// <summary>For the self-test: the Bedrock guide on <paramref name="page"/>, with sample state.</summary>
@@ -542,6 +577,12 @@ public sealed class SetupWizardWindow : Window, IGuideHost
             panel.Children.Add(Choice(Icons.Play, "Continue the DGX Spark guide",
                 $"Pick up where you left off{(saved.Host is { } host ? $" with your Spark at {host}" : "")}.", false, () => StartGuide(resume: true)));
         }
+        panel.Children.Add(Choice(Icons.Connect, "Connect my Spark Swapper (connection code)",
+            "Your DGX Spark or Strix Halo already runs Spark Swapper? Paste the code from its Connect tab: the model, switching and the security certificate are set up in one go.",
+            false, () => StartSwapperGuide()));
+        panel.Children.Add(Choice(Icons.Key, "A subscription or API plan — GLM, Kimi, Qwen, OpenAI",
+            "Use your Z.ai, Kimi, Alibaba Cloud or OpenAI plan. A guide shows where to get the key.",
+            false, () => StartPlanGuide()));
         panel.Children.Add(Choice(Icons.Education, "I have a DGX Spark — walk me through everything (beginner)",
             "Step by step, with a picture for each: power it on, find it on your network, install Spark Swapper, and connect DSH. No terminal needed — it can even make a USB stick to reinstall it.",
             false, () => StartGuide(resume: false)));
@@ -602,6 +643,12 @@ public sealed class SetupWizardWindow : Window, IGuideHost
     private UIElement Backend()
     {
         var panel = Ui.Stack(Heading("Where does the model run?"), Lead("You can change this later, and keep more than one configured."));
+        panel.Children.Add(Choice(Icons.Connect, "My Spark Swapper (DGX Spark or Strix Halo)",
+            "Paste the connection code from the Swapper's Connect tab. Sets up the model, switching, and the security certificate in one go.",
+            false, () => StartSwapperGuide()));
+        panel.Children.Add(Choice(Icons.Key, "A subscription or API plan — GLM, Kimi, Qwen, OpenAI",
+            "Use your Z.ai, Kimi, Alibaba Cloud or OpenAI plan. A guide shows where to get the key.",
+            false, () => StartPlanGuide()));
         foreach (var kind in ProviderKinds.All)
         {
             var (title, detail) = kind switch

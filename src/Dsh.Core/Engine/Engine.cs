@@ -219,6 +219,9 @@ public sealed class Engine
     public VaultGrants VaultGrants { get; init; } = new();
     /// <summary>The model servers subagents run on (see <see cref="AgentFleet"/>); null = this engine's client.</summary>
     public AgentFleet? Fleet { get; init; }
+    /// <summary>The chat runs unattended (its task list, a /goal): its subagents keep off servers whose plan allows only
+    /// interactive use.</summary>
+    public bool Unattended { get; init; }
     /// <summary>Where this chat's subagent runs are recorded for the UI.</summary>
     public AgentRoster? Roster { get; init; }
     /// <summary>The kinds of subagent this chat offers.</summary>
@@ -351,6 +354,7 @@ public sealed class Engine
             Vault = Vault,
             VaultGrants = VaultGrants,
             Fleet = Fleet,
+            Unattended = Unattended,
             Roster = Roster,
             AgentTypes = AgentTypes,
             Retry = Config.Retry,
@@ -1031,6 +1035,7 @@ public sealed class Engine
             case "goal_blocked": return S("reason") is { } why ? TextUtil.Prefix(why, 80) : "goal blocked";
             case "agent":
                 return S("description") ?? (S("prompt") is { } p ? TextUtil.Prefix(p, 80) : null) ?? "subagent";
+            case "use_skill": return S("name") ?? call.Name;
             case "glob": return S("pattern") ?? call.Name;
             case "grep": return S("pattern") ?? call.Name;
             case "read_many_files": return S("paths") ?? call.Name;
