@@ -246,8 +246,9 @@ services, so they aren't private: DSH masks sensitive data before sending (*Sens
 
 Alibaba allows the Qwen Coding Plan only for interactive use, so its route is marked **Interactive use
 only (plan terms)** (a switch in the route editor, for any route): while it is the primary, the task queue
-won't run and a `/goal` doesn't carry on by itself — make another model primary for unattended work.
-Chats, and the subagents they start, are fine.
+won't run and a `/goal` doesn't carry on by itself — make another model primary for unattended work —
+and unattended work never falls back to it as a backup or sends subagents to it. Chats, and the
+subagents they start, are fine.
 
 ## Using Amazon Bedrock
 
@@ -308,9 +309,10 @@ sidebar — even while a folder is open) are regular conversations: the model is
 is needed and answers directly, using the web, your skills and long-term memory when they help. Your own
 instruction files, skills and plugins apply; a project's don't. When something needs files or
 commands, the chat works in a scratch folder of its own, `%APPDATA%\DSH\Chats\<chat id>` — made on
-first use, deleted with the chat, and treated by the permission preset like a project folder (queue
-tasks the chat adds run there too). Its first screen offers openers like *Explain something simply* or
-*Summarise a web page* (and your skills), with a link to open a folder for code.
+first use, treated by the permission preset like a project folder, and moved to the Recycle Bin when the
+chat is deleted (not while a queue task still works there). Queue tasks the chat adds, or that you add
+from the queue panel while it is open, run there too. Its first screen offers openers like *Explain
+something simply* or *Summarise a web page* (and your skills), with a link to open a folder for code.
 
 **Code** (Ctrl+2) — a VS Code-shaped workspace with the agent beside it:
 
