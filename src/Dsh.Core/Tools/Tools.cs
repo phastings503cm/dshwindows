@@ -125,8 +125,10 @@ public sealed class ToolRegistry
     public static IReadOnlyList<IToolExecutor> BackgroundAgentTools() => [new AgentStatusTool(), new AgentStopTool()];
 
     /// <summary>The built-in tool set. The agent tool is only offered at the top level: subagents
-    /// don't spawn subagents (keeps the permission surface and cost predictable).</summary>
-    public static ToolRegistry Standard(int depth = 0, AgentShell? shell = null, AgentCatalog? agents = null)
+    /// don't spawn subagents (keeps the permission surface and cost predictable). <paramref name="servers"/>
+    /// are the subagent servers the agent tools describe, with their privacy.</summary>
+    public static ToolRegistry Standard(int depth = 0, AgentShell? shell = null, AgentCatalog? agents = null,
+                                        IReadOnlyList<SubagentServer>? servers = null)
     {
         var tools = new List<IToolExecutor>
         {
@@ -136,8 +138,8 @@ public sealed class ToolRegistry
         };
         if (depth == 0)
         {
-            tools.Add(new AgentTool(agents));
-            tools.Add(new DelegateTool(agents));
+            tools.Add(new AgentTool(agents, servers));
+            tools.Add(new DelegateTool(agents, servers));
         }
         return new ToolRegistry(tools);
     }
