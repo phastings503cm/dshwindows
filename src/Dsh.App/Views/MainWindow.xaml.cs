@@ -360,6 +360,7 @@ public partial class MainWindow : Window
         }
         if (open && QueueShown && Body.ActualWidth > 0 && RoomForPanels() < PanelLayout.PlanMin + PanelLayout.QueueMin) SetQueuePanel(false);
         _planPanel.Visibility = open ? Visibility.Visible : Visibility.Collapsed;
+        Model.PlanPanelVisible = open;
         PlanSplitter.Visibility = open ? Visibility.Visible : Visibility.Collapsed;
         PlanColumn.MinWidth = open ? PanelLayout.PlanMin : 0;
         PlanColumn.Width = new GridLength(open ? PanelLayout.Clamp(Model.Config.PlanPanelWidth, PanelLayout.PlanMin, PanelLayout.PlanMax) : 0);

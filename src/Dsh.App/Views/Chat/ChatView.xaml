@@ -169,9 +169,20 @@
             </DataTemplate.Triggers>
         </DataTemplate>
 
-        <!-- The agent's plan. -->
+        <!-- The agent's plan (one line while the plan panel shows it). -->
         <DataTemplate DataType="{x:Type model:TodosEntryVM}">
-            <Border Margin="28,0,0,12" Style="{StaticResource Card}">
+            <Grid>
+            <DockPanel x:Name="CompactPlan" Margin="28,0,0,12" LastChildFill="False" Visibility="Collapsed">
+                <TextBlock Style="{StaticResource Glyph}" FontSize="12" Text="{x:Static infra:Icons.CheckList}" Margin="0,0,8,0"
+                           VerticalAlignment="Center" Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
+                <TextBlock Text="{Binding Summary}" Style="{StaticResource MetaText}" VerticalAlignment="Center" />
+                <TextBlock Text=" · " Style="{StaticResource MetaText}" VerticalAlignment="Center" />
+                <Button Style="{StaticResource SubtleButton}" Padding="3,0" VerticalAlignment="Center" Click="ShowTodoCard_Click"
+                        ToolTip="Show the plan here too">
+                    <TextBlock Text="Show" FontSize="11.5" Foreground="{DynamicResource AccentTextFillColorPrimaryBrush}" />
+                </Button>
+            </DockPanel>
+            <Border x:Name="FullPlan" Margin="28,0,0,12" Style="{StaticResource Card}">
                 <StackPanel>
                     <DockPanel Margin="0,0,0,6">
                         <TextBlock DockPanel.Dock="Right" Text="{Binding Progress}" Style="{StaticResource MetaText}" />
@@ -206,6 +217,13 @@
                     </ItemsControl>
                 </StackPanel>
             </Border>
+            </Grid>
+            <DataTemplate.Triggers>
+                <DataTrigger Binding="{Binding ShowCompact}" Value="True">
+                    <Setter TargetName="FullPlan" Property="Visibility" Value="Collapsed" />
+                    <Setter TargetName="CompactPlan" Property="Visibility" Value="Visible" />
+                </DataTrigger>
+            </DataTemplate.Triggers>
         </DataTemplate>
 
         <!-- The conversation was compacted to fit the context window. -->

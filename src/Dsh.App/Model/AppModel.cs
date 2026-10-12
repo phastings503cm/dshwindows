@@ -32,6 +32,8 @@ public sealed partial class AppModel : ObservableObject
     [ObservableProperty] [NotifyPropertyChangedFor(nameof(ProjectName))] private string? _project;
     /// <summary>A newer release is available (shown as a banner until dismissed).</summary>
     [ObservableProperty] private UpdateInfo? _update;
+    /// <summary>The plan panel is on screen (the transcript's plan card then shrinks to a line).</summary>
+    [ObservableProperty] private bool _planPanelVisible;
 
     /// <summary>The last connection test of each route (Settings › AI Models shows it as a dot): route id → result.</summary>
     public Dictionary<string, RouteCheck> RouteChecks { get; } = new(StringComparer.Ordinal);

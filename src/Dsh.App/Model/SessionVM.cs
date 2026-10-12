@@ -73,10 +73,18 @@ public sealed partial class ToolEntryVM(string name, string preview, string? id 
 }
 
 /// <summary>The agent's task list.</summary>
-public sealed class TodosEntryVM(IReadOnlyList<TodoItem> items) : ChatEntryVM(null, null)
+public sealed partial class TodosEntryVM(IReadOnlyList<TodoItem> items) : ChatEntryVM(null, null)
 {
     public IReadOnlyList<TodoItem> Items { get; } = items;
     public string Progress => $"{Items.Count(i => i.Status == TodoStatus.Completed)}/{Items.Count}";
+    /// <summary>"Plan updated — 3 of 7 done": the one line the card shrinks to while the plan panel shows the plan.</summary>
+    public string Summary => $"Plan updated — {Items.Count(i => i.Status == TodoStatus.Completed)} of {Items.Count} done";
+    /// <summary>The plan panel is open, so the card is a single line (unless the user asked to see it here).</summary>
+    [ObservableProperty] [NotifyPropertyChangedFor(nameof(ShowCompact))] private bool _compact;
+    /// <summary>The user pressed "Show" on the single line.</summary>
+    [ObservableProperty] [NotifyPropertyChangedFor(nameof(ShowCompact))] private bool _expanded;
+
+    public bool ShowCompact => Compact && !Expanded;
 }
 
 /// <summary>A record that the older part of a conversation was summarized to fit the context

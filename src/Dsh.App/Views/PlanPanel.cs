@@ -21,8 +21,11 @@ public sealed class PlanPanel : UserControl
     private readonly AppModel _model;
     private AgentHost Host => _model.Host;
 
+    /// <summary>The chat whose plan this is.</summary>
     private readonly TextBlock _subtitle = Ui.Secondary("", 11.5);
-    private readonly ProgressBar _progress = new() { Height = 4, Minimum = 0, Maximum = 1, Margin = new Thickness(12, 0, 12, 10) };
+    /// <summary>"3 of 7 done" (or what the agent is doing when there are no steps).</summary>
+    private readonly TextBlock _summary = Ui.Text("", 11, brushKey: "TextFillColorTertiaryBrush", wrap: false);
+    private readonly ProgressBar _progress = new() { Height = 4, Minimum = 0, Maximum = 1, Margin = new Thickness(12, 0, 12, 4) };
     private readonly StackPanel _body = new() { Margin = new Thickness(12, 6, 12, 12) };
     private readonly ScrollViewer _scroll;
     private readonly CheckBox _auto = new() { Content = "Show when the agent makes a plan", FontSize = 11.5, Margin = new Thickness(12, 8, 12, 10) };
@@ -78,6 +81,8 @@ public sealed class PlanPanel : UserControl
         var top = new StackPanel();
         top.Children.Add(header);
         top.Children.Add(_progress);
+        _summary.Margin = new Thickness(12, 0, 12, 8);
+        top.Children.Add(_summary);
         top.Children.Add(Ui.Divider());
         var bottom = new StackPanel();
         bottom.Children.Add(Ui.Divider());
@@ -149,7 +154,8 @@ public sealed class PlanPanel : UserControl
     {
         // Streaming text changes constantly; the plan only cares about these.
         if (e.PropertyName is nameof(SessionVM.Todos) or nameof(SessionVM.Goal) or nameof(SessionVM.RunningTool) or nameof(SessionVM.Running)
-            or nameof(SessionVM.Activity) or nameof(SessionVM.Outline) or nameof(SessionVM.ProposedPlan) or nameof(SessionVM.Retry))
+            or nameof(SessionVM.Activity) or nameof(SessionVM.Outline) or nameof(SessionVM.ProposedPlan) or nameof(SessionVM.Retry)
+            or nameof(SessionVM.Title))
             QueueRefresh();
     }
 
@@ -191,7 +197,7 @@ public sealed class PlanPanel : UserControl
         var vm = _watched;
         if (vm is null)
         {
-            SetSummary("No chat open", null);
+            SetSummary("No chat open", "", null);
             _cache.Text = "";
             _body.Children.Add(Empty("Open or start a chat, and the agent's plan appears here as it works."));
             return;
@@ -200,9 +206,10 @@ public sealed class PlanPanel : UserControl
         var steps = StepsOf(vm, out var isOutline);
         var running = vm.Agents.Where(a => a.IsRunning).ToList();
         var done = steps.Count(s => s.Status == TodoStatus.Completed);
-        SetSummary(steps.Count > 0 ? $"{done} of {steps.Count} step{(steps.Count == 1 ? "" : "s")} done" + (isOutline ? " · outline" : "")
-                                   : vm.ProposedPlan is not null ? "Plan proposed"
-                                   : vm.Running ? "Working…" : "No plan yet",
+        SetSummary(vm.Title,
+            steps.Count > 0 ? (isOutline ? $"{steps.Count} step{(steps.Count == 1 ? "" : "s")} · outline" : $"{done} of {steps.Count} done")
+            : vm.ProposedPlan is not null ? "Plan proposed"
+            : vm.Running ? "Working…" : "",
             steps.Count > 0 && !isOutline ? done / (double)steps.Count : null);
 
         var anything = false;
@@ -239,7 +246,7 @@ public sealed class PlanPanel : UserControl
             anything = true;
         }
         if (!anything)
-            _body.Children.Add(Empty("No plan yet. When the agent takes on a job with several steps it lays the plan out here and ticks the steps off as it goes."));
+            _body.Children.Add(Empty("No plan in this chat yet. When the agent breaks work into steps or proposes a plan, it shows up here."));
 
         _cache.Text = Host.CacheSummary(vm.Id);
         _cache.Visibility = _cache.Text.Length > 0 ? Visibility.Visible : Visibility.Collapsed;
@@ -256,10 +263,13 @@ public sealed class PlanPanel : UserControl
         return vm.Todos.Select(t => new Step(t.Content, t.Status)).ToList();
     }
 
-    private void SetSummary(string text, double? fraction)
+    /// <summary>The header: whose plan (the chat's title), how far it has got, and the bar.</summary>
+    private void SetSummary(string chat, string progress, double? fraction)
     {
-        _subtitle.Text = text;
-        _subtitle.ToolTip = text;
+        _subtitle.Text = chat;
+        _subtitle.ToolTip = chat;
+        _summary.Text = progress;
+        _summary.Visibility = progress.Length > 0 ? Visibility.Visible : Visibility.Collapsed;
         _progress.Visibility = fraction is null ? Visibility.Collapsed : Visibility.Visible;
         if (fraction is { } value) _progress.Value = value;
     }

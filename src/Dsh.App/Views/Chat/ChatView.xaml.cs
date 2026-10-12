@@ -79,6 +79,11 @@ public partial class ChatView : UserControl
         {
             if (e.PropertyName is nameof(SparkController.ProgressLine) or nameof(SparkController.Revision)) UpdateSpark();
         };
+        // While the plan panel shows the plan, the transcript's plan card is a single line.
+        _model.PropertyChanged += (_, e) =>
+        {
+            if (e.PropertyName == nameof(AppModel.PlanPanelVisible)) UpdateTodoCards();
+        };
         _model.Code.MentionRequested += InsertMention;
         _thinking.PropertyChanged += (_, e) =>
         {
@@ -146,6 +151,7 @@ public partial class ChatView : UserControl
         Composer.CaretIndex = Composer.Text.Length;
 
         UpdateStarter();
+        UpdateTodoCards();
         UpdateGate();
         UpdateComposerState();
         UpdateMeta();
@@ -194,7 +200,25 @@ public partial class ChatView : UserControl
     private void OnEntriesChanged(object? sender, NotifyCollectionChangedEventArgs e)
     {
         UpdateStarter();
+        if (e.NewItems is { } added && added.OfType<TodosEntryVM>().Any()) UpdateTodoCards();
         ScrollIfPinned();
+    }
+
+    /// <summary>The plan card in the transcript shrinks to "Plan updated — 3 of 7 done · Show" while the plan panel is open,
+    /// so the plan isn't shown twice.</summary>
+    private void UpdateTodoCards()
+    {
+        if (_session is null) return;
+        foreach (var card in _session.Entries.OfType<TodosEntryVM>()) card.Compact = _model.PlanPanelVisible;
+    }
+
+    private void ShowTodoCard_Click(object sender, RoutedEventArgs e)
+    {
+        if ((sender as FrameworkElement)?.DataContext is TodosEntryVM card)
+        {
+            _pinned = false;
+            card.Expanded = true;
+        }
     }
 
     private void OnGatesChanged(object? sender, NotifyCollectionChangedEventArgs e) => UpdateGate();
