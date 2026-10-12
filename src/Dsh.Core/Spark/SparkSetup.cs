@@ -47,11 +47,15 @@ public static class SparkSetup
 
     /// <summary>Send one tiny prompt and return the reply — proof the whole path works (address,
     /// certificate, key, model).</summary>
-    public static async Task<string> SayHelloAsync(ILlmClient client, string model, CancellationToken cancellationToken = default)
+    public static Task<string> SayHelloAsync(ILlmClient client, string model, CancellationToken cancellationToken = default) =>
+        SayHelloAsync(client, model, "Say hello to a new DGX Spark owner in one short, friendly sentence.", cancellationToken);
+
+    /// <summary>Send <paramref name="message"/> (a one-line hello) and return the reply.</summary>
+    public static async Task<string> SayHelloAsync(ILlmClient client, string model, string message, CancellationToken cancellationToken)
     {
         var request = new LlmRequest(
             "You are a helpful assistant.",
-            [LlmMessage.User("Say hello to a new DGX Spark owner in one short, friendly sentence.")],
+            [LlmMessage.User(message)],
             [], model, Temperature: 0.3, MaxTokens: 200, Thinking: ThinkingLevel.Off);
         var reply = new StringBuilder();
         await foreach (var e in client.StreamAsync(request, cancellationToken).ConfigureAwait(false))

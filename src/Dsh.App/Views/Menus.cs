@@ -39,22 +39,35 @@ public static class Menus
     {
         var menu = new ContextMenu();
         var spark = model.Spark;
-        if (spark.IsConfigured)
+        foreach (var box in spark.Boxes)
         {
-            menu.Items.Add(Header("DGX Spark — what it serves"));
-            if (spark.Status is { } status)
+            menu.Items.Add(Header($"{box.Name} — what it serves"));
+            if (box.Status is { } status)
             {
                 foreach (var m in status.Ordered)
                 {
-                    var suffix = m.Key == status.Active ? "  (serving)" : m.Running ? "  (loading)" : "";
-                    menu.Items.Add(Item($"{m.Title} — {ShortTokens(m.ServedContext ?? m.Context)}{suffix}", () => spark.Request(m),
-                        isChecked: m.Key == status.Active, enabled: m.Key != status.Active && !status.IsSwitching));
+                    var facts = new List<string> { ShortTokens(m.EffectiveContext) };
+                    if (m.Speed() is { } speed) facts.Add(speed);
+                    var suffix = m.Key == status.Active ? "  (serving)"
+                        : !m.IsInstalled ? "  · Not installed"
+                        : m.Running ? "  (loading)" : "";
+                    var item = Item($"{m.Title} — {string.Join(" · ", facts)}{suffix}", () => spark.Request(box, m),
+                        isChecked: m.Key == status.Active, enabled: m.IsInstalled && m.Key != status.Active && !status.IsSwitching);
+                    if (!m.IsInstalled)
+                    {
+                        item.ToolTip = $"Not installed — install it from Settings › Model servers{(m.InstallSummary is { } size ? $" ({size})" : "")}.";
+                        ToolTipService.SetShowOnDisabled(item, true);
+                    }
+                    menu.Items.Add(item);
                 }
             }
             else
             {
-                menu.Items.Add(new MenuItem { Header = spark.LastError ?? "Connecting to the Spark…", IsEnabled = false });
+                menu.Items.Add(new MenuItem { Header = box.LastError ?? $"Connecting to {box.Name}…", IsEnabled = false });
             }
+        }
+        if (spark.IsConfigured)
+        {
             menu.Items.Add(Item("Refresh", () => _ = spark.RefreshAsync(), Icons.Refresh));
             menu.Items.Add(new Separator());
         }
@@ -70,7 +83,7 @@ public static class Menus
         }
         menu.Items.Add(new Separator());
         menu.Items.Add(Item("Configure Models…", () => model.ShowSettings(SettingsTab.Models), Icons.Settings));
-        if (!spark.IsConfigured) menu.Items.Add(Item("Set Up Spark Model Switching…", () => model.ShowSettings(SettingsTab.Spark)));
+        if (!spark.IsConfigured) menu.Items.Add(Item("Connect a Spark Swapper…", () => model.ShowSwapperGuide(), Icons.Connect));
         menu.Items.Add(Item("Run Setup Wizard…", model.ShowWizard));
         return menu;
     }

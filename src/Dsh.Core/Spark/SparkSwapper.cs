@@ -281,7 +281,7 @@ public sealed class SwapperException : Exception
         statusCode: 401);
 
     public static SwapperException UntrustedCertificate(string fingerprint) => new(SwapperErrorKind.UntrustedCertificate,
-        $"The Spark swapper's certificate isn't trusted yet (SHA-256 {TextUtil.Prefix(fingerprint, 23)}…). Approve it in Settings › Spark.",
+        $"The Spark swapper's certificate isn't trusted yet (SHA-256 {TextUtil.Prefix(fingerprint, 23)}…). Approve it in Settings › Model servers.",
         fingerprint);
 
     public static SwapperException BadLogin(string message) =>

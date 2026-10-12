@@ -144,6 +144,21 @@ public sealed class SetupWizardWindow : Window, IGuideHost
         ShowGuide(new BedrockGuide(_model, this, page, route));
     }
 
+    /// <summary>Show "Connect my Spark Swapper" in place of the normal steps (<paramref name="login"/>: start on the address
+    /// and login form).</summary>
+    public void StartSwapperGuide(bool login = false)
+    {
+        _guide?.Dispose();
+        ShowGuide(new SwapperConnectGuide(_model, this, login));
+    }
+
+    /// <summary>For the self-test: "Connect my Spark Swapper" on <paramref name="page"/>, with sample state.</summary>
+    internal void ShowSwapperDemo(SwapperPage page)
+    {
+        if (_guide is not SwapperConnectGuide) StartSwapperGuide();
+        ((SwapperConnectGuide)_guide!).ShowDemo(page);
+    }
+
     /// <summary>For the self-test: the Bedrock guide on <paramref name="page"/>, with sample state.</summary>
     internal void ShowBedrockDemo(BedrockPage page, bool terms = false)
     {
@@ -542,6 +557,9 @@ public sealed class SetupWizardWindow : Window, IGuideHost
             panel.Children.Add(Choice(Icons.Play, "Continue the DGX Spark guide",
                 $"Pick up where you left off{(saved.Host is { } host ? $" with your Spark at {host}" : "")}.", false, () => StartGuide(resume: true)));
         }
+        panel.Children.Add(Choice(Icons.Connect, "Connect my Spark Swapper (connection code)",
+            "Your DGX Spark or Strix Halo already runs Spark Swapper? Paste the code from its Connect tab: the model, switching and the security certificate are set up in one go.",
+            false, () => StartSwapperGuide()));
         panel.Children.Add(Choice(Icons.Education, "I have a DGX Spark — walk me through everything (beginner)",
             "Step by step, with a picture for each: power it on, find it on your network, install Spark Swapper, and connect DSH. No terminal needed — it can even make a USB stick to reinstall it.",
             false, () => StartGuide(resume: false)));
@@ -602,6 +620,9 @@ public sealed class SetupWizardWindow : Window, IGuideHost
     private UIElement Backend()
     {
         var panel = Ui.Stack(Heading("Where does the model run?"), Lead("You can change this later, and keep more than one configured."));
+        panel.Children.Add(Choice(Icons.Connect, "My Spark Swapper (DGX Spark or Strix Halo)",
+            "Paste the connection code from the Swapper's Connect tab. Sets up the model, switching, and the security certificate in one go.",
+            false, () => StartSwapperGuide()));
         foreach (var kind in ProviderKinds.All)
         {
             var (title, detail) = kind switch

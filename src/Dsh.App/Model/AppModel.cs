@@ -11,6 +11,7 @@ namespace Dsh.App.Model;
 /// <summary>Which half of the window is showing.</summary>
 public enum WorkspaceMode { Chat, Code }
 
+/// <summary>Settings pages. (<see cref="Spark"/> is the "Model servers" page: the Spark Swapper boxes.)</summary>
 public enum SettingsTab { General, Models, Spark, Skills, Plugins, Editor }
 
 public enum SkillsAction { Generate, Import, NewManual }
@@ -40,6 +41,8 @@ public sealed partial class AppModel : ObservableObject
     /// <summary>Open the setup window straight into the Amazon Bedrock guide, on the given page (for an
     /// existing Bedrock route, starting from its sign-in and Region).</summary>
     public event Action<Views.Guide.BedrockPage, ProviderProfile?>? BedrockGuideRequested;
+    /// <summary>Open the setup window on "Connect my Spark Swapper" (true: straight to the address-and-login form).</summary>
+    public event Action<bool>? SwapperGuideRequested;
     public event Action? MemoryRequested;
     public event Action? ExternalImportRequested;
     public event Action? MemoriesRequested;
@@ -54,7 +57,8 @@ public sealed partial class AppModel : ObservableObject
         Code = new CodeWorkspace(config, dispatcher);
         _mode = config.LastMode == "code" ? WorkspaceMode.Code : WorkspaceMode.Chat;
 
-        Host.IsServerSwitching = () => Spark.IsSwitching;
+        // Only the primary model's own box switching holds the chats back (another box may switch freely).
+        Host.IsServerSwitching = () => Spark.IsSwitchingFor(Config.Providers.FirstOrDefault(p => p.RouteId == Config.ActiveRoute));
         // Agents that reported while the Spark was busy switching models are heard as soon as it is done. (Every status poll
         // raises IsSwitching, changed or not, so only the step from switching to not switching counts.)
         var edge = new SwitchEdge();
@@ -194,6 +198,8 @@ public sealed partial class AppModel : ObservableObject
     public void ShowWizard() => WizardRequested?.Invoke();
     public void ShowBedrockGuide(Views.Guide.BedrockPage page = Views.Guide.BedrockPage.Welcome, ProviderProfile? route = null) =>
         BedrockGuideRequested?.Invoke(page, route);
+    /// <summary>"Connect my Spark Swapper": paste a connection code (or sign in with an address and login).</summary>
+    public void ShowSwapperGuide(bool login = false) => SwapperGuideRequested?.Invoke(login);
     public void ShowMemory() => MemoryRequested?.Invoke();
     /// <summary>Open "Bring in Claude Code &amp; Cursor".</summary>
     public void ShowExternalImport() => ExternalImportRequested?.Invoke();

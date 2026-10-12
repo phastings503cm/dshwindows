@@ -35,6 +35,9 @@ public sealed partial class AppConfig : ObservableObject
 
     public ObservableCollection<ProviderProfile> Providers { get; } = [];
     public ObservableCollection<string> RecentProjects { get; } = [];
+    /// <summary>The Spark Swapper boxes DSH knows (a DGX Spark, a Strix Halo…). Their tokens and passwords live in
+    /// Credential Manager.</summary>
+    public ObservableCollection<SwapperConnection> SwapperConnections { get; } = [];
 
     /// <summary>Identity of the active route: "&lt;provider name&gt;|&lt;model&gt;".</summary>
     [ObservableProperty] private string? _activeRoute;
@@ -61,6 +64,8 @@ public sealed partial class AppConfig : ObservableObject
     /// doesn't come back.</summary>
     [ObservableProperty] private bool _externalImportOffered;
 
+    /// <summary>The one Swapper of versions before several boxes (Settings › DGX Spark). Read once to make the first
+    /// <see cref="SwapperConnections"/> entry, and written back unchanged, so an older version still finds it.</summary>
     [ObservableProperty] private string _sparkUrl = "";
     [ObservableProperty] private string _sparkUser = "";
     [ObservableProperty] private string? _sparkPin;
@@ -101,6 +106,7 @@ public sealed partial class AppConfig : ObservableObject
         Load();
         Providers.CollectionChanged += (_, _) => Persist();
         RecentProjects.CollectionChanged += (_, _) => Persist();
+        SwapperConnections.CollectionChanged += (_, _) => Persist();
     }
 
     protected override void OnPropertyChanged(PropertyChangedEventArgs e)
@@ -203,6 +209,81 @@ public sealed partial class AppConfig : ObservableObject
         lock (_keyLock) return _keyCache.TryAdd(provider.RouteId, key) ? key : _keyCache[provider.RouteId];
     }
 
+    // MARK: - Swapper connections
+
+    private readonly Dictionary<string, string> _swapperSecrets = new(StringComparer.Ordinal);
+
+    /// <summary>Add a Swapper box, or replace the one with the same id, keeping its token or password in Credential
+    /// Manager (not changed when <paramref name="secret"/> is null).</summary>
+    public void SaveSwapper(SwapperConnection connection, string? secret)
+    {
+        var copy = connection.DeepCopy();
+        var index = SwapperConnections.ToList().FindIndex(c => c.Id == copy.Id);
+        if (index >= 0) SwapperConnections[index] = copy; else SwapperConnections.Add(copy);
+        if (secret is not null)
+        {
+            lock (_keyLock) _swapperSecrets[copy.Id] = secret;
+            try
+            {
+                SecretStore.Write(copy.SecretTarget, secret, copy.Username);
+            }
+            catch (Exception)
+            {
+                // Kept for this session at least.
+            }
+        }
+    }
+
+    /// <summary>Forget a Swapper box and its secret.</summary>
+    public void RemoveSwapper(string id)
+    {
+        if (SwapperConnections.FirstOrDefault(c => c.Id == id) is not { } existing) return;
+        SwapperConnections.Remove(existing);
+        lock (_keyLock) _swapperSecrets.Remove(id);
+        try { SecretStore.Delete(existing.SecretTarget); } catch (Exception) { }
+    }
+
+    /// <summary>A Swapper box's token or password ("" when there is none).</summary>
+    public string SwapperSecret(SwapperConnection connection)
+    {
+        lock (_keyLock)
+        {
+            if (_swapperSecrets.TryGetValue(connection.Id, out var cached)) return cached;
+        }
+        string secret;
+        try
+        {
+            secret = SecretStore.Read(connection.SecretTarget) ?? "";
+        }
+        catch (Exception)
+        {
+            secret = "";
+        }
+        lock (_keyLock) return _swapperSecrets.TryAdd(connection.Id, secret) ? secret : _swapperSecrets[connection.Id];
+    }
+
+    /// <summary>Before there could be several boxes: make the one Swapper the user set up the first connection (its
+    /// password copied to the connection's own entry; the old entry and settings stay, for an older version).</summary>
+    private void MigrateLegacySwapper()
+    {
+        string legacyPassword;
+        try
+        {
+            legacyPassword = SecretStore.Read(SecretStore.SparkTarget) ?? "";
+        }
+        catch (Exception)
+        {
+            legacyPassword = "";
+        }
+        if (Dsh.Core.SwapperConnections.MigrateLegacy(SparkUrl, SparkUser, SparkPin, legacyPassword.Length > 0, Providers) is not { } connection) return;
+        SwapperConnections.Add(connection);
+        if (legacyPassword.Length > 0)
+        {
+            lock (_keyLock) _swapperSecrets[connection.Id] = legacyPassword;
+            try { SecretStore.Write(connection.SecretTarget, legacyPassword, connection.Username); } catch (Exception) { }
+        }
+    }
+
     // MARK: - Projects
 
     /// <summary>Record a folder as recently opened (newest first, capped).</summary>
@@ -297,10 +378,12 @@ public sealed partial class AppConfig : ObservableObject
         public bool? PlanPanelAutoOpen { get; set; }
         public bool? MemoryEnabled { get; set; }
         public bool? SubagentsUsePrimary { get; set; }
+        public List<SwapperConnection>? SwapperConnections { get; set; }
     }
 
     private void Load()
     {
+        var migrateSwapper = false;
         _loading = true;
         try
         {
@@ -348,10 +431,19 @@ public sealed partial class AppConfig : ObservableObject
             PlanPanelAutoOpen = stored?.PlanPanelAutoOpen ?? true;
             MemoryEnabled = stored?.MemoryEnabled ?? true;
             SubagentsUsePrimary = stored?.SubagentsUsePrimary ?? true;
+            if (stored?.SwapperConnections is { } connections)
+                foreach (var connection in connections) SwapperConnections.Add(connection);
+            else
+                migrateSwapper = true; // settings from before several boxes: their one Swapper becomes the first
         }
         finally
         {
             _loading = false;
+        }
+        if (migrateSwapper)
+        {
+            MigrateLegacySwapper();
+            if (SwapperConnections.Count > 0) SaveNow();
         }
     }
 
@@ -412,6 +504,7 @@ public sealed partial class AppConfig : ObservableObject
             PlanPanelAutoOpen = PlanPanelAutoOpen,
             MemoryEnabled = MemoryEnabled,
             SubagentsUsePrimary = SubagentsUsePrimary,
+            SwapperConnections = SwapperConnections.Select(c => c.DeepCopy()).ToList(),
         };
         try
         {

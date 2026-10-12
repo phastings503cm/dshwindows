@@ -417,6 +417,45 @@ public sealed class SwapperConnectTests
     }
 
     [Fact]
+    public async Task SigningInWithALoginKeepsATokenRatherThanThePassword()
+    {
+        await using var swapper = new FakeSwapper2();
+        var result = await SwapperSetupFlows.SignInAsync(swapper.Url, "pat", "correct horse", swapper.Fingerprint, "DSH on TESTPC");
+        Assert.True(result.UsesToken);
+        Assert.Equal(FakeSwapper2.Token, result.Secret);
+        Assert.Equal("DGX Spark (spark-3f2a)", result.Connection.Name);
+        Assert.Equal("nvidia-gb10", result.Connection.Platform);
+        Assert.Equal("https://127.0.0.1:11443/v1", result.Connection.ApiBase);
+        Assert.Equal(swapper.Fingerprint, result.Connection.PinnedFingerprint);
+        Assert.Equal(SwapperAuth.Token, result.Connection.Auth);
+
+        await using var old = new FakeSwapper2(old: true);
+        var legacy = await SwapperSetupFlows.SignInAsync(old.Url, "pat", "correct horse", old.Fingerprint, "DSH on TESTPC");
+        Assert.False(legacy.UsesToken);
+        Assert.Equal("correct horse", legacy.Secret);
+        Assert.Equal(SwapperAuth.Password, legacy.Connection.Auth);
+        Assert.Equal("vllm-local", legacy.Credentials!.ApiKey);
+        Assert.Equal("https://127.0.0.1:11443/v1", legacy.Connection.ApiBase);
+
+        var wrong = await Assert.ThrowsAsync<SwapperException>(() =>
+            SwapperSetupFlows.SignInAsync(swapper.Url, "pat", "nope", swapper.Fingerprint, "DSH on TESTPC"));
+        Assert.Equal(SwapperErrorKind.BadLogin, wrong.Kind);
+    }
+
+    [Fact]
+    public async Task AnInstallIsFollowedUntilItEnds()
+    {
+        await using var swapper = new FakeSwapper2();
+        using var client = SparkSwapperClient.WithToken(swapper.Url, FakeSwapper2.Token, swapper.Fingerprint);
+        var seen = new List<string>();
+        var job = await SwapperSetupFlows.InstallModelAsync(client, "flash", j => seen.Add(j.State), TimeSpan.Zero);
+        Assert.True(job!.IsDone);
+        Assert.Equal(["running", "running", "done"], seen);
+        Assert.Equal("a few minutes", SwapperSetupFlows.SwitchTime(new SwapperModel("k", "T", null, null, 1, null, "s", null, false, false, null)));
+        Assert.Equal("about a minute", SwapperSetupFlows.SwitchTime(new SwapperModel("k", "T", null, null, 1, null, "s", null, false, false, null, Eta: "about a minute")));
+    }
+
+    [Fact]
     public void TokenLabelsNameTheComputer() => Assert.Equal("DSH on TESTPC", SwapperAddress.TokenLabel("TESTPC"));
 
     // MARK: - Addresses

@@ -23,7 +23,7 @@ public sealed class SettingsWindow : Window
     [
         new(SettingsTab.General, "General", Icons.Settings),
         new(SettingsTab.Models, "Models", Icons.Robot),
-        new(SettingsTab.Spark, "DGX Spark", Icons.Bolt),
+        new(SettingsTab.Spark, "Model servers", Icons.Bolt),
         new(SettingsTab.Skills, "Skills", Icons.Education),
         new(SettingsTab.Plugins, "Plugins", Icons.Puzzle),
         new(SettingsTab.Editor, "Editor & Terminal", Icons.Code),
@@ -96,7 +96,7 @@ public sealed class SettingsWindow : Window
         _page.Content = tab switch
         {
             SettingsTab.Models => new ModelsPage(_model),
-            SettingsTab.Spark => new SparkPage(_model),
+            SettingsTab.Spark => new ModelServersPage(_model),
             SettingsTab.Skills => new SkillsManagerPage(_model, TakeAction()),
             SettingsTab.Plugins => new PluginsPage(_model),
             SettingsTab.Editor => new EditorPage(_model),

@@ -60,7 +60,7 @@ public partial class MainWindow : Window
         model.Config.PropertyChanged += OnConfigChanged;
         model.Spark.PropertyChanged += (_, e) =>
         {
-            if (e.PropertyName is nameof(SparkController.Status) or nameof(SparkController.IsSwitching)) UpdateModelLabel();
+            if (e.PropertyName is nameof(SparkController.Revision) or nameof(SparkController.IsSwitching)) UpdateModelLabel();
             if (e.PropertyName is nameof(SparkController.ConfirmTarget) && model.Spark.ConfirmTarget is not null)
                 Dispatcher.BeginInvoke(ConfirmSparkSwap);
         };
@@ -68,6 +68,7 @@ public partial class MainWindow : Window
         model.SettingsRequested += (tab, action) => ShowSettings(tab, action);
         model.WizardRequested += ShowWizard;
         model.BedrockGuideRequested += ShowBedrockGuide;
+        model.SwapperGuideRequested += ShowSwapperGuide;
         model.MemoryRequested += ShowMemory;
         model.ExternalImportRequested += ShowExternalImport;
         model.MemoriesRequested += ShowMemories;
@@ -225,7 +226,8 @@ public partial class MainWindow : Window
         ModelLabel.Text = provider is null ? "No model" : served ?? provider.Model;
         ModelButton.ToolTip = provider is null
             ? "No model configured — run the setup wizard"
-            : $"{provider.DisplayName}\n{provider.BaseUrl}" + (Model.Spark.IsSwitching ? "\nThe Spark is switching models…" : "");
+            : $"{provider.DisplayName}\n{provider.BaseUrl}" +
+              (Model.Spark.IsSwitchingFor(provider) ? $"\n{Model.Spark.BoxFor(provider)?.Name} is switching models…" : "");
     }
 
     private void UpdatePreset()
@@ -419,26 +421,25 @@ public partial class MainWindow : Window
         }
     }
 
-    /// <summary>Switching what the Spark serves takes minutes and affects every client, so ask.</summary>
+    /// <summary>Switching what a box serves takes minutes and affects every client, so ask.</summary>
     private async void ConfirmSparkSwap()
     {
         var spark = Model.Spark;
-        if (spark.ConfirmTarget is not { } target) return;
-        var current = spark.Status?.ActiveModel?.Title;
-        var eta = target.Key.Contains("flash", StringComparison.OrdinalIgnoreCase) ? "about 11 minutes" : "a few minutes";
+        if (spark.ConfirmTarget is not { } target || spark.ConfirmBox is not { } box) return;
+        var current = box.Status?.ActiveModel?.Title;
         var message = (current is null ? "" : $"{current} stops, then ") +
-                      $"{target.Title} loads ({eta}, {target.Context:N0}-token context). OpenClaw and every chat here follow it " +
+                      $"{target.Title} loads ({SwapperSetupFlows.SwitchTime(target)}, {target.EffectiveContext:N0}-token context). OpenClaw and every chat here follow it " +
                       "automatically; if it fails to load, the previous model comes back.";
         spark.ConfirmTarget = null;
-        if (!Dialog.Confirm($"Switch the Spark to {target.Title}?", message, "Switch")) return;
-        if (await spark.SwapAsync(target.Key) is { } error) Dialog.Info("Couldn't switch the Spark", error);
+        if (!Dialog.Confirm($"Switch {box.Name} to {target.Title}?", message, "Switch")) return;
+        if (await spark.SwapAsync(box, target.Key) is { } error) Dialog.Info($"Couldn't switch {box.Name}", error);
     }
 
     // MARK: - Top bar menus
 
     private void ModelButton_Click(object sender, RoutedEventArgs e)
     {
-        if (Model.Spark.IsConfigured && Model.Spark.Status is null) _ = Model.Spark.RefreshAsync();
+        if (Model.Spark.Boxes.Any(b => b.Status is null)) _ = Model.Spark.RefreshAsync();
         Menus.Open(Menus.Model(Model), (FrameworkElement)sender);
     }
 
@@ -678,6 +679,17 @@ public partial class MainWindow : Window
         var owner = OwnedWindows.OfType<Window>().FirstOrDefault(w => w.IsActive) ?? this;
         var wizard = new SetupWizardWindow(Model) { Owner = owner };
         wizard.StartBedrockGuide(page, route);
+        wizard.ShowDialog();
+        UpdateModelLabel();
+        UpdateBanner();
+    }
+
+    /// <summary>"Connect my Spark Swapper" in the setup window, over whatever window is in front (Settings, say).</summary>
+    public void ShowSwapperGuide(bool login)
+    {
+        var owner = OwnedWindows.OfType<Window>().FirstOrDefault(w => w.IsActive) ?? this;
+        var wizard = new SetupWizardWindow(Model) { Owner = owner };
+        wizard.StartSwapperGuide(login);
         wizard.ShowDialog();
         UpdateModelLabel();
         UpdateBanner();

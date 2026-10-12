@@ -77,7 +77,7 @@ public partial class ChatView : UserControl
         _model.Host.PendingDrafts.CollectionChanged += (_, _) => UpdateSkillsButton();
         _model.Spark.PropertyChanged += (_, e) =>
         {
-            if (e.PropertyName is nameof(SparkController.ProgressLine) or nameof(SparkController.Status)) UpdateSpark();
+            if (e.PropertyName is nameof(SparkController.ProgressLine) or nameof(SparkController.Revision)) UpdateSpark();
         };
         _model.Code.MentionRequested += InsertMention;
         _thinking.PropertyChanged += (_, e) =>
@@ -327,7 +327,7 @@ public partial class ChatView : UserControl
         var current = _model.Host.ActiveModelId ?? _model.Config.ActiveProvider?.Model ?? "No model";
         var limit = _model.Host.ContextLimit();
         ModelMenuText.Text = $"{current} · {Menus.ShortTokens(limit)}";
-        ModelMenuButton.ToolTip = "Model in use and its context window. Pick a Spark model to switch what the Spark serves " +
+        ModelMenuButton.ToolTip = "Model in use and its context window. Pick a Spark Swapper model to switch what that box serves " +
                                   "(also /swap), or another configured provider.";
 
         var fallback = _model.Config.ActiveProvider?.Thinking;
@@ -588,7 +588,7 @@ public partial class ChatView : UserControl
 
     private void ModelMenu_Click(object sender, RoutedEventArgs e)
     {
-        if (_model.Spark.IsConfigured && _model.Spark.Status is null) _ = _model.Spark.RefreshAsync();
+        if (_model.Spark.Boxes.Any(b => b.Status is null)) _ = _model.Spark.RefreshAsync();
         Menus.Open(Menus.Model(_model), ModelMenuButton, PlacementMode.Top);
     }
 

@@ -32,7 +32,8 @@ public enum GuidePage
 
 /// <summary>Where the user is in the guide and what they have done, saved after every step so
 /// closing the window (or the app) and coming back picks up where they left off. It never holds a
-/// password: the Spark's login is asked for again, and the Swapper's lives in Credential Manager.</summary>
+/// password: the Spark's login is asked for again, and the Swapper's lives in Credential Manager (with its
+/// connection).</summary>
 public sealed class GuideState
 {
     public GuidePage Page { get; set; } = GuidePage.Welcome;
@@ -47,6 +48,9 @@ public sealed class GuideState
     /// <summary>The certificate of the HTTPS model front on :11443, when it differs.</summary>
     public string? FrontFingerprint { get; set; }
     public bool AdminReady { get; set; }
+    /// <summary>The Swapper connection (Settings › Model servers) the guide made for this Spark; its login — or, once
+    /// the Swapper hands one out, its app token — is in Credential Manager.</summary>
+    public string? SwapperConnectionId { get; set; }
     public string? ModelKey { get; set; }
     public bool Connected { get; set; }
     public string? RecoverySource { get; set; }

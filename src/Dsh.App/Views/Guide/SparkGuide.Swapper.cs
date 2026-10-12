@@ -25,8 +25,11 @@ public sealed partial class SparkGuide
     private bool _trustingWindows;
 
     private bool CertificatePinned => _cert is not null
-                                      && string.Equals(_state.SwapperFingerprint, _cert.Fingerprint, StringComparison.OrdinalIgnoreCase)
-                                      && string.Equals(_model.Spark.PinnedFingerprint, _cert.Fingerprint, StringComparison.OrdinalIgnoreCase);
+                                      && string.Equals(_state.SwapperFingerprint, _cert.Fingerprint, StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>The Swapper connection this guide made (after the login step), from Settings › Model servers.</summary>
+    private SwapperConnection? GuideConnection =>
+        _state.SwapperConnectionId is { } id ? _model.Config.SwapperConnections.FirstOrDefault(c => c.Id == id) : null;
 
     private async Task ProbeCertificateAsync()
     {
@@ -56,10 +59,11 @@ public sealed partial class SparkGuide
     private void TrustInDsh()
     {
         if (_cert is not { } cert) return;
-        _model.Spark.Url = SwapperUrl.ToString().TrimEnd('/');
-        _model.Spark.PinnedFingerprint = cert.Fingerprint;
         _state.SwapperFingerprint = cert.Fingerprint;
         _state.Save();
+        // A connection made on an earlier run follows the certificate (a reinstall makes a new one).
+        if (GuideConnection is { } connection && connection.PinnedFingerprint != cert.Fingerprint)
+            _model.Spark.Save(connection with { PinnedFingerprint = cert.Fingerprint }, null);
     }
 
     /// <summary>Compare with the certificate file on the Spark itself, over the SSH login the user
@@ -190,13 +194,17 @@ public sealed partial class SparkGuide
     private Button? _adminGo;
     private SparkSwapperClient? _swapper;
 
-    /// <summary>A Swapper client signed in with the saved login (after this page).</summary>
+    /// <summary>A Swapper client signed in with the saved login, or the app token it was swapped for (after this page).</summary>
     private SparkSwapperClient Swapper()
     {
         if (_swapper is not null) return _swapper;
-        var spark = _model.Spark;
-        var url = Uri.TryCreate(spark.Url, UriKind.Absolute, out var saved) ? saved : SwapperUrl;
-        _swapper = new SparkSwapperClient(url, spark.Username, spark.Password, spark.PinnedFingerprint ?? _state.SwapperFingerprint);
+        if (GuideConnection is not { } connection || _model.Config.SwapperSecret(connection) is not { Length: > 0 } secret)
+            throw new InvalidOperationException("Sign in to Spark Swapper first (the \"Your Swapper login\" step).");
+        var url = connection.Address ?? SwapperUrl;
+        var pin = connection.PinnedFingerprint ?? _state.SwapperFingerprint;
+        _swapper = connection.Auth == SwapperAuth.Token
+            ? SparkSwapperClient.WithToken(url, secret, pin)
+            : new SparkSwapperClient(url, connection.Username ?? "", secret, pin);
         return _swapper;
     }
 
@@ -209,7 +217,7 @@ public sealed partial class SparkGuide
         {
             using var anonymous = new SparkSwapperClient(SwapperUrl, "", "", _state.SwapperFingerprint);
             _session = await anonymous.SessionAsync();
-            if (!_session.SetupNeeded && _state.AdminReady && _model.Spark.IsConfigured)
+            if (!_session.SetupNeeded && _state.AdminReady && GuideConnection is not null)
             {
                 // Resumed: check the saved login still works.
                 _swapper?.Dispose();
@@ -240,7 +248,7 @@ public sealed partial class SparkGuide
             Picture("swapper-setup", "Spark Swapper's first page, asking to create the admin login.", 230),
             Heading("Create your Spark Swapper login"),
             Lead("Spark Swapper has its own login, separate from the Spark's. **The first person to open its page becomes its admin** — so let's make that you, right now, before anyone else on your network could."));
-        _adminUser ??= Ui.Field(_state.SshUser ?? _model.Spark.Username, "for example: admin");
+        _adminUser ??= Ui.Field(GuideConnection?.Username ?? _state.SshUser ?? "", "for example: admin");
         _adminPassword ??= PasswordField();
         if (_adminPassword2 is null)
         {
@@ -266,7 +274,7 @@ public sealed partial class SparkGuide
         if (_state.AdminReady)
         {
             panel.Children.Add(Note(Tone.Success,
-                $"Signed in to Spark Swapper as {_model.Spark.Username}. DSH keeps this login in Windows Credential Manager, to switch models for you.",
+                $"Signed in to Spark Swapper as {GuideConnection?.Username ?? "you"}. DSH keeps this login in Windows Credential Manager for now; on the last step it swaps it for an app token, so your password isn't kept.",
                 "Your Swapper login is ready"));
             panel.Children.Add(Paragraph($"Use the same username and password in the browser at https://{SparkSetup.UrlHost(SparkHost)}:{SparkSetup.SwapperPort}. As the admin you can add logins for other people from its Users tab."));
         }
@@ -329,17 +337,27 @@ public sealed partial class SparkGuide
         {
             if (setup) await client.SetupAdminAsync();
             else await client.StatusAsync();
-            var spark = _model.Spark;
-            spark.Url = SwapperUrl.ToString().TrimEnd('/');
-            spark.Username = user;
-            spark.Password = password;
-            spark.PinnedFingerprint = _state.SwapperFingerprint;
+            // The box joins Settings › Model servers now, with this login (swapped for an app token on the last step).
+            var session = _session;
+            var connection = (GuideConnection?.DeepCopy() ?? new SwapperConnection()) with
+            {
+                Name = GuideConnection?.Name is { Length: > 0 } known ? known
+                    : SwapperConnectionCode.DefaultName(session?.Platform ?? SwapperPlatforms.DgxSpark, session?.Hostname ?? ShortName(_state.HostName ?? SparkHost), SwapperUrl.ToString()),
+                Url = SwapperUrl.ToString().TrimEnd('/'),
+                Platform = session?.Platform ?? GuideConnection?.Platform,
+                Hostname = session?.Hostname ?? GuideConnection?.Hostname,
+                Auth = SwapperAuth.Password,
+                Username = user,
+                PinnedFingerprint = _state.SwapperFingerprint,
+                ApiBase = SparkSetup.ModelBaseUrl(SparkHost),
+            };
+            _model.Spark.Save(connection, password);
+            _state.SwapperConnectionId = connection.Id;
             _swapper?.Dispose();
             _swapper = client;
             client = null;
             _state.AdminReady = true;
             _state.Save();
-            _ = spark.RefreshAsync();
         }
         catch (SwapperException error)
         {
@@ -467,24 +485,36 @@ public sealed partial class SparkGuide
                 panel.Children.Add(ready);
             }
             panel.Children.Add(Subheading("Models"));
-            var recommended = status.Ordered.FirstOrDefault(m => m.Key == "standard")?.Key ?? status.Ordered.FirstOrDefault()?.Key;
+            var recommended = status.Recommended?.Key;
             _chosenModel ??= status.Active ?? recommended;
+            var busy = _starting || (_job?.IsRunning ?? false) || status.IsSwitching;
             foreach (var m in status.Ordered)
             {
-                var detail = string.Join(" · ", new[] { m.Tagline, m.Engine, $"{m.Context:N0}-token context" }.Where(s => !string.IsNullOrWhiteSpace(s)));
+                var speed = m.Speed();
+                var detail = string.Join(" · ", new[] { m.Tagline, m.Engine, $"{m.EffectiveContext:N0}-token context", speed }.Where(s => !string.IsNullOrWhiteSpace(s)));
                 if (m.Key == status.Active) detail = "Serving now · " + detail;
                 else if (m.Key == recommended) detail = "Recommended first · " + detail;
+                if (!m.IsInstalled) detail = "Not installed" + (m.InstallSummary is { } size ? $" ({size})" : "") + " · " + detail;
                 var key = m.Key;
-                panel.Children.Add(Choice(m.Key == status.Active ? Icons.Completed : Icons.Robot, m.Title, detail, _chosenModel == key, () =>
+                panel.Children.Add(Choice(m.Key == status.Active ? Icons.Completed : m.IsInstalled ? Icons.Robot : Icons.Download, m.Title, detail, _chosenModel == key, () =>
                 {
                     _chosenModel = key;
                     _host.Render();
                 }));
             }
-            if (_chosenModel == "flash" && status.Active != "flash")
-                panel.Children.Add(Note(Tone.Warning, "Flash Next needs its model files (about 99 GB) downloaded on the Spark first, which Spark Swapper doesn't do by itself. Start with Qwen3.8 27B unless you've done that."));
-            var busy = _starting || (_job?.IsRunning ?? false) || status.IsSwitching;
-            var start = Ui.Button(_chosenModel == status.Active ? "It's running" : $"Start {TitleOf(_chosenModel ?? "")}", () => _ = StartModelAsync(_chosenModel!), accent: true);
+            var chosen = _chosenModel is { } pick ? status.AllModels.GetValueOrDefault(pick) : null;
+            if (chosen is { IsInstalled: false })
+            {
+                // Install it on its own first; starting it afterwards is the next button.
+                var install = Ui.Button($"Install on {SparkLabel}", () => _ = InstallModelAsync(chosen.Key));
+                install.IsEnabled = !busy;
+                panel.Children.Add(Note(Tone.Info,
+                    $"{chosen.Title} isn't on the Spark yet. Installing downloads it and gets it ready{(chosen.InstallSummary is { } size ? $" — {size}" : "")}. It keeps going on the Spark if you close this window.",
+                    "Not installed yet", Ui.Buttons(install)));
+            }
+            var start = Ui.Button(_chosenModel == status.Active ? "It's running"
+                : chosen is { IsInstalled: false } ? $"Install and start {TitleOf(_chosenModel ?? "")}"
+                : $"Start {TitleOf(_chosenModel ?? "")}", () => _ = StartModelAsync(_chosenModel!), accent: true);
             start.IsEnabled = !busy && _chosenModel is not null && _chosenModel != status.Active;
             panel.Children.Add(Ui.Buttons(start, Ui.Button("Refresh", () => _ = LoadModelsAsync())));
         }
@@ -533,8 +563,9 @@ public sealed partial class SparkGuide
             var docker = _provision.FirstOrDefault(i => i.Action == "docker");
             if (docker is { Present: false })
                 await RunInstallJobAsync(client, "docker", "Installing Docker with GPU support");
-            if (key == "flash" && _provision.FirstOrDefault(i => i.Action == "flash_recipe") is { Present: false })
-                await RunInstallJobAsync(client, "flash_recipe", "Getting the Flash Next recipe");
+            // A model the Spark doesn't have yet is installed first (Swapper 2.0's catalog installs).
+            if (_status?.AllModels.GetValueOrDefault(key) is { IsInstalled: false } missing)
+                await RunModelInstallAsync(client, missing);
             var swap = await client.StartSwapAsync(key);
             _job = swap;
             _jobTitle = $"Starting {TitleOf(key)}";
@@ -554,6 +585,52 @@ public sealed partial class SparkGuide
             _starting = false;
             RenderIf(GuidePage.Model);
         }
+    }
+
+    /// <summary>Install a model on the Spark on its own (the page's "Install on …"), following its log; starting it is the
+    /// next button.</summary>
+    private async Task InstallModelAsync(string key)
+    {
+        if (_status?.AllModels.GetValueOrDefault(key) is not { } model) return;
+        _starting = true;
+        _modelError = null;
+        _host.Render();
+        try
+        {
+            await RunModelInstallAsync(Swapper(), model);
+            _status = await Swapper().StatusAsync();
+            if (_status.AllModels.GetValueOrDefault(key) is { IsInstalled: true }) _modelLog.Append($"{model.Title} is installed. Press Start to run it.");
+        }
+        catch (SwapperException error) when (error.StatusCode == 409)
+        {
+            _modelError = "Another install is already running on the Spark. Wait for it to finish, then try again.";
+        }
+        catch (Exception error)
+        {
+            _modelError = error.Message;
+        }
+        finally
+        {
+            _starting = false;
+            RenderIf(GuidePage.Model);
+        }
+    }
+
+    /// <summary>Install one catalog model and follow its log until it finishes (POST /api/models/install).</summary>
+    private async Task RunModelInstallAsync(SparkSwapperClient client, SwapperModel model)
+    {
+        var title = $"Installing {model.Title}";
+        _jobTitle = title;
+        _modelLog.Append($"── {title} ──");
+        var tail = new SwapperLogTail();
+        var job = await SwapperSetupFlows.InstallModelAsync(client, model.Key, j => OnUi(() =>
+        {
+            _job = j;
+            foreach (var line in tail.Next(j)) _modelLog.Append(line.M);
+            RenderIf(GuidePage.Model);
+        }));
+        if (job is { IsFailed: true } failed) throw SwapperException.Server(500, failed.Error ?? $"{title} failed.");
+        _provision = await client.ProvisioningAsync();
     }
 
     /// <summary>Run one provisioning action and follow its log until it finishes.</summary>
@@ -676,9 +753,11 @@ public sealed partial class SparkGuide
             var model = _status.ActiveModel?.ServedId ?? credentials.ApiModel ?? _status.Ordered.FirstOrDefault()?.ServedId ?? "model";
             var profile = SparkSetup.Provider(SparkHost, model, key, pin);
             SaveProvider(profile);
+            var token = await RegisterBoxAsync(profile, cts.Token);
             _state.Connected = true;
             _state.Save();
-            Set(StepState.Done, $"DSH now talks to {profile.BaseUrl} · {model}");
+            Set(StepState.Done, $"DSH now talks to {profile.BaseUrl} · {model}" +
+                                (token ? ". Spark Swapper gave DSH an app token, so your Swapper password isn't kept." : "."));
 
             step = 3;
             if (_status.ActiveModel is null)
@@ -710,6 +789,47 @@ public sealed partial class SparkGuide
             _connectBusy = false;
             RenderIf(GuidePage.Connect);
         }
+    }
+
+    /// <summary>Put the Spark in Settings › Model servers for switching models, linked to its route. A Swapper 2.0 hands
+    /// out an app token (labelled "DSH on &lt;this PC&gt;"), which is kept instead of the Swapper password; an older one keeps
+    /// the login. Returns whether a token is kept.</summary>
+    private async Task<bool> RegisterBoxAsync(ProviderProfile route, CancellationToken cancellationToken)
+    {
+        if (GuideConnection is not { } connection) return false;
+        var updated = connection with
+        {
+            ApiBase = route.BaseUrl,
+            Platform = _status?.Platform ?? connection.Platform,
+            Hostname = _status?.Hostname ?? connection.Hostname,
+            RouteIds = connection.RouteIds.Where(id => _model.Config.Providers.Any(p => p.RouteId == id)).Append(route.RouteId).Distinct().ToList(),
+        };
+        string? secret = null;
+        if (connection.Auth == SwapperAuth.Password)
+        {
+            try
+            {
+                if (await Swapper().CreateTokenAsync(SwapperAddress.TokenLabel(), cancellationToken) is { } grant)
+                {
+                    updated = updated with
+                    {
+                        Auth = SwapperAuth.Token,
+                        Name = grant.Connect?.Name ?? updated.Name,
+                        Platform = grant.Connect?.Platform ?? updated.Platform,
+                        Hostname = grant.Connect?.Hostname ?? updated.Hostname,
+                    };
+                    secret = grant.Token; // replaces the password in Credential Manager
+                }
+            }
+            catch (SwapperException)
+            {
+                // The login keeps working; switching models doesn't need the token.
+            }
+        }
+        _model.Spark.Save(updated, secret);
+        _swapper?.Dispose();
+        _swapper = null;
+        return updated.Auth == SwapperAuth.Token;
     }
 
     /// <summary>Make the Spark DSH's model route (replacing an older route to the same address), with
@@ -798,7 +918,7 @@ public sealed partial class SparkGuide
         again.IsEnabled = !_connectBusy;
         if (!_connectBusy && _connect.Any(s => s.State is StepState.Failed or StepState.Warning)) panel.Children.Add(Ui.Buttons(again));
 
-        panel.Children.Add(Aside($"DSH saved a model route named \"{SparkSetup.ProviderName}\" pointing at https://{SparkSetup.UrlHost(SparkHost)}:{SparkSetup.ModelFrontPort}/v1, with the Spark's certificate pinned (DSH accepts exactly that certificate there) and the model key in Windows Credential Manager. It also saved Spark Swapper's address and login, so /swap and Settings › DGX Spark can switch models. Everything is editable in Settings."));
+        panel.Children.Add(Aside($"DSH saved a model route named \"{SparkSetup.ProviderName}\" pointing at https://{SparkSetup.UrlHost(SparkHost)}:{SparkSetup.ModelFrontPort}/v1, with the Spark's certificate pinned (DSH accepts exactly that certificate there) and the model key in Windows Credential Manager. It also added the Spark to Settings › Model servers — with an app token from Spark Swapper when it hands one out, otherwise its login — so /swap and the model menu can switch models. Everything is editable in Settings."));
         panel.Children.Add(Stuck("\"Couldn't reach the model server\": a model may still be loading — wait for it on the previous page. \"Replied 401\": the key changed on the Spark; press Try again to fetch it anew."));
         return panel;
     }
@@ -815,7 +935,7 @@ public sealed partial class SparkGuide
             Bullets(
                 (Icons.Chat, "**Chat.** Start a new chat — it runs on your Spark, privately, on your own network."),
                 (Icons.Sync, "**Switch models.** Type /swap in a chat (or /swap flash), or use the model menu under the message box. Every chat follows the switch."),
-                (Icons.Globe, $"**Manage the Spark** in Spark Swapper: {swapper} — bookmark it. In DSH: Settings › DGX Spark."),
+                (Icons.Globe, $"**Manage the Spark** in Spark Swapper: {swapper} — bookmark it. In DSH: Settings › Model servers."),
                 (Icons.Up, "**Update Spark Swapper** later: run this guide again, choose \"It's already set up\", and on its install step press \"Reinstall or update Spark Swapper\" — or on the Spark: git -C ~/spark-swapper pull && sudo bash ~/spark-swapper/deploy/install.sh"),
                 (Icons.Lock, "**Forgot the Swapper login?** On the Spark run sudo spark-swapper-reset-login, then open its page and create a new one."),
                 (Icons.Document, $"**Logs.** Spark Swapper: journalctl -u spark-swapper -f on the Spark. DSH: {AppPaths.Logs}")),
