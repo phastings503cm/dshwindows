@@ -122,6 +122,11 @@ public sealed class SelfTest
                 await ShowAndCapture(settings, $"settings-{tab.ToString().ToLowerInvariant()}");
             }
 
+            // Settings › Model servers with two made-up boxes (nothing is contacted or saved).
+            ShowDemoBoxes(model);
+            await ShowAndCapture(new SettingsWindow(model, SettingsTab.Spark, null) { Owner = window, Width = 1000, Height = 720 }, "settings-model-servers");
+            model.Spark.HideDemoBoxes();
+
             var wizard = new SetupWizardWindow(model) { Owner = window };
             await ShowAndCapture(wizard, "wizard");
 
@@ -129,6 +134,13 @@ public sealed class SelfTest
 
             var memory = new MemoryWindow(model) { Owner = window };
             await ShowAndCapture(memory, "memory");
+
+            // A chat without a project: its own openers, and the memory window with what applies to every chat.
+            var plain = model.NewPlainChat();
+            model.Select(plain.Id);
+            await Settle();
+            Capture(window, "plain-chat");
+            await ShowAndCapture(new MemoryWindow(model) { Owner = window }, "memory-plain");
 
             await CaptureImport(window, model);
 
@@ -240,6 +252,60 @@ public sealed class SelfTest
             try { bedrock.Close(); } catch (Exception) { }
         }
 
+        // Connecting a Spark Swapper with its connection code, with sample state (no network).
+        var swapper = new SetupWizardWindow(model) { Owner = owner, WindowStartupLocation = WindowStartupLocation.CenterOwner };
+        try
+        {
+            swapper.Show();
+            foreach (var page in Enum.GetValues<SwapperPage>())
+            {
+                swapper.ShowSwapperDemo(page);
+                await Settle(900);
+                Capture(swapper, $"swapper-{page.ToString().ToLowerInvariant()}");
+                if (page is SwapperPage.Model or SwapperPage.Role or SwapperPage.Done)
+                {
+                    swapper.ScrollGuide(0.6);
+                    await Settle(400);
+                    Capture(swapper, $"swapper-{page.ToString().ToLowerInvariant()}-more");
+                }
+            }
+        }
+        catch (Exception error)
+        {
+            Fail("swapper guide", error);
+        }
+        finally
+        {
+            try { swapper.Close(); } catch (Exception) { }
+        }
+
+        // Connecting a subscription plan (the Qwen Coding Plan), with sample state (no network).
+        var subscription = new SetupWizardWindow(model) { Owner = owner, WindowStartupLocation = WindowStartupLocation.CenterOwner };
+        try
+        {
+            subscription.Show();
+            foreach (var page in Enum.GetValues<PlanPage>())
+            {
+                subscription.ShowPlanDemo(page);
+                await Settle(900);
+                Capture(subscription, $"subscription-{page.ToString().ToLowerInvariant()}");
+                if (page is PlanPage.Choose or PlanPage.Key or PlanPage.Role)
+                {
+                    subscription.ScrollGuide(0.6);
+                    await Settle(400);
+                    Capture(subscription, $"subscription-{page.ToString().ToLowerInvariant()}-more");
+                }
+            }
+        }
+        catch (Exception error)
+        {
+            Fail("subscription guide", error);
+        }
+        finally
+        {
+            try { subscription.Close(); } catch (Exception) { }
+        }
+
         var scanning = new SetupWizardWindow(model) { Owner = owner, WindowStartupLocation = WindowStartupLocation.CenterOwner, Height = 760 };
         try
         {
@@ -337,13 +403,21 @@ public sealed class SelfTest
         var chat = model.NewChat();
         chat.Title = "Fix the negative stock bug";
         chat.AppendMessage(MessageRole.User, "Removing more items than we have makes the stock go negative in the report. Can you find and fix it, and add a test?");
-        chat.AppendMessage(MessageRole.Assistant,
+        var reply = chat.AppendMessage(MessageRole.Assistant,
             "I'll look at how stock is removed, then add a regression test.\n\n" +
             "## What I found\n\n`Stock.Remove` clamps the **stored** level at zero, but the report reads the *unclamped* value:\n\n" +
             "```csharp\nvar level = _levels.GetValueOrDefault(sku) - count;\n_levels[sku] = Math.Max(0, level);\n```\n\n" +
             "| Case | Before | After |\n|---|---|---|\n| remove 3 of 2 | -1 | 0 |\n| remove 2 of 5 | 3 | 3 |\n\n" +
             "1. Return the clamped level\n2. Add `RemovingMoreThanInStockStopsAtZero`\n3. Run the tests");
+        // The shield's chip: what was masked before the request went to a model that isn't private (counts, never values).
+        if (chat.Entries.LastOrDefault(e => e.Id == reply) is MessageEntryVM masked)
+        {
+            var report = new ShieldReport("Kimi Code", new Dictionary<SensitiveKind, int> { [SensitiveKind.Email] = 2, [SensitiveKind.Secret] = 1 }, false);
+            masked.Shield = report.Summary;
+            masked.ShieldDetails = report.Details;
+        }
         var at = DateTimeOffset.Now;
+        chat.AddFinishedTool("t0", "use_skill", "release-notes", "Loaded the skill", "Group by area, lead with what users notice.", true, at);
         chat.AddFinishedTool("t1", "read_file", "src/Stock.cs", "22 lines", "using System;\n...", true, at);
         chat.AddFinishedTool("t2", "grep", "Remove\\(", "3 matches in 2 files", "src/Stock.cs:13\ntests/StockTests.cs:8", true, at);
         chat.AddFinishedTool("t3", "run_shell_command", "dotnet test --no-build", "exit 1 — 1 failed",
@@ -366,6 +440,47 @@ public sealed class SelfTest
         chat.Running = true;
         chat.PendingGates.Add(new GateVM("g1", "run_shell_command", "dotnet add tests package FluentAssertions --version 6.12.0"));
         return chat;
+    }
+
+    /// <summary>Two Spark Swapper boxes for Settings › Model servers: a DGX Spark serving one model while it installs
+    /// another (with one more it doesn't have), and a Strix Halo that isn't answering.</summary>
+    private void ShowDemoBoxes(AppModel model)
+    {
+        try
+        {
+            var status = JsonSerializer.Deserialize<SwapperStatus>("""
+                {"active": "tf27b", "busy": false, "version": "2.0.0", "platform": "nvidia-gb10", "hostname": "spark-3f2a",
+                 "models": {
+                   "tf27b": {"key": "tf27b", "title": "Qwen3.8 27B", "context": 262144, "served_id": "Qwen3.8-27B", "running": true, "healthy": true,
+                             "order": 1, "installed": true, "recommended": true, "eta": "about a minute",
+                             "perf": {"decode": 58.3, "estimate": false}, "measured": {"decode": 27.1, "at": 1791234567.0}},
+                   "tfflash": {"key": "tfflash", "title": "Qwen3.8 Flash Next", "context": 524288, "served_id": "Qwen3.8-Flash-Next", "running": false,
+                               "healthy": false, "order": 2, "installed": false, "recommended": true, "eta": "a few minutes",
+                               "perf": {"decode": 64.4, "estimate": false}, "install": {"size_gb": 165, "time": "1–2 hours"}},
+                   "nemotron": {"key": "nemotron", "title": "Nemotron 3.5 Lightning", "context": 262144, "served_id": "nemotron", "running": false,
+                                "healthy": false, "order": 3, "installed": true, "perf": {"decode": 124.2, "estimate": true}},
+                   "gptoss": {"key": "gptoss", "title": "gpt-oss 120B", "context": 131072, "served_id": "openai/gpt-oss-120b", "running": false,
+                              "healthy": false, "order": 4, "installed": false, "perf": {"decode": 41.0, "estimate": true},
+                              "install": {"size_gb": 65, "time": "15–30 minutes"}}}}
+                """, SwapperStatus.Json);
+            var started = DateTimeOffset.UtcNow.AddMinutes(-3).ToUnixTimeMilliseconds() / 1000.0;
+            var install = new SwapperJob("i1", "install:model:tfflash", "dsh", "running", null, null, started, null,
+                [new SwapperStep("download", "Downloading the model", "running"), new SwapperStep("build", "Building the engine", "pending")]);
+            model.Spark.ShowDemoBox(new SwapperConnection
+            {
+                Name = "DGX Spark (spark-3f2a)", Url = "https://192.168.1.42:8999", Platform = SwapperPlatforms.DgxSpark, Hostname = "spark-3f2a",
+                ApiBase = "https://192.168.1.42:11443/v1",
+            }, status, install: install);
+            model.Spark.ShowDemoBox(new SwapperConnection
+            {
+                Name = "Strix Halo (halo)", Url = "https://halo.local:8999", Platform = SwapperPlatforms.StrixHalo, Hostname = "halo",
+                Auth = SwapperAuth.Password, Username = "alice",
+            }, null, error: "Couldn't reach the Swapper at https://halo.local:8999. Is the box on and on this network?");
+        }
+        catch (Exception error)
+        {
+            Fail("model servers", error);
+        }
     }
 
     /// <summary>A queue with one task in each state.</summary>
