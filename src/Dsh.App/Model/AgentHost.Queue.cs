@@ -98,8 +98,9 @@ public sealed partial class AgentHost
     public QueueTask QueueAdd(string title, string details = "", bool atFront = false)
     {
         // The task runs in the project it was queued in, even if the app has moved on to another
-        // project by the time its turn comes.
-        var cwd = ProjectContext?.Root ?? Selected?.WorkspacePath;
+        // project by the time its turn comes — or, added while a chat without a project is open, in that
+        // chat's scratch folder.
+        var cwd = Selected is { IsPlain: true } plain ? plain.WorkingFolder : ProjectContext?.Root ?? Selected?.WorkspacePath;
         var task = Queue.Add(title, details, atFront, cwd);
         return Queue.Find(task.Id) ?? task;
     }
@@ -365,7 +366,9 @@ public sealed partial class AgentHost
             }
             else
             {
-                var cwd = task.Cwd ?? ProjectContext?.Root ?? Sessions.FirstOrDefault()?.WorkspacePath;
+                // (A task with no folder at all runs as a chat without a project, in a scratch folder of its own — never in
+                // whichever project some other chat happens to have.)
+                var cwd = task.Cwd ?? ProjectContext?.Root;
                 vm = NewSession(cwd, select: false);
                 RenameSession(vm.Id, $"🚀 {task.Title}");
                 Queue.AttachSession(taskId, vm.Id);

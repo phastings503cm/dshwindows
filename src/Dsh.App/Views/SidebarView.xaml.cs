@@ -145,8 +145,12 @@ public partial class SidebarView : UserControl
 
     private void Delete(SessionVM session)
     {
-        if (Dialog.Confirm($"Delete “{session.Title}”?", "The conversation is removed from this computer. This can't be undone.",
-                "Delete", destructive: true))
+        var message = "The conversation is removed from this computer. This can't be undone.";
+        // A chat without a project may have made files in its scratch folder: say where they go.
+        if (session.IsPlain && PlainChat.FileCount(session.Id) is var files and > 0)
+            message += $" The {(files == 1 ? "file" : $"{(files >= 1000 ? "1,000+" : files.ToString(System.Globalization.CultureInfo.CurrentCulture))} files")} it made in its scratch folder " +
+                       $"({PlainChat.Folder(session.Id)}) {(files == 1 ? "goes" : "go")} to the Recycle Bin.";
+        if (Dialog.Confirm($"Delete “{session.Title}”?", message, "Delete", destructive: true))
             _model.Host.DeleteSession(session.Id);
     }
 

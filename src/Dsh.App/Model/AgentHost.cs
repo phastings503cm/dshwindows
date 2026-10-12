@@ -234,11 +234,26 @@ public sealed partial class AgentHost : ObservableObject
         Config.SetSkillsFor(id, null);
         Log.Delete(id);
         _pendingShield.Remove(id);
+        var cwd = Session(id)?.Cwd;
         if (Session(id) is { } vm) Sessions.Remove(vm);
-        // A chat without a project takes its scratch folder with it — unless a queue task it added still works there.
-        var scratch = PlainChat.Folder(id);
-        if (!Sessions.Any(s => string.Equals(s.Cwd, scratch, StringComparison.OrdinalIgnoreCase))) PlainChat.Delete(id);
+        // A chat without a project takes its scratch folder with it (to the Recycle Bin) — unless something still works
+        // there: a chat, or a queue task it added that hasn't finished. (A queue task's chat working in another chat's folder
+        // takes that folder along when it is the last to go.)
+        ForgetScratch(id);
+        if (PlainChat.IsScratch(cwd) && Path.GetFileName(cwd!.TrimEnd('\\', '/')) is { Length: > 0 } owner && owner != id && Session(owner) is null)
+            ForgetScratch(owner);
         if (SelectedId == id) SelectedId = Sessions.FirstOrDefault()?.Id;
+    }
+
+    /// <summary>Move chat <paramref name="chatId"/>'s scratch folder to the Recycle Bin, unless a chat or an unfinished queue task
+    /// still works in it.</summary>
+    private void ForgetScratch(string chatId)
+    {
+        var scratch = PlainChat.Folder(chatId);
+        static bool Same(string? a, string b) => a is not null && string.Equals(a.TrimEnd('\\', '/'), b.TrimEnd('\\', '/'), StringComparison.OrdinalIgnoreCase);
+        if (Sessions.Any(s => Same(s.Cwd, scratch))) return;
+        if (Queue.Tasks.Any(t => t.Status is QueueTaskStatus.Queued or QueueTaskStatus.Running or QueueTaskStatus.Blocked && Same(t.Cwd, scratch))) return;
+        PlainChat.Delete(chatId);
     }
 
     public void RenameSession(string id, string title)

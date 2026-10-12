@@ -60,6 +60,38 @@ public sealed class PlainChatTests : IDisposable
     }
 
     [Fact]
+    public void ADeletedChatsFilesGoToTheRecycleBin()
+    {
+        var recycled = new List<string>();
+        PlainChat.RecycleBin = path =>
+        {
+            recycled.Add(path);
+            Directory.Delete(path, recursive: true);
+            return true;
+        };
+        try
+        {
+            var folder = PlainChat.Ensure(PlainChat.Folder("chat-2"));
+            File.WriteAllText(Path.Combine(folder, "report.csv"), "a,b");
+            Directory.CreateDirectory(Path.Combine(folder, "out"));
+            File.WriteAllText(Path.Combine(folder, "out", "chart.png"), "png");
+            Assert.Equal(2, PlainChat.FileCount("chat-2"));
+            PlainChat.Delete("chat-2");
+            Assert.Equal([folder], recycled);
+            // An empty folder has nothing to get back: it is just removed.
+            var empty = PlainChat.Ensure(PlainChat.Folder("chat-3"));
+            PlainChat.Delete("chat-3");
+            Assert.False(Directory.Exists(empty));
+            Assert.Single(recycled);
+            Assert.Equal(0, PlainChat.FileCount("chat-3"));
+        }
+        finally
+        {
+            PlainChat.RecycleBin = null;
+        }
+    }
+
+    [Fact]
     public void TheEnvironmentNamesTheScratchFolderForWhatItIs()
     {
         var block = ProjectContext.EnvironmentBlock("/tmp/chats/x", "m", PermissionPreset.WorkspaceWrite, scratch: true);

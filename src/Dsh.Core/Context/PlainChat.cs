@@ -5,7 +5,8 @@ namespace Dsh.Core;
 // A chat with no project folder is a regular conversation, not a coding session: the model is told so, is never
 // nudged towards opening a folder, and gets a scratch folder of the chat's own for the times it does need files
 // or commands (a skill that runs a script, a document to draft, data to convert). The scratch folder is
-// %APPDATA%\DSH\Chats\<chat id>\ (or the portable data folder), made on first use and deleted with the chat.
+// %APPDATA%\DSH\Chats\<chat id>\ (or the portable data folder), made on first use and moved to the Recycle Bin with
+// the chat — files the agent made there can still be got back.
 
 public static class PlainChat
 {
@@ -64,13 +65,41 @@ public static class PlainChat
         return folder;
     }
 
-    /// <summary>Delete a chat's scratch folder (the chat was deleted). Only ever a folder under <see cref="Root"/>.</summary>
+    /// <summary>Moves a folder to the Recycle Bin (the app sets it; returns false when that failed). Unset (tests, other
+    /// platforms), a deleted chat's folder is deleted outright.</summary>
+    public static Func<string, bool>? RecycleBin { get; set; }
+
+    /// <summary>How many files a chat's scratch folder holds (0 when there is none), counting no further than
+    /// <paramref name="upTo"/>.</summary>
+    public static int FileCount(string chatId, int upTo = 1000)
+    {
+        var folder = Folder(chatId);
+        if (!Directory.Exists(folder)) return 0;
+        try
+        {
+            return Directory.EnumerateFiles(folder, "*", SearchOption.AllDirectories).Take(upTo).Count();
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            return 0;
+        }
+    }
+
+    /// <summary>Remove a chat's scratch folder (the chat was deleted): to the Recycle Bin when the app can, so files the
+    /// agent made there can be got back. Only ever a folder under <see cref="Root"/>.</summary>
     public static void Delete(string chatId)
     {
         var folder = Folder(chatId);
         if (!IsScratch(folder) || !Directory.Exists(folder)) return;
         try
         {
+            if (RecycleBin is { } recycle)
+            {
+                // An empty folder has nothing to get back.
+                if (Directory.EnumerateFileSystemEntries(folder).Any()) recycle(folder);
+                else Directory.Delete(folder);
+                return;
+            }
             Directory.Delete(folder, recursive: true);
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
