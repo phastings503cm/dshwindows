@@ -3,7 +3,7 @@ using System.Text;
 
 namespace Dsh.Core;
 
-/// <summary>Secrets (API keys, the Spark password) in Windows Credential Manager — never in the
+/// <summary>Secrets (API keys, Swapper tokens and passwords) in Windows Credential Manager — never in the
 /// settings file. Entries show up under "Windows Credentials" as DSH/…. On other platforms (tests)
 /// secrets live in memory for the life of the process.</summary>
 public static class SecretStore
@@ -17,7 +17,10 @@ public static class SecretStore
     private static bool UseCredentialManager => OperatingSystem.IsWindows() && !UseMemoryOnly;
 
     public static string ProviderTarget(string routeId) => $"DSH/provider/{routeId}";
+    /// <summary>The one Swapper login of versions before several boxes; read once, to move it to its connection.</summary>
     public const string SparkTarget = "DSH/spark/login";
+    /// <summary>A Swapper connection's app token or password.</summary>
+    public static string SwapperTarget(string connectionId) => $"DSH/swapper/{connectionId}";
 
     public static string? Read(string target)
     {

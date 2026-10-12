@@ -330,7 +330,8 @@ public sealed class SparkInstaller(ISparkConnection connection, string password)
     /// <summary>Installs nginx if needed and serves https://&lt;spark&gt;:11443 — /v1/ goes to the model
     /// API on 127.0.0.1:8888 (unbuffered, so replies stream), everything else to the OpenClaw gateway
     /// (the Swapper's "dashboard" link points there). Uses the Swapper's certificate so one fingerprint
-    /// covers both. Leaves an existing :11443 setup alone.</summary>
+    /// covers both. Leaves an existing :11443 setup alone — including the one Spark Swapper 2.0 writes itself (it
+    /// marks the file "Written by Spark Swapper" and enforces the API key at nginx).</summary>
     public const string ModelFrontScript = """
         #!/usr/bin/env bash
         # Written by DSH for Windows: an HTTPS front on :11443 for the Spark's model API.
@@ -340,6 +341,10 @@ public sealed class SparkInstaller(ISparkConnection connection, string password)
         PORT=11443
         CONF=/etc/nginx/conf.d/spark-model-front.conf
         say() { printf '==> %s\n' "$*"; }
+        if [[ -f $CONF ]] && grep -qs "Written by Spark Swapper" "$CONF"; then
+          say "Spark Swapper manages the HTTPS front."
+          exit 0
+        fi
         if [[ ! -s $CERT || ! -s $KEY ]]; then
           echo "Spark Swapper's certificate is missing ($CERT). Install Spark Swapper first." >&2
           exit 2
