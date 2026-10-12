@@ -101,12 +101,19 @@ public sealed class SensitiveDataTests
     [InlineData("378282246310005", true)]            // Amex, 15 digits
     [InlineData("4111 1111 1111 1112", false)]       // fails Luhn
     [InlineData("1234567890123", false)]
+    [InlineData("1791827673618", false)]             // a millisecond timestamp: 13 digits, starts like no card
+    [InlineData("17918276736181", false)]            // Luhn-valid by chance, but no card network starts with 1
+    [InlineData("5555555555554444", true)]           // Mastercard
     public void CardNumbersNeedToPassLuhn(string card, bool expected)
     {
         var found = Found($"card: {card} thanks");
         Assert.Equal(expected, found.Contains((card, SensitiveKind.Card)));
         if (!expected) Assert.DoesNotContain(found, f => f.Kind == SensitiveKind.Card);
     }
+
+    [Fact]
+    public void QuotedJsonKeysCountAsAssignments() =>
+        Masks("{\"password\": \"hunter2hunter2\"}", "hunter2hunter2", SensitiveKind.Secret);
 
     [Fact]
     public void ACardBesideOtherDigitsIsStillFound() => Masks("4111 1111 1111 1111 2024", "4111 1111 1111 1111", SensitiveKind.Card);

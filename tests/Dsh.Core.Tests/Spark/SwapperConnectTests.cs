@@ -105,6 +105,24 @@ public sealed class FakeSwapper2 : IAsyncDisposable
 
 public sealed class SwapperConnectTests
 {
+    /// <summary>A code made by Spark Swapper 2.0's own encoder (swapper/tokens.py connection_code), so the two
+    /// sides can't drift apart unnoticed.</summary>
+    [Fact]
+    public void ACodeFromSparkSwapperItselfDecodes()
+    {
+        var code = SwapperConnectionCode.Parse("SSC1:eyJ2IjoxLCJuYW1lIjoiREdYIFNwYXJrIChzcGFyay0zZjJhKSIsImhvc3RuYW1lIjoic3BhcmstM2YyYSIsInBsYXRmb3JtIjoibnZpZGlhLWdiMTAiLCJ2ZXJzaW9uIjoiMi4wLjAiLCJzd2FwcGVyX3VybCI6Imh0dHBzOi8vMTkyLjE2OC4xLjQyOjg5OTkiLCJhcGlfYmFzZSI6Imh0dHBzOi8vMTkyLjE2OC4xLjQyOjExNDQzL3YxIiwiYXBpX2tleSI6InNrLXNwYXJrLTAxMjM0NTY3ODlhYmNkZWYwMTIzNDU2Nzg5YWJjZGVmMDEyMzQ1NjciLCJtb2RlbCI6IlF3ZW4zLjgtMjdCIiwiY29udGV4dCI6MjYyMTQ0LCJmaW5nZXJwcmludCI6IjNBOjlGOkMyOjAwOjExOjIyOjMzOjQ0OjU1OjY2Ojc3Ojg4Ojk5OkFBOkJCOkNDOkREOkVFOkZGOjAxOjIzOjQ1OjY3Ojg5OkFCOkNEOkVGOjEwOjMyOjU0Ojc2Ojk4IiwidG9rZW4iOiJzc3RfMWEyYjNjNGRfWm05dlltRnlMV0poZWkxeGRYVjRMVEF4TWpNME5UWTNPRGt0WVdKalpHVm0tX3giLCJ1c2VyIjoicGF0In0");
+        Assert.Equal("DGX Spark (spark-3f2a)", code.Name);
+        Assert.Equal("nvidia-gb10", code.Platform);
+        Assert.Equal("https://192.168.1.42:8999", code.SwapperUrl);
+        Assert.Equal("https://192.168.1.42:11443/v1", code.ApiBase);
+        Assert.Equal("sk-spark-0123456789abcdef0123456789abcdef01234567", code.ApiKey);
+        Assert.Equal("Qwen3.8-27B", code.Model);
+        Assert.Equal(262144, code.Context);
+        Assert.Equal("3A:9F:C2:00:11:22:33:44:55:66:77:88:99:AA:BB:CC:DD:EE:FF:01:23:45:67:89:AB:CD:EF:10:32:54:76:98", code.Fingerprint);
+        Assert.Equal("sst_1a2b3c4d_Zm9vYmFyLWJhei1xdXV4LTAxMjM0NTY3ODktYWJjZGVm-_x", code.Token);
+        Assert.Equal("pat", code.User);
+    }
+
     private const string Fingerprint = "3A:9F:00:11:22:33:44:55:66:77:88:99:AA:BB:CC:DD:EE:FF:00:11:22:33:44:55:66:77:88:99:AA:BB:CC:C2";
 
     private static JsonObject Fields(Action<JsonObject>? change = null)

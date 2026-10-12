@@ -178,8 +178,8 @@ public sealed partial class SensitiveDetector
     [GeneratedRegex(@"\b[A-Za-z][A-Za-z0-9+.\-]*://[^\s/:@]+:([^\s/@]+)@", RegexOptions.CultureInvariant)]
     private static partial Regex UrlPassword();
 
-    /// <summary>password = …, api_key: …, token=…: the value is the secret.</summary>
-    [GeneratedRegex(@"(password|passwd|pwd|secret|api[_-]?key|token|access[_-]?key)\s*[:=]\s*[""']?([^\s""']{6,})",
+    /// <summary>password = …, api_key: …, token=…, "password": "…" (JSON, YAML): the value is the secret.</summary>
+    [GeneratedRegex(@"(password|passwd|pwd|secret|api[_-]?key|token|access[_-]?key)[""']?\s*[:=]\s*[""']?([^\s""']{6,})",
         RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
     private static partial Regex Assignment();
 
@@ -310,13 +310,15 @@ public sealed partial class SensitiveDetector
         return false;
     }
 
-    /// <summary>The card number inside a run of digits (13–19 of them, passing Luhn): the whole run, or a run of whole
-    /// groups from its start or its end (a card written next to other digits). Null when there's none.</summary>
+    /// <summary>The card number inside a run of digits (14–19 of them, starting like a card network's numbers and
+    /// passing Luhn): the whole run, or a run of whole groups from its start or its end (a card written next to other
+    /// digits). Null when there's none.</summary>
     internal static (int Offset, int Length)? CardWithin(string run)
     {
         static string Digits(string s) => new(s.Where(char.IsAsciiDigit).ToArray());
+        static bool IsCard(string d) => d.Length is >= 14 and <= 19 && HasCardPrefix(d) && d.Distinct().Count() > 1 && Luhn(d);
         var all = Digits(run);
-        if (all.Length is >= 13 and <= 19 && Luhn(all)) return (0, run.Length);
+        if (IsCard(all)) return (0, run.Length);
         // Groups split by the separators: try the longest leading and trailing runs of whole groups.
         var groups = new List<(int Start, int Length)>();
         var start = 0;
@@ -335,10 +337,27 @@ public sealed partial class SensitiveDetector
                 var last = groups[from + take - 1];
                 var piece = run.Substring(first.Start, last.Start + last.Length - first.Start);
                 var digits = Digits(piece);
-                if (digits.Length is >= 13 and <= 19 && Luhn(digits)) return (first.Start, piece.Length);
+                if (IsCard(digits)) return (first.Start, piece.Length);
             }
         }
         return null;
+    }
+
+    /// <summary>Whether digits start like a card people carry (Visa, Mastercard, Amex, Discover, JCB, Diners,
+    /// UnionPay). A tenth of any digit run passes Luhn by chance; this keeps millisecond timestamps (17…) and other
+    /// long numbers in code from being taken for cards.</summary>
+    internal static bool HasCardPrefix(string d)
+    {
+        int Prefix(int n) => d.Length >= n ? int.Parse(d[..n], System.Globalization.CultureInfo.InvariantCulture) : -1;
+        return d[0] switch
+        {
+            '4' => true,
+            '5' => Prefix(2) is >= 51 and <= 55,
+            '2' => Prefix(4) is >= 2221 and <= 2720,
+            '3' => Prefix(2) is 34 or 37 or 35 or 36 or 38 or 39 || Prefix(3) is >= 300 and <= 305,
+            '6' => Prefix(4) == 6011 || Prefix(2) is 65 or 62 || Prefix(3) is >= 644 and <= 649,
+            _ => false,
+        };
     }
 
     /// <summary>The Luhn checksum card numbers carry.</summary>

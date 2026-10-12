@@ -103,7 +103,8 @@ public sealed class ModelServersPage : UserControl
             IconButton(Icons.Delete, "Remove", () =>
             {
                 if (!Dialog.Confirm($"Remove {box.Name}?",
-                        "DSH forgets this box and its connection. Its models stay where they are, and its routes in AI Models stay too.",
+                        "DSH forgets this box and its connection. Its models stay where they are, and its routes in AI Models stay too. " +
+                        "The box still lists this app's connection: revoke it on the Swapper's Connect tab if you won't use it again.",
                         "Remove", destructive: true)) return;
                 spark.Remove(box);
             }));

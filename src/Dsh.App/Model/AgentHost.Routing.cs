@@ -27,7 +27,6 @@ public sealed partial class AgentHost
     private ShieldOptions? ShieldFor(string? sessionId)
     {
         var privacy = Config.Privacy;
-        if (!privacy.Mask) return null;
         IReadOnlyList<string> vault;
         try
         {
@@ -37,10 +36,13 @@ public sealed partial class AgentHost
         {
             vault = [];
         }
+        // The vault's secrets are masked even with the switch off (as in DSH for macOS); with it off and an empty
+        // vault there is nothing to do.
+        if (!privacy.Mask && vault.Count == 0) return null;
         return new ShieldOptions
         {
-            Categories = privacy.Categories,
-            CustomTerms = privacy.TermLines,
+            Categories = privacy.Mask ? privacy.Categories : SensitiveCategories.None,
+            CustomTerms = privacy.Mask ? privacy.TermLines : [],
             VaultSecrets = vault,
             Report = sessionId is null ? null : report => _dispatcher.BeginInvoke(DispatcherPriority.Normal, () => OnShieldReport(sessionId, report)),
         };
