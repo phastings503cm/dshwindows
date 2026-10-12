@@ -34,6 +34,9 @@ public sealed class FleetServer
     /// <summary>May see sensitive data unmasked (see <see cref="ProviderProfile.IsPrivateRoute"/>): a sensitive task runs
     /// only on such a server.</summary>
     public bool IsPrivate { get; init; }
+    /// <summary>Its plan's terms allow only interactive use (see <see cref="ProviderProfile.IsInteractiveOnly"/>): unattended
+    /// work — the task queue, a /goal carrying on by itself — never runs on it.</summary>
+    public bool InteractiveOnly { get; init; }
     /// <summary>How many subagents may work on it at once.</summary>
     public int MaxParallel { get; init; } = 2;
     /// <summary>Probe the server and return its client. Throws if it can't be reached.</summary>
@@ -45,6 +48,13 @@ public sealed record FleetStatus(string Id, string Label, bool IsPrimary, int In
 
 /// <summary>No configured server answered.</summary>
 public class FleetUnavailableException(string message, Exception? inner = null) : Exception(message, inner);
+
+/// <summary>Unattended work, and every server that could take it is for interactive use only.</summary>
+public sealed class NoUnattendedServerException() : FleetUnavailableException(Text)
+{
+    /// <summary>What the model is told.</summary>
+    public const string Text = "The model servers that could take this task are for interactive use only under their plans' terms, so unattended work can't run there. Do it yourself.";
+}
 
 /// <summary>A sensitive task, and no private server to run it on.</summary>
 public sealed class NoPrivateServerException(Exception? inner = null) : FleetUnavailableException(Text, inner)
@@ -176,8 +186,9 @@ public sealed class AgentFleet
     /// A <paramref name="sensitive"/> task goes only to a private server: a private worker, or the primary when it is
     /// private and may take subagents (always, when there are no workers at all).
     /// Throws <see cref="FleetUnavailableException"/> when no server can be reached, and
-    /// <see cref="NoPrivateServerException"/> when a sensitive task has no private server to go to.</summary>
-    public async Task<FleetLease> AcquireAsync(string? preferred, CancellationToken cancellationToken, bool sensitive = false)
+    /// <see cref="NoPrivateServerException"/> when a sensitive task has no private server to go to. <paramref name="unattended"/>
+    /// work (the queue, a /goal carrying on by itself) never goes to a server whose plan allows only interactive use.</summary>
+    public async Task<FleetLease> AcquireAsync(string? preferred, CancellationToken cancellationToken, bool sensitive = false, bool unattended = false)
     {
         var tried = new HashSet<string>(StringComparer.Ordinal);
         Exception? lastError = null;
@@ -190,14 +201,16 @@ public sealed class AgentFleet
             lock (_lock)
             {
                 if (_servers.Count == 0) throw new FleetUnavailableException("No model server is configured.");
+                var pool = PoolLocked(sensitive, unattended);
                 if (sensitive)
                 {
-                    var eligible = EligibleForSensitiveLocked();
-                    if (eligible.Count == 0 || eligible.All(s => tried.Contains(s.Id))) throw new NoPrivateServerException(lastError);
+                    if (pool.Count == 0 || pool.All(s => tried.Contains(s.Id))) throw new NoPrivateServerException(lastError);
                 }
-                else if (_servers.All(s => tried.Contains(s.Id)))
+                else if (pool.Count == 0)
+                    throw new NoUnattendedServerException();
+                else if (pool.All(s => tried.Contains(s.Id)))
                     throw new FleetUnavailableException("No model server answered" + (lastError is null ? "." : $": {lastError.Message}"), lastError);
-                chosen = ChooseLocked(preferred, tried, sensitive);
+                chosen = ChooseLocked(preferred, tried, pool, sensitive);
                 if (chosen is not null)
                 {
                     _states[chosen.Id].InFlight++;
@@ -304,10 +317,17 @@ public sealed class AgentFleet
         return _servers.Where(s => s.IsPrivate && (!s.IsPrimary || UsePrimaryWhenWorkersBusy || !anyWorkers)).ToList();
     }
 
-    private FleetServer? ChooseLocked(string? preferred, HashSet<string> tried, bool sensitive = false)
+    /// <summary>The servers a task may go to: private ones for a sensitive task, and none whose plan allows only interactive
+    /// use for unattended work.</summary>
+    private List<FleetServer> PoolLocked(bool sensitive, bool unattended)
+    {
+        var pool = sensitive ? EligibleForSensitiveLocked() : [.. _servers];
+        return unattended ? pool.Where(s => !s.InteractiveOnly).ToList() : pool;
+    }
+
+    private FleetServer? ChooseLocked(string? preferred, HashSet<string> tried, List<FleetServer> pool, bool sensitive)
     {
         var now = _clock.GetUtcNow();
-        var pool = sensitive ? EligibleForSensitiveLocked() : _servers;
         var candidates = pool.Where(s => !tried.Contains(s.Id)).ToList();
         if (candidates.Count == 0) return null;
         // Skip servers that just failed — unless that would leave none.

@@ -9,12 +9,13 @@ public sealed class SensitiveDelegationTests : IDisposable
 
     public void Dispose() => _root.Dispose();
 
-    private static FleetServer S(string id, bool primary = false, bool isPrivate = false, int max = 2) => new()
+    private static FleetServer S(string id, bool primary = false, bool isPrivate = false, int max = 2, bool interactiveOnly = false) => new()
     {
         Id = id,
         Label = id,
         IsPrimary = primary,
         IsPrivate = isPrivate,
+        InteractiveOnly = interactiveOnly,
         MaxParallel = max,
         Resolve = _ => Task.FromResult(new FleetTarget(FleetTestSupport.Reports("report from " + id), "model-" + id, 8_000)),
     };
@@ -72,6 +73,25 @@ public sealed class SensitiveDelegationTests : IDisposable
         Assert.False(waiting.IsCompleted);
         held.Dispose();
         Assert.Equal("spark-2", (await waiting.WaitAsync(TimeSpan.FromSeconds(3))).Label);
+    }
+
+    [Fact]
+    public async Task UnattendedWorkKeepsOffInteractiveOnlyPlans()
+    {
+        // The Qwen Coding Plan as a worker: a chat's subagents may use it, the task queue's may not.
+        var fleet = new AgentFleet { UsePrimaryWhenWorkersBusy = true };
+        fleet.Configure([S("spark", primary: true, isPrivate: true), S("qwen-coding", interactiveOnly: true)]);
+        Assert.Equal("qwen-coding", (await fleet.AcquireAsync(null, default)).Label);
+        Assert.Equal("spark", (await fleet.AcquireAsync(null, default, unattended: true)).Label);
+        // With no worker it may use, unattended work runs on the primary, as in a fleet without workers…
+        var only = new AgentFleet { UsePrimaryWhenWorkersBusy = false };
+        only.Configure([S("spark", primary: true), S("qwen-coding", interactiveOnly: true)]);
+        Assert.Equal("spark", (await only.AcquireAsync(null, default, unattended: true)).Label);
+        // …and with nowhere at all to go, the model is told rather than the plan's terms broken.
+        var none = new AgentFleet();
+        none.Configure([S("qwen-coding", primary: true, interactiveOnly: true)]);
+        var error = await Assert.ThrowsAsync<NoUnattendedServerException>(() => none.AcquireAsync(null, default, unattended: true));
+        Assert.Contains("interactive use only", error.Message);
     }
 
     private ToolContext Context(AgentFleet fleet) => new()

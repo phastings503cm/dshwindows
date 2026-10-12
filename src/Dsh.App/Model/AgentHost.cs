@@ -71,7 +71,7 @@ public sealed partial class AgentHost : ObservableObject
 
     private sealed record EngineKey(string Profile, int Window, ThinkingLevel? Thinking, PermissionPreset Preset,
                                     int Skills, bool ComputerTools, bool Vision, string Shell, long Vault,
-                                    bool GoalMode, int Memory, string Agents, string Routing);
+                                    bool GoalMode, int Memory, string Agents, string Routing, bool Unattended);
 
     /// <summary>Everything about skills one turn needs: what exists, what's on, and the prompt text.</summary>
     private sealed record SkillState(IReadOnlyList<Skill> All, IReadOnlyList<Skill> Active, SkillPromptResult Result, int Signature);
@@ -457,6 +457,7 @@ public sealed partial class AgentHost : ObservableObject
             VaultGrants = VaultGrantsFor(sessionId),
             BackgroundAgents = BackgroundPool(sessionId),
             Fleet = Fleet,
+            Unattended = IsUnattended(sessionId),
             Roster = RosterFor(sessionId),
             AgentTypes = agents,
             Cache = CacheFor(sessionId),
@@ -921,7 +922,7 @@ public sealed partial class AgentHost : ObservableObject
         var shell = Config.ResolvedAgentShell;
         var key = new EngineKey(ProfileKey(profile), window, thinking, vm.Preset, skillState.Signature,
                                 Config.ComputerToolsEnabled, VisionOn(profile), shell.Executable, Vault.Revision,
-                                vm.Goal is not null, MemorySignature(vm), AgentsStampFor(vm), RoutingStamp());
+                                vm.Goal is not null, MemorySignature(vm), AgentsStampFor(vm), RoutingStamp(), IsUnattended(sessionId));
         if (_engineKeys.TryGetValue(sessionId, out var previous) && !string.Equals(ModelOf(previous.Profile), profile.Model, StringComparison.Ordinal))
             vm.Note($"The server is now serving `{profile.Model}` (was `{ModelOf(previous.Profile)}`) — switched to it, {Fmt.N(window)}-token window.");
         if (!_engines.TryGetValue(sessionId, out var engine) || _engineKeys.GetValueOrDefault(sessionId) != key)

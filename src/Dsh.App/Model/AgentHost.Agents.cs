@@ -58,6 +58,7 @@ public sealed partial class AgentHost
                 Label = RouteLabel(active),
                 IsPrimary = true,
                 IsPrivate = active.IsPrivateRoute,
+                InteractiveOnly = active.IsInteractiveOnly,
                 MaxParallel = Math.Clamp(active.SubagentParallel ?? 4, 1, 16),
                 // The main route is probed the way the chat probes it (and shares its cache).
                 Resolve = _ => _dispatcher.InvokeAsync(ResolvePrimaryTargetAsync).Task.Unwrap(),
@@ -72,6 +73,7 @@ public sealed partial class AgentHost
                 Label = RouteLabel(captured),
                 IsPrimary = false,
                 IsPrivate = captured.IsPrivateRoute,
+                InteractiveOnly = captured.IsInteractiveOnly,
                 MaxParallel = Math.Clamp(captured.SubagentParallel ?? 2, 1, 16),
                 Resolve = ct => ResolveWorkerTargetAsync(captured, ct),
             });

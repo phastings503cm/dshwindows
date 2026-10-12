@@ -49,11 +49,12 @@ public sealed partial class AgentHost
     }
 
     /// <summary>The client a chat's own turns use: the primary, and — when there are backups — the backups behind it,
-    /// each with its own shield. Subagents never get backups (the fleet moves their tasks itself).</summary>
+    /// each with its own shield. Subagents never get backups (the fleet moves their tasks itself), and unattended work
+    /// never falls back to a plan that allows only interactive use.</summary>
     private IProviderClient MakeChatClient(ProviderProfile profile, string sessionId)
     {
         var primary = MakeClient(profile, sessionId);
-        var backups = BackupRoutes();
+        var backups = BackupRoutes().Where(b => !b.IsInteractiveOnly || !IsUnattended(sessionId)).ToList();
         if (backups.Count == 0) return primary;
         return new FailoverClient(primary, backups.Select(b => MakeClient(b, sessionId)).ToList(),
             notice => _dispatcher.BeginInvoke(DispatcherPriority.Normal, () => OnFailover(sessionId, notice)));
@@ -103,6 +104,9 @@ public sealed partial class AgentHost
         WorkerRoutes.Select(r => new SubagentServer(RouteLabel(r), r.IsPrivateRoute)).ToList();
 
     // MARK: Interactive-only plans
+
+    /// <summary>Whether a chat is working without the user: a task-queue task, or a /goal (which carries on by itself).</summary>
+    private bool IsUnattended(string sessionId) => _queueSessions.ContainsKey(sessionId) || Session(sessionId)?.Goal is not null;
 
     /// <summary>The primary route, when its plan's terms allow only interactive use (the Qwen Coding Plan).</summary>
     public ProviderProfile? InteractiveOnlyPrimary =>

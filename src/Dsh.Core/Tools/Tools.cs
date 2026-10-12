@@ -39,6 +39,9 @@ public sealed record ToolContext
     /// <summary>The model servers subagents run on (workers first, the primary as overflow). Null = a
     /// subagent uses this run's own client.</summary>
     public AgentFleet? Fleet { get; init; }
+    /// <summary>The run is unattended (the task queue, a /goal carrying on by itself): its subagents never go to a server
+    /// whose plan allows only interactive use.</summary>
+    public bool Unattended { get; init; }
     /// <summary>Every subagent this chat has started, for the UI. Null = not tracked.</summary>
     public AgentRoster? Roster { get; init; }
     /// <summary>The kinds of subagent available (null = the built-in ones).</summary>
