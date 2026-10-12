@@ -245,10 +245,10 @@ the route and says hello through it. The key goes to Windows Credential Manager.
 services, so they aren't private: DSH masks sensitive data before sending (*Sensitive data*, above).
 
 Alibaba allows the Qwen Coding Plan only for interactive use, so its route is marked **Interactive use
-only (plan terms)** (a switch in the route editor, for any route): while it is the primary, the task queue
-won't run and a `/goal` doesn't carry on by itself — make another model primary for unattended work —
-and unattended work never falls back to it as a backup or sends subagents to it. Chats, and the
-subagents they start, are fine.
+only (plan terms)** (a switch in the route editor, for any route): while it is the primary, a chat's
+task list won't start (or stops before its next task) and a `/goal` doesn't carry on by itself — make
+another model primary for unattended work — and unattended work never falls back to it as a backup or
+sends subagents to it. Chats, and the subagents they start, are fine.
 
 ## Using Amazon Bedrock
 
@@ -299,10 +299,12 @@ To remove DSH's sign-in: `aws logout --profile dsh-bedrock`.
 
 **Chat** (Ctrl+1) — the transcript interleaves messages and tool calls in the order they happened,
 each tool card expandable to its full output (a skill the agent uses shows as *Using the <name>
-skill*). Markdown renders with headings, code blocks (with copy), lists, quotes and tables. **Enter**
-sends, **Shift+Enter** adds a line. Drop files on the chat or paste an image (Ctrl+V) to attach it.
-Under the composer: the chat's permission preset, the model menu (with switching on each Spark Swapper
-box), thinking level, skills, and a live context gauge.
+skill*). Every message — yours, the agent's, and the app's notices — shows the date and time it was sent
+on this PC's clock, in your Windows date and time format (hover it for the full date and UTC offset).
+Markdown renders with headings, code blocks (with copy), lists, quotes and tables. **Enter** sends,
+**Shift+Enter** adds a line. Drop files on the chat or paste an image (Ctrl+V) to attach it. Under the
+composer: the chat's permission preset, the model menu (with switching on each Spark Swapper box),
+thinking level, skills, and a live context gauge.
 
 **Chats without a project** (File › New Chat Without a Project, Ctrl+Shift+N, or the chat button in the
 sidebar — even while a folder is open) are regular conversations: the model is told no project folder
@@ -310,9 +312,9 @@ is needed and answers directly, using the web, your skills and long-term memory 
 instruction files, skills and plugins apply; a project's don't. When something needs files or
 commands, the chat works in a scratch folder of its own, `%APPDATA%\DSH\Chats\<chat id>` — made on
 first use, treated by the permission preset like a project folder, and moved to the Recycle Bin when the
-chat is deleted (not while a queue task still works there). Queue tasks the chat adds, or that you add
-from the queue panel while it is open, run there too. Its first screen offers openers like *Explain
-something simply* or *Summarise a web page* (and your skills), with a link to open a folder for code.
+chat is deleted. Its task list runs in the chat too, so its tasks work in that folder. Its first screen
+offers openers like *Explain something simply* or *Summarise a web page* (and your skills), with a link
+to open a folder for code.
 
 **Code** (Ctrl+2) — a VS Code-shaped workspace with the agent beside it:
 
@@ -375,7 +377,7 @@ a scoped task). On top of those:
   built. Each chat asks before the first look and the first click (full-access chats don't). Typing
   into terminals, the Run box, Explorer or Task Manager is always refused. Switch them off in
   **Settings › General › Computer use**.
-- **`queue_task`** adds follow-up work to the task queue; **`vault_search`** finds credentials by
+- **`queue_task`** adds follow-up work to the chat's own task list; **`vault_search`** finds credentials by
   name (never their values).
 - **Kinds of subagent, and fan-out** — `agent` takes an `agent_type`: `general` (the default),
   `explore` (read-only search), `plan`, `review`, `worker`, or your own. Your own are Claude
@@ -397,19 +399,26 @@ a scoped task). On top of those:
 
 Plugins add more (below).
 
-## Task queue
+## Task lists
 
-Queue up work — one task per item — and press **Start**: DSH works the tasks one at a time, top to
-bottom, each in its own chat, as an unattended goal that runs until the model declares it complete.
-A task that needs you is marked blocked and the queue moves on; answer in its chat and press
-**Resume**. Drag waiting tasks to reorder them. The log (the clock button) records when each task
-started, every round, retries, and how it ended, with token counts and speed.
+Every chat has its own **task list** (the panel on the right, **Ctrl+Shift+Q**; it shows the chat
+you're in). Line up work — one task per item — and press **Start**: the chat works its tasks one at a
+time, top to bottom, *in that chat*, each as an unattended goal that runs until the model declares it
+complete. Each task sees the conversation so far, including what the tasks before it did. If you're
+mid-turn when the list starts, your turn finishes first. Several chats can work their lists at the
+same time; the toolbar's list button shows a dot while any of them is running.
 
-The queue is saved to `task-queue.json` and survives restarts: if the app quits or crashes mid-task,
-the task goes back in line and the queue picks up where it left off on the next launch (unless you
-had pressed Stop). Three failed tasks in a row pause it. Windows is kept awake while it runs.
-Permission questions in a queue task are answered "no" after five minutes, so an unattended run
-never stalls on one.
+A task that needs you is marked blocked and that chat's list pauses, so the next task doesn't talk
+over the question: answer in the chat and press **Resume** on the task. Drag waiting tasks (or use
+the arrows) to reorder them; edit or delete any task that isn't running. The log (the clock button)
+records when each task started, every round, retries, and how it ended, with token counts and speed.
+
+Task lists are saved to `task-queue.json` and survive restarts: if the app quits or crashes mid-task,
+the task goes back in line and that chat's list picks up where it left off on the next launch (unless
+you had pressed Stop). Three failed tasks in a row pause a list. Deleting a chat deletes its list.
+Windows is kept awake while a list runs. Permission questions in a task are answered "no" after five
+minutes, so an unattended run never stalls on one. Tasks queued before lists were per chat are moved
+into a chat called *📋 Earlier tasks* (one per project folder) the first time this version starts.
 
 ## Credentials vault
 
@@ -432,7 +441,7 @@ Press Stop to give up. Nothing already done is lost: tool calls that ran stay in
 | Command | What it does |
 |---|---|
 | `/goal <task>` | Works on the task round after round, with no round limit and nobody typing "continue", until the agent calls its `goal_complete` tool (models that can't call tools end a reply with `GOAL_COMPLETE` instead). If it needs you it calls `goal_blocked` and waits: your next message is the answer, and the goal carries on with it (even after a restart); `/goal stop` drops a paused goal instead. Outages are retried; Ctrl+. stops it. A bare `/goal` picks an unfinished goal back up. |
-| `/queue` | Starts the task queue (or says what it is doing). |
+| `/queue` | Starts this chat's task list (or says what it is doing). |
 | `/compact [focus]` | Summarizes the conversation now. Long chats also compact automatically at 75% of the window. |
 | `/think off\|low\|medium\|high\|max\|default` | Thinking level for this chat. |
 | `/context` | Window size, usage, and where the window figure came from. |
@@ -595,7 +604,7 @@ with the computer-use tools.
 | Remembered notes | `%APPDATA%\DSH\memory\memories.jsonl` |
 | Your subagent types | `%APPDATA%\DSH\agents\*.md` |
 | Notes imported per project | `%APPDATA%\DSH\project-notes\<project>` |
-| Task queue | `%APPDATA%\DSH\task-queue.json` |
+| Task lists (every chat's) | `%APPDATA%\DSH\task-queue.json` |
 | Credentials vault | `%APPDATA%\DSH\vault.json` (names and details) and `vault.bin` (values, DPAPI-encrypted) |
 | Program | `%LOCALAPPDATA%\Programs\DSH` (installer) |
 
@@ -607,7 +616,7 @@ library and its tests also build and run on Linux and macOS.
 ```powershell
 dotnet build DSH.sln
 dotnet test tests/Dsh.Core.Tests
-dotnet test tests/Dsh.App.Tests       # Windows: task queue, /goal, background agents, vault
+dotnet test tests/Dsh.App.Tests       # Windows: task lists, /goal, background agents, vault
 dotnet test tests/Dsh.Windows.Tests   # Windows: screenshots, windows, mouse and keyboard
 dotnet run --project src/Dsh.App
 ```
@@ -631,7 +640,7 @@ a throwaway data folder and a demo project, and exits non-zero on any error. CI 
 | `src/Dsh.App` | The WPF app |
 | `src/Dsh.Windows` | The computer-use tools (screen capture, UI Automation, input) |
 | `tests/Dsh.Core.Tests` | xUnit tests (Windows-only ones are skipped elsewhere) |
-| `tests/Dsh.App.Tests` | The app host against a fake model server: queue runner, /goal, background agents, vault |
+| `tests/Dsh.App.Tests` | The app host against a fake model server: task lists, /goal, background agents, vault |
 | `tests/Dsh.Windows.Tests` | The computer-use tools against real windows |
 | `installer/DSH.iss` | Inno Setup script |
 | `scripts/` | Packaging, self-test and installer-test scripts used by CI |

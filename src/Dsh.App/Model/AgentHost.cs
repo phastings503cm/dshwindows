@@ -76,7 +76,7 @@ public sealed partial class AgentHost : ObservableObject
     /// <summary>Everything about skills one turn needs: what exists, what's on, and the prompt text.</summary>
     private sealed record SkillState(IReadOnlyList<Skill> All, IReadOnlyList<Skill> Active, SkillPromptResult Result, int Signature);
 
-    /// <param name="queueFile">Where the task queue is saved (default %APPDATA%\DSH\task-queue.json).</param>
+    /// <param name="queueFile">Where every chat's task list is saved (default %APPDATA%\DSH\task-queue.json).</param>
     /// <param name="skillLocations">Where skills live (tests point it at a temp folder).</param>
     /// <param name="vault">The credentials vault (default: DPAPI-encrypted, under the data folder).</param>
     /// <param name="memory">The long-term memory (default: under the data folder).</param>
@@ -146,8 +146,8 @@ public sealed partial class AgentHost : ObservableObject
         "tasks out at once use `delegate`; with several model servers configured they run on different machines.\n" +
         "With run_in_background: true a subagent works while you continue (several can run at once); you're told\n" +
         "when each finishes, and agent_status / agent_stop manage them. Long-running programs (dev servers, game\n" +
-        "engines, REPLs) go in `process_start`. Follow-up work that can happen later, unattended, goes on the task\n" +
-        "queue with `queue_task`.\n\n" +
+        "engines, REPLs) go in `process_start`. Follow-up work for later goes on this chat's task list with\n" +
+        "`queue_task`; the chat works through the list, task by task, unattended.\n\n" +
         "Rules that matter:\n" +
         "- Never claim a command succeeded unless you ran it and saw the output.\n" +
         "- Prefer `edit` over `write_file` for changes to an existing file; rewriting a whole file loses work.\n" +
@@ -230,29 +230,27 @@ public sealed partial class AgentHost : ObservableObject
         _agentQueuedCount.Remove(id);
         ForgetChatState(id);
         if (_backgroundPools.Remove(id, out var pool)) pool.StopAll();
-        Queue.DetachSession(id);
+        // Its task list goes with it.
+        if (_chatQueues.TryGetValue(id, out var queueRun)) queueRun.Running = false;
+        _queueSessions.Remove(id);
+        Queue.RemoveChat(id);
+        Config.SetQueueResume(id, false);
         Config.SetSkillsFor(id, null);
         Log.Delete(id);
         _pendingShield.Remove(id);
-        var cwd = Session(id)?.Cwd;
         if (Session(id) is { } vm) Sessions.Remove(vm);
-        // A chat without a project takes its scratch folder with it (to the Recycle Bin) — unless something still works
-        // there: a chat, or a queue task it added that hasn't finished. (A queue task's chat working in another chat's folder
-        // takes that folder along when it is the last to go.)
+        // A chat without a project takes its scratch folder with it, to the Recycle Bin: its task list, which worked in the
+        // chat (and so in that folder), has just gone too.
         ForgetScratch(id);
-        if (PlainChat.IsScratch(cwd) && Path.GetFileName(cwd!.TrimEnd('\\', '/')) is { Length: > 0 } owner && owner != id && Session(owner) is null)
-            ForgetScratch(owner);
         if (SelectedId == id) SelectedId = Sessions.FirstOrDefault()?.Id;
     }
 
-    /// <summary>Move chat <paramref name="chatId"/>'s scratch folder to the Recycle Bin, unless a chat or an unfinished queue task
-    /// still works in it.</summary>
+    /// <summary>Move chat <paramref name="chatId"/>'s scratch folder to the Recycle Bin — never while another chat still works in
+    /// it (one made for tasks from before task lists were per chat may have been given it).</summary>
     private void ForgetScratch(string chatId)
     {
-        var scratch = PlainChat.Folder(chatId);
-        static bool Same(string? a, string b) => a is not null && string.Equals(a.TrimEnd('\\', '/'), b.TrimEnd('\\', '/'), StringComparison.OrdinalIgnoreCase);
-        if (Sessions.Any(s => Same(s.Cwd, scratch))) return;
-        if (Queue.Tasks.Any(t => t.Status is QueueTaskStatus.Queued or QueueTaskStatus.Running or QueueTaskStatus.Blocked && Same(t.Cwd, scratch))) return;
+        var scratch = PlainChat.Folder(chatId).TrimEnd('\\', '/');
+        if (Sessions.Any(s => s.Cwd is { } cwd && string.Equals(cwd.TrimEnd('\\', '/'), scratch, StringComparison.OrdinalIgnoreCase))) return;
         PlainChat.Delete(chatId);
     }
 
@@ -752,16 +750,16 @@ public sealed partial class AgentHost : ObservableObject
 
             case SlashCommand.Queue:
             {
-                var stats = Queue.Stats();
-                if (QueueRunning)
-                    vm.Note($"Queue is running — {stats.Queued} waiting, {stats.Completed} done so far. Ctrl+Shift+Q shows the panel; Stop there (or Ctrl+.) halts it.");
+                var stats = Queue.Stats(vm.Id);
+                if (IsQueueRunning(vm.Id))
+                    vm.Note($"This chat's task list is running — {stats.Queued} waiting, {stats.Completed} done so far. Ctrl+Shift+Q shows it; Stop there (or Ctrl+.) halts it.");
                 else if (stats.Queued > 0)
                 {
-                    vm.Note($"Starting the queue: {stats.Queued} task{(stats.Queued == 1 ? "" : "s")} to go, one at a time, unattended.");
-                    StartQueue();
+                    vm.Note($"Working this chat's task list: {stats.Queued} task{(stats.Queued == 1 ? "" : "s")} to go, one at a time, unattended.");
+                    StartQueue(vm.Id);
                 }
                 else
-                    vm.Note("The queue is empty. Add tasks from the Task Queue panel (Ctrl+Shift+Q), then press Start — or /queue again.");
+                    vm.Note("This chat's task list is empty. Add tasks in the Task List panel (Ctrl+Shift+Q), then press Start — or /queue again.");
                 break;
             }
         }
@@ -908,11 +906,11 @@ public sealed partial class AgentHost : ObservableObject
                                             string? recallQuery = null)
     {
         var sessionId = vm.Id;
-        // A chat whose timeline was released (an archived queue chat) or never loaded: bring it back
-        // first, so the model keeps its history.
+        // A chat whose timeline was never loaded (opened after a relaunch): bring it back first, so the
+        // model keeps its history.
         Hydrate(vm);
-        // Prime the model transcript from the timeline when it's missing (an archived queue chat whose
-        // transcript was evicted), before this turn's entry is added so its text isn't sent twice.
+        // Prime the model transcript from the timeline when it's missing (a chat from an earlier launch),
+        // before this turn's entry is added so its text isn't sent twice.
         if (!_transcripts.ContainsKey(sessionId)) _transcripts[sessionId] = ReplayMessages(vm.Entries);
         var userEntryId = vm.AppendMessage(MessageRole.User, displayText);
         Log.RecordItem(sessionId, "user", displayText);
@@ -1367,12 +1365,12 @@ public sealed partial class AgentHost : ObservableObject
 
     public void StopAll()
     {
-        StopQueue();
+        StopAllQueues();
         foreach (var id in _runs.Keys.Concat(_backgroundPools.Keys).Distinct().ToList()) StopSession(id);
     }
 
-    /// <summary>The app is closing: cancel every run and background agent, but keep the queue's
-    /// "resume on launch" so a queue that was running picks back up next time.</summary>
+    /// <summary>The app is closing: cancel every run and background agent, but keep each running task
+    /// list's "resume on launch" so it picks back up next time.</summary>
     public void Shutdown()
     {
         _shuttingDown = true;

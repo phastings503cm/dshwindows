@@ -88,7 +88,7 @@ public sealed class TaskQueueStoreTests : IDisposable
         Assert.Null(t.StartedAt);
         Assert.Equal(TaskQueue.InterruptedNote, t.Log[^1].Text);
         Assert.Equal(
-            "Was running when the app quit — back in the queue; it resumes in the same chat.", t.Log[^1].Text);
+            "Was running when the app quit — back in line; it resumes where it stopped.", t.Log[^1].Text);
         Assert.Equal(a.Id, relaunched.NextTask?.Id);   // still first in line
         Assert.Equal([a.Id, b.Id], relaunched.Tasks.Select(x => x.Id));
         Assert.Null(relaunched.LoadProblem);

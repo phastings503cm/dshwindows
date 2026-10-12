@@ -548,7 +548,7 @@ public sealed class ProviderEditorWindow : Window
             _thinking.Items.Add(new ComboBoxItem { Content = $"{level.Label()} — {level.Blurb()}", Tag = level.RawValue(), IsSelected = profile.ReasoningEffort == level.RawValue() });
         _vision.IsChecked = profile.Vision ?? true;
         _interactiveOnly.IsChecked = profile.IsInteractiveOnly;
-        _interactiveOnly.ToolTip = "The plan's terms allow only interactive use (the Qwen Coding Plan): the task queue and other unattended work won't run on it as the primary.";
+        _interactiveOnly.ToolTip = "The plan's terms allow only interactive use (the Qwen Coding Plan): task lists and other unattended work won't run on it as the primary.";
         _pin = profile.PinnedCertificate;
         _headers.AcceptsReturn = true;
         _headers.Height = 70;

@@ -22,6 +22,11 @@
   </ItemGroup>
 
   <ItemGroup>
+    <!-- The app tests drive panels through a few internal hooks. -->
+    <InternalsVisibleTo Include="Dsh.App.Tests" />
+  </ItemGroup>
+
+  <ItemGroup>
     <ProjectReference Include="..\Dsh.Core\Dsh.Core.csproj" />
     <ProjectReference Include="..\Dsh.Windows\Dsh.Windows.csproj" />
   </ItemGroup>

@@ -417,7 +417,7 @@ public sealed class PlanGuide : IWizardGuide
         Use(RouteUse.Backup, Icons.Sync, "Backup", "It takes over when the primary stops answering.");
         Use(RouteUse.JustAdd, Icons.Add, "Just add it", "It's there in the model menu when you want it.");
         if (plan.InteractiveOnly)
-            panel.Children.Add(Note(Tone.Info, "Under this plan's terms DSH uses it only while you're there: as the primary, the task queue won't run on it, and a /goal goes one round at a time.", "Interactive use only"));
+            panel.Children.Add(Note(Tone.Info, "Under this plan's terms DSH uses it only while you're there: as the primary, task lists won't run on it, and a /goal goes one round at a time.", "Interactive use only"));
         var isPrivate = Ui.Check("Private", _private, on => _private = on);
         isPrivate.Margin = new Thickness(0, 12, 0, 0);
         isPrivate.FontWeight = FontWeights.SemiBold;

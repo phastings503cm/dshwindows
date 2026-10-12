@@ -22,7 +22,7 @@
     <infra:OneLineConverter x:Key="OneLine" />
     <infra:NotNullConverter x:Key="NotNull" />
     <infra:PositiveToVisibilityConverter x:Key="PositiveToVisibility" />
-    <infra:ClockConverter x:Key="Clock" />
+    <infra:StampConverter x:Key="Stamp" />
 
     <!-- Text roles -->
     <Style x:Key="SecondaryText" TargetType="TextBlock">

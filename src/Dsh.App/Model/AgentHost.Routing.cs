@@ -105,7 +105,8 @@ public sealed partial class AgentHost
 
     // MARK: Interactive-only plans
 
-    /// <summary>Whether a chat is working without the user: a task-queue task, or a /goal (which carries on by itself).</summary>
+    /// <summary>Whether a chat is working without the user: a task from its task list, or a /goal (which carries on by
+    /// itself).</summary>
     private bool IsUnattended(string sessionId) => _queueSessions.ContainsKey(sessionId) || Session(sessionId)?.Goal is not null;
 
     /// <summary>The primary route, when its plan's terms allow only interactive use (the Qwen Coding Plan).</summary>
@@ -113,7 +114,7 @@ public sealed partial class AgentHost
         Config.Providers.FirstOrDefault(p => p.RouteId == Config.ActiveRoute) is { IsInteractiveOnly: true } primary ? primary : null;
 
     public static string QueueRefusal(ProviderProfile route) =>
-        $"{route.Name} is for interactive use only under its plan's terms, so the queue won't run on it. Make another model primary for unattended work.";
+        $"{route.Name} is for interactive use only under its plan's terms, so the task list won't run on it. Make another model primary for unattended work.";
 
     public static string GoalRefusal(ProviderProfile route) =>
         $"{route.Name} is for interactive use only under its plan's terms, so the goal won't carry on by itself. Reply to take it one round further, or make another model primary for unattended work.";

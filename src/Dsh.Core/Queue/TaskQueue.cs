@@ -2,8 +2,10 @@ namespace Dsh.Core;
 
 // MARK: - Task queue: the store
 //
-// One queue per app. The runner (async code) and the UI (the WPF dispatcher) both read and change
-// it, so every member takes one lock; the tasks inside are immutable records, so what a reader gets
+// One store per app, holding every chat's task list: a task belongs to the chat in its SessionId,
+// and its position, moves and "front of the queue" all count among that chat's tasks only. The
+// runners (async code) and the UI (the WPF dispatcher) both read and change it, so every member takes
+// one lock; the tasks inside are immutable records, so what a reader gets
 // back is a snapshot nothing can change under it. Every change is saved to one JSON file (written
 // atomically) so a week-long queue survives restarts, and every transition appends a timestamped
 // line to the task's log so the whole run can be read afterwards.
@@ -18,7 +20,7 @@ public sealed class TaskQueue
     public static string DefaultFilePath => Path.Combine(AppPaths.Root, FileName);
 
     /// <summary>The note a task gets when a restart finds it "running": the work in flight was lost.</summary>
-    public const string InterruptedNote = "Was running when the app quit — back in the queue; it resumes in the same chat.";
+    public const string InterruptedNote = "Was running when the app quit — back in line; it resumes where it stopped.";
 
     private readonly Lock _lock = new();
     private readonly Lock _writeLock = new();
@@ -124,8 +126,37 @@ public sealed class TaskQueue
         }
     }
 
-    /// <summary>1-based position among queued tasks (the "long view" number): how many queued tasks
-    /// come before it, plus one. Null for an unknown id.</summary>
+    // MARK: - One chat's list
+
+    /// <summary>The tasks on <paramref name="chatId"/>'s list, in order.</summary>
+    public IReadOnlyList<QueueTask> TasksFor(string? chatId)
+    {
+        lock (_lock) return _tasks.Where(t => t.SessionId == chatId).ToList();
+    }
+
+    /// <summary>The next task <paramref name="chatId"/> works: the first queued one on its list.</summary>
+    public QueueTask? NextTaskFor(string? chatId)
+    {
+        lock (_lock) return _tasks.Find(t => t.SessionId == chatId && t.Status == QueueTaskStatus.Queued);
+    }
+
+    public QueueTask? RunningTaskFor(string? chatId)
+    {
+        lock (_lock) return _tasks.Find(t => t.SessionId == chatId && t.Status == QueueTaskStatus.Running);
+    }
+
+    public int QueuedCountFor(string? chatId)
+    {
+        lock (_lock) return _tasks.Count(t => t.SessionId == chatId && t.Status == QueueTaskStatus.Queued);
+    }
+
+    public QueueStats Stats(string? chatId)
+    {
+        lock (_lock) return QueueStats.Of(_tasks.Where(t => t.SessionId == chatId));
+    }
+
+    /// <summary>1-based position among the queued tasks on the same chat's list: how many of them come
+    /// before it, plus one. Null for an unknown id.</summary>
     public int? Position(string id)
     {
         lock (_lock) return PositionLocked(id);
@@ -147,6 +178,15 @@ public sealed class TaskQueue
 
     private int FindIndex(string id) => _tasks.FindIndex(t => t.Id == id);
 
+    /// <summary>Queued tasks on <paramref name="chatId"/>'s list before index <paramref name="before"/>.</summary>
+    private int CountQueued(int before, string? chatId)
+    {
+        var n = 0;
+        for (var i = 0; i < before; i++)
+            if (_tasks[i].Status == QueueTaskStatus.Queued && _tasks[i].SessionId == chatId) n++;
+        return n;
+    }
+
     private int CountQueued(int before)
     {
         var n = 0;
@@ -155,7 +195,17 @@ public sealed class TaskQueue
         return n;
     }
 
-    private int? PositionLocked(string id) => FindIndex(id) is var i and >= 0 ? CountQueued(i) + 1 : null;
+    private int? PositionLocked(string id) =>
+        FindIndex(id) is var i and >= 0 ? CountQueued(i, _tasks[i].SessionId) + 1 : null;
+
+    /// <summary>Indexes of the queued tasks on <paramref name="chatId"/>'s list, in order.</summary>
+    private List<int> QueuedIndexes(string? chatId)
+    {
+        var found = new List<int>();
+        for (var i = 0; i < _tasks.Count; i++)
+            if (_tasks[i].Status == QueueTaskStatus.Queued && _tasks[i].SessionId == chatId) found.Add(i);
+        return found;
+    }
 
     // MARK: - Mutations
 
@@ -167,9 +217,10 @@ public sealed class TaskQueue
     /// <inheritdoc cref="Batch(Action{TaskQueue})"/>
     public T Batch<T>(Func<TaskQueue, T> body) => Mutate(() => body(this));
 
-    /// <summary>Add a task at the back of the queue, or at the front of the waiting tasks. Title and
-    /// details are trimmed; an empty <paramref name="cwd"/> means none. Returns the task as stored.</summary>
-    public QueueTask Add(string title, string details = "", bool atFront = false, string? cwd = null) => Mutate(() =>
+    /// <summary>Add a task to the back of <paramref name="chatId"/>'s list, or in front of its waiting
+    /// tasks. Title and details are trimmed; an empty <paramref name="cwd"/> means none. Returns the
+    /// task as stored.</summary>
+    public QueueTask Add(string title, string details = "", bool atFront = false, string? cwd = null, string? chatId = null) => Mutate(() =>
     {
         var now = Now;
         var task = new QueueTask
@@ -178,9 +229,11 @@ public sealed class TaskQueue
             Details = details.Trim(),
             EnteredAt = now,
             Cwd = string.IsNullOrEmpty(cwd) ? null : cwd,
+            SessionId = string.IsNullOrEmpty(chatId) ? null : chatId,
         };
-        task = task.AppendingLog(QueueLogKind.Entered, $"Entered the queue at #{(atFront ? 1 : CountQueued(_tasks.Count) + 1)}", now);
-        if (atFront) _tasks.Insert(FrontOfQueued(), task);
+        task = task.AppendingLog(QueueLogKind.Entered,
+            $"Entered the queue at #{(atFront ? 1 : CountQueued(_tasks.Count, task.SessionId) + 1)}", now);
+        if (atFront) _tasks.Insert(FrontOfQueued(task.SessionId), task);
         else _tasks.Add(task);
         _dirty = true;
         return task;
@@ -217,38 +270,41 @@ public sealed class TaskQueue
         return _dirty = true;
     });
 
-    /// <summary>Move a queued task <paramref name="offset"/> places (−1 = up), stepping over finished
-    /// tasks so it stays inside the queued region.</summary>
+    /// <summary>Move a queued task <paramref name="offset"/> places (−1 = up) among the waiting tasks on
+    /// its chat's list, stopping at either end.</summary>
     public bool MoveBy(string id, int offset) => Mutate(() =>
     {
         var from = FindIndex(id);
         if (from < 0 || _tasks[from].Status != QueueTaskStatus.Queued) return false;
-        // Clamped first: upstream indexes past the ends when the first task moves up or the last down.
-        var to = Math.Clamp(from + offset, 0, _tasks.Count - 1);
-        while (to > 0 && _tasks[to - 1].Status != QueueTaskStatus.Queued) to--;
-        while (to < _tasks.Count - 1 && _tasks[to + 1].Status != QueueTaskStatus.Queued) to++;
-        return to != from && MoveLocked(from, to);
+        var peers = QueuedIndexes(_tasks[from].SessionId);
+        var at = peers.IndexOf(from);
+        var target = Math.Clamp(at + offset, 0, peers.Count - 1);
+        // Taking the target's index puts it after the target going down, before it going up.
+        return target != at && MoveLocked(from, peers[target]);
     });
 
-    /// <summary>Move a queued task so it sits just before <paramref name="targetId"/> (null, or an
-    /// unknown id, = the end).</summary>
+    /// <summary>Move a queued task so it sits just before <paramref name="targetId"/>, a task on the same
+    /// chat's list (null, or an unknown id, = the end of the list).</summary>
     public bool MoveBefore(string id, string? targetId) => Mutate(() =>
     {
         var from = FindIndex(id);
         if (from < 0 || _tasks[from].Status != QueueTaskStatus.Queued || targetId == id) return false;
-        var to = targetId is null || FindIndex(targetId) is not (var target and >= 0) ? _tasks.Count : target;
+        var target = targetId is null ? -1 : FindIndex(targetId);
+        if (target >= 0 && _tasks[target].SessionId != _tasks[from].SessionId) return false;
+        var to = target >= 0 ? target : _tasks.Count;
         if (to > from) to--;
         return to != from && MoveLocked(from, to);
     });
 
-    /// <summary>Drag-and-drop: dropping a queued task onto another queued task puts it in that task's
-    /// place — after it when dragged down, before it when dragged up — so every position, first and last
-    /// included, is reachable.</summary>
+    /// <summary>Drag-and-drop: dropping a queued task onto another queued task on the same list puts it in
+    /// that task's place — after it when dragged down, before it when dragged up — so every position,
+    /// first and last included, is reachable.</summary>
     public bool MoveOnto(string id, string targetId) => Mutate(() =>
     {
         int from = FindIndex(id), to = FindIndex(targetId);
         if (from < 0 || to < 0 || from == to
-            || _tasks[from].Status != QueueTaskStatus.Queued || _tasks[to].Status != QueueTaskStatus.Queued) return false;
+            || _tasks[from].Status != QueueTaskStatus.Queued || _tasks[to].Status != QueueTaskStatus.Queued
+            || _tasks[from].SessionId != _tasks[to].SessionId) return false;
         return MoveLocked(from, to);
     });
 
@@ -280,8 +336,16 @@ public sealed class TaskQueue
         return Log(t, QueueLogKind.Started, $"Work started — {t.Title}");
     });
 
-    /// <summary>Record the chat a task will run in (before it starts).</summary>
+    /// <summary>Put a task on <paramref name="sessionId"/>'s list (it runs in that chat).</summary>
     public bool AttachSession(string id, string sessionId) => Change(id, t => t with { SessionId = sessionId });
+
+    /// <summary>A chat was deleted: its task list goes with it.</summary>
+    public int RemoveChat(string chatId) => Mutate(() =>
+    {
+        var removed = _tasks.RemoveAll(t => t.SessionId == chatId);
+        if (removed > 0) _dirty = true;
+        return removed;
+    });
 
     /// <summary>Forget a deleted chat: tasks that pointed at it (and aren't running) get a fresh one
     /// next time.</summary>
@@ -319,7 +383,7 @@ public sealed class TaskQueue
         t = t with { Status = QueueTaskStatus.Queued, StartedAt = null, FinishedAt = null };
         if (wasFinished) t = Log(t, QueueLogKind.Note, "Re-queued to retry.");
         _tasks.RemoveAt(at);
-        if (toFront) _tasks.Insert(FrontOfQueued(), t);
+        if (toFront) _tasks.Insert(FrontOfQueued(t.SessionId), t);
         else _tasks.Add(t);
         return _dirty = true;
     });
@@ -364,10 +428,11 @@ public sealed class TaskQueue
 
     private QueueTask Log(QueueTask task, QueueLogKind kind, string text) => task.AppendingLog(kind, text, Now);
 
-    /// <summary>Index where "the front of the queue" is: before the first waiting task, or the end.</summary>
-    private int FrontOfQueued()
+    /// <summary>Index where the front of <paramref name="chatId"/>'s waiting tasks is: before the first of
+    /// them, or the end.</summary>
+    private int FrontOfQueued(string? chatId)
     {
-        var i = _tasks.FindIndex(t => t.Status == QueueTaskStatus.Queued);
+        var i = _tasks.FindIndex(t => t.Status == QueueTaskStatus.Queued && t.SessionId == chatId);
         return i < 0 ? _tasks.Count : i;
     }
 

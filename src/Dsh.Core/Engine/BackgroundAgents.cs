@@ -268,15 +268,15 @@ public sealed class AgentStopTool : IToolExecutor
     }
 }
 
-/// <summary>Adds work to the app's task queue — background tasks that run unattended, one at a time,
-/// each in its own chat, after (or alongside) this one.</summary>
+/// <summary>Adds work to this chat's task list — tasks the chat works by itself, one at a time, after
+/// what it is doing now.</summary>
 public sealed class QueueAddTool(Func<string, string, bool, bool, Task<string>> add) : IToolExecutor
 {
     public const string ToolName = "queue_task";
     public string Name => ToolName;
     public ToolSpec Spec { get; } = new(ToolName,
-        "Add a background task to the user's task queue. Queued tasks run unattended, one at a time, each in its own chat, until the model declares them complete — use it for follow-up work that can happen after (or independently of) this conversation, e.g. 'write tests for the parser'. Give full instructions: the task's chat won't see this conversation. Set start to true to start the queue if it isn't running.",
-        """{"type":"object","properties":{"title":{"type":"string","description":"Short title"},"details":{"type":"string","description":"Complete, self-contained instructions"},"front":{"type":"boolean","description":"Put it at the front of the queue"},"start":{"type":"boolean","description":"Start the queue if it isn't running"}},"required":["title","details"]}""");
+        "Add a task to this chat's task list. Tasks on the list run in this chat, one after another, once the current work is done — each unattended, round after round, until the model declares it complete. Use it for follow-up work, e.g. 'write tests for the parser'. Give clear instructions: the task runs in this conversation, but later, possibly after it has been summarized. Set start to true to start working the list if it isn't running.",
+        """{"type":"object","properties":{"title":{"type":"string","description":"Short title"},"details":{"type":"string","description":"Clear instructions for the task"},"front":{"type":"boolean","description":"Put it before the other waiting tasks"},"start":{"type":"boolean","description":"Start working the list if it isn't running"}},"required":["title","details"]}""");
 
     /// <summary>(title, details, front, start) → a message for the model.</summary>
     public Func<string, string, bool, bool, Task<string>> Add { get; } = add;

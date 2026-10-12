@@ -219,7 +219,7 @@ public sealed class Engine
     public VaultGrants VaultGrants { get; init; } = new();
     /// <summary>The model servers subagents run on (see <see cref="AgentFleet"/>); null = this engine's client.</summary>
     public AgentFleet? Fleet { get; init; }
-    /// <summary>The chat runs unattended (the task queue, a /goal): its subagents keep off servers whose plan allows only
+    /// <summary>The chat runs unattended (its task list, a /goal): its subagents keep off servers whose plan allows only
     /// interactive use.</summary>
     public bool Unattended { get; init; }
     /// <summary>Where this chat's subagent runs are recorded for the UI.</summary>

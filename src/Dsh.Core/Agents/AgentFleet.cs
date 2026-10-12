@@ -35,7 +35,7 @@ public sealed class FleetServer
     /// only on such a server.</summary>
     public bool IsPrivate { get; init; }
     /// <summary>Its plan's terms allow only interactive use (see <see cref="ProviderProfile.IsInteractiveOnly"/>): unattended
-    /// work — the task queue, a /goal carrying on by itself — never runs on it.</summary>
+    /// work — a chat's task list, a /goal carrying on by itself — never runs on it.</summary>
     public bool InteractiveOnly { get; init; }
     /// <summary>How many subagents may work on it at once.</summary>
     public int MaxParallel { get; init; } = 2;
@@ -187,7 +187,7 @@ public sealed class AgentFleet
     /// private and may take subagents (always, when there are no workers at all).
     /// Throws <see cref="FleetUnavailableException"/> when no server can be reached, and
     /// <see cref="NoPrivateServerException"/> when a sensitive task has no private server to go to. <paramref name="unattended"/>
-    /// work (the queue, a /goal carrying on by itself) never goes to a server whose plan allows only interactive use.</summary>
+    /// work (a chat's task list, a /goal carrying on by itself) never goes to a server whose plan allows only interactive use.</summary>
     public async Task<FleetLease> AcquireAsync(string? preferred, CancellationToken cancellationToken, bool sensitive = false, bool unattended = false)
     {
         var tried = new HashSet<string>(StringComparer.Ordinal);

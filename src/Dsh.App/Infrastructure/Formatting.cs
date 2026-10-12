@@ -1,4 +1,5 @@
 using System.Globalization;
+using Dsh.Core;
 
 namespace Dsh.App.Infrastructure;
 
@@ -15,8 +16,11 @@ public static class Formatting
         return date.ToLocalTime().ToString("d MMM", CultureInfo.CurrentCulture);
     }
 
-    /// <summary>"14:32" — transcript timestamps.</summary>
-    public static string Clock(DateTimeOffset date) => date.ToLocalTime().ToString("t", CultureInfo.CurrentCulture);
+    /// <summary>"Fri, Oct 2, 2026 · 11:42:05 AM" — the date and time on every chat message, on this PC's clock.</summary>
+    public static string Stamp(DateTimeOffset date) => Fmt.Stamp(date);
+
+    /// <summary>"Friday, October 2, 2026 11:42:05 AM (UTC-07:00)".</summary>
+    public static string FullStamp(DateTimeOffset date) => Fmt.FullStamp(date);
 
     public static string Plural(int n, string singular, string? plural = null) =>
         $"{n} {(n == 1 ? singular : plural ?? singular + "s")}";

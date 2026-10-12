@@ -239,7 +239,7 @@ public static partial class SubscriptionPlans
                 new("qwen3.5-plus"), new("kimi-k2.5"), new("glm-5"), new("MiniMax-M2.5"),
             ],
             InteractiveOnly = true,
-            TermsNote = "Alibaba allows the Coding Plan only for interactive use in coding tools — not for automated scripts or unattended work. DSH won't run the task queue on it.",
+            TermsNote = "Alibaba allows the Coding Plan only for interactive use in coding tools — not for automated scripts or unattended work. DSH won't run task lists on it.",
         },
         new()
         {

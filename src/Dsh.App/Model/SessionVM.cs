@@ -175,14 +175,14 @@ public sealed partial class SessionVM : ObservableObject
 
     public bool IsIdle => !Running;
     public bool IsEmpty => Entries.Count == 0;
-    /// <summary>The project folder this chat works in; null for a chat without a project (a regular chat). A queue task a
-    /// regular chat added works in that chat's scratch folder, which is not a project either.</summary>
+    /// <summary>The project folder this chat works in; null for a chat without a project (a regular chat). A scratch folder
+    /// is never a project.</summary>
     public string? WorkspacePath => string.IsNullOrEmpty(Cwd) || PlainChat.IsScratch(Cwd) ? null : Cwd;
     /// <summary>A regular chat: no project folder.</summary>
     public bool IsPlain => WorkspacePath is null;
-    /// <summary>Where the agent works: the project folder, or (a regular chat) the chat's own scratch folder — or, for a
-    /// queue task a regular chat added, that chat's.</summary>
-    public string WorkingFolder => WorkspacePath ?? (string.IsNullOrEmpty(Cwd) ? PlainChat.Folder(Id) : Cwd);
+    /// <summary>Where the agent works — in this chat's turns and its task list alike: the project folder, or (a regular chat)
+    /// the chat's own scratch folder.</summary>
+    public string WorkingFolder => WorkspacePath ?? (PlainChat.IsScratch(Cwd) ? Cwd! : PlainChat.Folder(Id));
     public string? ProjectName => WorkspacePath is { } p ? System.IO.Path.GetFileName(p.TrimEnd('\\', '/')) : null;
     public string UpdatedLabel => Formatting.Relative(UpdatedAt);
 

@@ -25,7 +25,7 @@ public abstract record SlashCommand
     public sealed record Skills : SlashCommand;
     /// <summary>"/skill &lt;name&gt;" toggles a skill for this chat; "/skill new &lt;what&gt;" writes one.</summary>
     public sealed record Skill(string? Argument) : SlashCommand;
-    /// <summary>Start (or report) the unattended task queue.</summary>
+    /// <summary>Start (or report) this chat's task list.</summary>
     public sealed record Queue : SlashCommand;
     /// <summary>"/remember the staging server is orion": save a note to long-term memory.</summary>
     public sealed record Remember(string Text) : SlashCommand;
@@ -46,7 +46,7 @@ public abstract record SlashCommand
         new("/swap [model]", "Show the Spark's models, or switch what it serves (e.g. /swap flash)"),
         new("/skills", "List skills and what is selected for this chat"),
         new("/skill <name>|new <what>", "Select/deselect a skill for this chat, or have the model write a new one"),
-        new("/queue", "Start the task queue — it works queued tasks one at a time, unattended"),
+        new("/queue", "Work this chat's task list — its tasks one at a time, unattended"),
         new("/remember <note>", "Save a note to long-term memory (searched automatically when it's relevant)"),
         new("/memory [search]", "Open the memory manager, or search what is remembered"),
         new("/agents", "Show the subagent types, the model servers they run on, and what is running now"),
@@ -127,7 +127,7 @@ public static class GoalProtocol
         "The loop only ends when you signal, so keep working until then.\n" +
         "Do not ask whether to continue; the harness continues for you.";
 
-    /// <summary>The unattended variant (task queue): the user is not at the keyboard, so "blocked" is
+    /// <summary>The unattended variant (a chat's task list): the user is not at the keyboard, so "blocked" is
     /// reserved for true external walls — anything that can be decided by reading code, running a
     /// build, or checking a state gets decided and worked through instead.</summary>
     public static string KickoffAuto(string goal) => Kickoff(goal) + UnattendedNote;
@@ -143,7 +143,7 @@ public static class GoalProtocol
         $"<user_reply>\n{reply.Trim()}\n</user_reply>\n\n" +
         "Carry on with the goal using their answer — do not start over.\n\n\n" + Kickoff(goal);
 
-    /// <summary>Kickoff for a queue task picked back up in its own chat — after an app restart, a Stop,
+    /// <summary>Kickoff for a task picked back up in its chat — after an app restart, a Stop,
     /// or a block the user has since answered. The model sees its earlier work above and continues
     /// rather than starting over.</summary>
     public static string ResumeAuto(string goal) => ResumePreface + KickoffAuto(goal);
@@ -154,7 +154,7 @@ public static class GoalProtocol
         "current state — files, builds, tests, and any replies from the user — and continue from where you left off.\n\n\n";
 
     private const string UnattendedNote =
-        "\n\nThis goal is running unattended in the task queue. The user will not see this " +
+        "\n\nThis goal is running unattended, from this chat's task list. The user may not see this " +
         "conversation until it finishes, so never stop to ask a question you can answer " +
         "yourself: read the code, run the build, test it, and make the call. If something " +
         $"truly cannot proceed without them, finish with `{BlockedMarker}: <exactly what you " +

@@ -6,8 +6,8 @@ using MessageRole = Dsh.App.Model.MessageRole;
 
 namespace Dsh.App.Tests;
 
-/// <summary>Ported from QueueRunnerTests.swift: the task queue, /goal, background agents and the vault,
-/// end to end through AgentHost against a fake model server.</summary>
+/// <summary>Ported from QueueRunnerTests.swift, then reworked for per-chat task lists: each chat's list,
+/// /goal, background agents and the vault, end to end through AgentHost against a fake model server.</summary>
 public sealed class QueueRunnerTests : IDisposable
 {
     private readonly string _dir = Path.Combine(Path.GetTempPath(), $"dsh-queue-{Guid.NewGuid():N}");
@@ -106,43 +106,100 @@ public sealed class QueueRunnerTests : IDisposable
         a is not null && b is not null
         && string.Equals(Path.GetFullPath(a).TrimEnd('\\', '/'), Path.GetFullPath(b).TrimEnd('\\', '/'), StringComparison.OrdinalIgnoreCase);
 
-    // MARK: - Queue
+    // MARK: - Task lists
+
+    private SessionVM Chat(AgentHost host, string project = "main") => host.NewSession(Project(project));
+
+    private List<string> Kickoffs() =>
+        _server.Seen.Where(r => r.Fresh && r.LastUser.Contains("GOAL: ", StringComparison.Ordinal))
+            .Select(r => r.LastUser).ToList();
 
     [Fact]
-    public void QueueWorksTasksInOrderToCompletion() => Run(async host =>
+    public void AChatWorksItsTasksInOrderInsideTheChat() => Run(async host =>
     {
-        var a = host.QueueAdd("Task A", "do a");
-        var b = host.QueueAdd("Task B");
-        host.StartQueue();
+        var chat = Chat(host);
+        var chats = host.Sessions.Count;
+        var a = host.QueueAdd(chat.Id, "Task A", "do a");
+        var b = host.QueueAdd(chat.Id, "Task B");
+        host.StartQueue(chat.Id);
+        Assert.True(host.IsQueueRunning(chat.Id));
         Assert.True(host.QueueRunning);
-        await WaitUntil("queue done", () => !host.QueueRunning);
+        Assert.Contains(chat.Id, host.Config.QueueResumeChats);
+        await WaitUntil("list done", () => !host.IsQueueRunning(chat.Id));
 
         Assert.Equal(QueueTaskStatus.Complete, Status(host, a.Id));
         Assert.Equal(QueueTaskStatus.Complete, Status(host, b.Id));
-        var kickoffs = _server.Seen.Select(r => r.LastUser).Where(u => u.StartsWith("GOAL:", StringComparison.Ordinal)).ToList();
+        var kickoffs = Kickoffs();
         Assert.Equal(2, kickoffs.Count);
         Assert.True(kickoffs[0].Contains("Task A") && kickoffs[1].Contains("Task B"), "worked in order");
-        var sa = host.Queue.Find(a.Id)?.SessionId;
-        var sb = host.Queue.Find(b.Id)?.SessionId;
-        Assert.NotNull(sa);
-        Assert.NotNull(sb);
-        Assert.NotEqual(sa, sb); // each task gets its own chat
-        Assert.DoesNotContain(host.Sessions, s => s.Running);
+        // Both ran in the chat itself — no new chats — and B saw A's work.
+        Assert.Equal(chats, host.Sessions.Count);
+        Assert.All(new[] { a, b }, t => Assert.Equal(chat.Id, host.Queue.Find(t.Id)?.SessionId));
+        var bKickoff = _server.Seen.First(r => r.KickoffOf("Task B"));
+        Assert.Contains("GOAL: Task A", bKickoff.AllUserText);
+        Assert.Contains(chat.Entries.OfType<MessageEntryVM>(), m => m.Role == MessageRole.User && m.Text.StartsWith("📋 Task: Task A", StringComparison.Ordinal));
+        Assert.Contains(Notes(chat), n => n.StartsWith("✅ Task complete: “Task A”", StringComparison.Ordinal));
+        Assert.Contains(Notes(chat), n => n.StartsWith("Task list done: 2 complete", StringComparison.Ordinal));
+        Assert.False(chat.Running);
         Assert.Equal(1, host.Queue.Find(a.Id)?.Rounds);
         Assert.Equal(120, host.Queue.Find(a.Id)?.TotalTokens);
-        Assert.False(host.Config.QueuePaused);
-        // The queue file on disk matches.
+        Assert.DoesNotContain(chat.Id, host.Config.QueueResumeChats);
+        Assert.False(host.QueueRunning);
+        // The file on disk matches.
         var onDisk = new TaskQueue(Path.Combine(_dir, "task-queue.json"));
-        Assert.Equal(new[] { QueueTaskStatus.Complete, QueueTaskStatus.Complete }, onDisk.Tasks.Select(t => t.Status));
+        Assert.Equal(new[] { QueueTaskStatus.Complete, QueueTaskStatus.Complete }, onDisk.TasksFor(chat.Id).Select(t => t.Status));
+    });
+
+    [Fact]
+    public void EachChatOnlyRunsItsOwnList() => Run(async host =>
+    {
+        var x = Chat(host);
+        var y = Chat(host);
+        var x1 = host.QueueAdd(x.Id, "X1");
+        var y1 = host.QueueAdd(y.Id, "Y1");
+        var x2 = host.QueueAdd(x.Id, "X2");
+        Assert.Equal(new[] { x1.Id, x2.Id }, host.Queue.TasksFor(x.Id).Select(t => t.Id));
+        Assert.Equal(new[] { y1.Id }, host.Queue.TasksFor(y.Id).Select(t => t.Id));
+        Assert.Equal(2, host.Queue.Position(x2.Id));
+        Assert.Equal(1, host.Queue.Position(y1.Id));
+
+        host.StartQueue(x.Id);
+        Assert.False(host.IsQueueRunning(y.Id));
+        await WaitUntil("x done", () => !host.IsQueueRunning(x.Id));
+        Assert.Equal(QueueTaskStatus.Complete, Status(host, x1.Id));
+        Assert.Equal(QueueTaskStatus.Complete, Status(host, x2.Id));
+        Assert.Equal(QueueTaskStatus.Queued, Status(host, y1.Id)); // another chat's list waits for its own Start
+        Assert.DoesNotContain(_server.Seen, r => r.WorkingOn("Y1"));
+        Assert.Empty(Notes(y));
+    });
+
+    [Fact]
+    public void TwoChatsListsRunSideBySide() => Run(async host =>
+    {
+        _server.Reset((_, _) => new FakeReply.Slow(TimeSpan.FromMilliseconds(400), "Done.\nGOAL_COMPLETE"));
+        var x = Chat(host);
+        var y = Chat(host);
+        var x1 = host.QueueAdd(x.Id, "X1");
+        var y1 = host.QueueAdd(y.Id, "Y1");
+        host.StartQueue(x.Id);
+        host.StartQueue(y.Id);
+        Assert.Equal(2, host.QueueRunningCount);
+        await WaitUntil("both working", () => Status(host, x1.Id) == QueueTaskStatus.Running && Status(host, y1.Id) == QueueTaskStatus.Running);
+        Assert.True(x.Running && y.Running);
+        await WaitUntil("both done", () => !host.QueueRunning);
+        Assert.Equal(QueueTaskStatus.Complete, Status(host, x1.Id));
+        Assert.Equal(QueueTaskStatus.Complete, Status(host, y1.Id));
+        Assert.Equal(0, host.QueueRunningCount);
     });
 
     [Fact]
     public void TaskKeepsGoingPastTheOldRoundCapUntilTheModelSaysComplete() => Run(async host =>
     {
         _server.Reset((_, n) => n < 60 ? new FakeReply.Text("Still working on it.") : new FakeReply.Text("All verified.\nGOAL_COMPLETE"));
-        var t = host.QueueAdd("Long task");
-        host.StartQueue();
-        await WaitUntil("queue done", () => !host.QueueRunning, 60);
+        var chat = Chat(host);
+        var t = host.QueueAdd(chat.Id, "Long task");
+        host.StartQueue(chat.Id);
+        await WaitUntil("list done", () => !host.QueueRunning, 60);
         Assert.Equal(QueueTaskStatus.Complete, Status(host, t.Id));
         Assert.Equal(60, host.Queue.Find(t.Id)?.Rounds);
     });
@@ -157,64 +214,65 @@ public sealed class QueueRunnerTests : IDisposable
             3 => new FakeReply.Transport(),
             _ => new FakeReply.Text("Recovered.\nGOAL_COMPLETE"),
         });
-        var t = host.QueueAdd("Survive an outage");
-        host.StartQueue();
-        await WaitUntil("queue done", () => !host.QueueRunning);
+        var chat = Chat(host);
+        var t = host.QueueAdd(chat.Id, "Survive an outage");
+        host.StartQueue(chat.Id);
+        await WaitUntil("list done", () => !host.QueueRunning);
         Assert.Equal(QueueTaskStatus.Complete, Status(host, t.Id));
         Assert.Equal(1, host.Queue.Find(t.Id)?.Rounds); // retries are not extra rounds
         var log = host.Queue.Find(t.Id)?.Log.Select(l => l.Text).ToList() ?? [];
         Assert.Contains(log, l => l.Contains("Model unavailable"));
         Assert.Contains(log, l => l.Contains("answering again"));
-        var vm = host.Sessions.Single(s => s.Id == host.Queue.Find(t.Id)?.SessionId);
-        Assert.Single(Replies(vm), r => r.Contains("Recovered."));
-        Assert.Null(vm.Retry);
+        Assert.Single(Replies(chat), r => r.Contains("Recovered."));
+        Assert.Null(chat.Retry);
     });
 
     [Fact]
-    public void StopReturnsTheTaskAndRestartResumesInTheSameChat() => Run(async host =>
+    public void StopPutsTheTaskBackAndStartPicksItUp() => Run(async host =>
     {
         _server.Reset((_, n) => n == 1 ? new FakeReply.Slow(TimeSpan.FromSeconds(5), "late") : new FakeReply.Text("Done.\nGOAL_COMPLETE"));
-        var t = host.QueueAdd("Stoppable");
-        host.StartQueue();
+        var chat = Chat(host);
+        var t = host.QueueAdd(chat.Id, "Stoppable");
+        host.StartQueue(chat.Id);
         await WaitUntil("request in flight", () => _server.Seen.Count == 1);
-        var chat = host.Queue.Find(t.Id)?.SessionId;
-        Assert.NotNull(chat); // chat recorded at start
-        host.StopQueue();
-        Assert.True(host.QueueStopping);
-        await WaitUntil("stopped", () => !host.QueueRunning && !host.QueueStopping);
+        Assert.Equal(t.Id, host.QueueActiveTask(chat.Id));
+        host.StopQueue(chat.Id);
+        Assert.True(host.IsQueueStopping(chat.Id));
+        Assert.False(host.IsQueueRunning(chat.Id));
+        await WaitUntil("stopped", () => !host.IsQueueStopping(chat.Id));
         Assert.Equal(QueueTaskStatus.Queued, Status(host, t.Id));
-        Assert.True(host.Config.QueuePaused);
-        Assert.False(host.Config.QueueResumeOnLaunch);
-        Assert.False(host.Session(chat!)?.Running ?? true);
+        Assert.DoesNotContain(chat.Id, host.Config.QueueResumeChats);
+        Assert.False(chat.Running);
 
-        host.StartQueue();
-        Assert.False(host.Config.QueuePaused);
+        host.StartQueue(chat.Id);
         await WaitUntil("done", () => !host.QueueRunning);
         Assert.Equal(QueueTaskStatus.Complete, Status(host, t.Id));
-        Assert.Equal(chat, host.Queue.Find(t.Id)?.SessionId); // resumed in the same chat
-        // The stopped attempt never got an answer, so nothing reached the model: the restart is a
-        // clean kickoff, and the chat says so.
+        // The stopped attempt never got an answer, so nothing reached the model: the restart is a clean
+        // kickoff, and the chat says the first one wasn't delivered.
         Assert.StartsWith("GOAL: Stoppable", _server.Seen[^1].LastUser);
         Assert.Equal(1, _server.Seen[^1].Messages.Count(m => m.Role == "user"));
-        Assert.Contains(Notes(host.Session(chat!)!), n => n.StartsWith("Not delivered to the model", StringComparison.Ordinal));
+        Assert.Contains(Notes(chat), n => n.StartsWith("Not delivered to the model", StringComparison.Ordinal));
     });
 
     [Fact]
-    public void StartStopStartInOneBreathRunsTheTaskOnce() => Run(async host =>
+    public void StartStopStartInOneBreathRunsEachTaskOnce() => Run(async host =>
     {
         _server.Reset((_, _) => new FakeReply.Slow(TimeSpan.FromMilliseconds(300), "Done.\nGOAL_COMPLETE"));
-        var t = host.QueueAdd("Race");
-        var other = host.QueueAdd("Next");
-        host.StartQueue();
-        host.StopQueue();
-        host.StartQueue();
-        host.StopQueue();
-        host.StartQueue();
-        await WaitUntil("done", () => !host.QueueRunning);
+        var chat = Chat(host);
+        var chats = host.Sessions.Count;
+        var t = host.QueueAdd(chat.Id, "Race");
+        var other = host.QueueAdd(chat.Id, "Next");
+        host.StartQueue(chat.Id);
+        host.StopQueue(chat.Id);
+        host.StartQueue(chat.Id);
+        host.StopQueue(chat.Id);
+        host.StartQueue(chat.Id);
+        await WaitUntil("done", () => !host.QueueRunning && !host.IsQueueStopping(chat.Id));
         Assert.Equal(QueueTaskStatus.Complete, Status(host, t.Id));
         Assert.Equal(QueueTaskStatus.Complete, Status(host, other.Id));
-        Assert.Equal(2, host.Sessions.Where(s => s.Title.StartsWith("🚀", StringComparison.Ordinal)).Select(s => s.Id).Distinct().Count());
-        Assert.DoesNotContain(host.Sessions, s => s.Running);
+        Assert.Equal(1, Kickoffs().Count(k => k.Contains("GOAL: Next")));
+        Assert.Equal(chats, host.Sessions.Count);
+        Assert.False(chat.Running);
         Assert.DoesNotContain(host.Queue.Tasks, task => task.Status == QueueTaskStatus.Running);
     });
 
@@ -222,62 +280,63 @@ public sealed class QueueRunnerTests : IDisposable
     public void StartWhileTheStoppedTaskIsStillUnwindingRunsItOnceMore() => Run(async host =>
     {
         _server.Reset((_, n) => n == 1 ? new FakeReply.Slow(TimeSpan.FromSeconds(5), "late") : new FakeReply.Text("GOAL_COMPLETE"));
-        var t = host.QueueAdd("Unwinding");
-        host.StartQueue();
+        var chat = Chat(host);
+        var t = host.QueueAdd(chat.Id, "Unwinding");
+        host.StartQueue(chat.Id);
         await WaitUntil("in flight", () => _server.Seen.Count == 1);
-        host.StopQueue();
-        host.StartQueue(); // before the old run has let go of the task
-        Assert.True(host.QueueRunning);
-        await WaitUntil("done", () => !host.QueueRunning && !host.QueueStopping);
+        host.StopQueue(chat.Id);
+        host.StartQueue(chat.Id); // before the old run has let go of the task
+        Assert.True(host.IsQueueRunning(chat.Id));
+        await WaitUntil("done", () => !host.QueueRunning && !host.IsQueueStopping(chat.Id));
         Assert.Equal(QueueTaskStatus.Complete, Status(host, t.Id));
         Assert.Equal(2, _server.Seen.Count);
-        Assert.Single(host.Sessions, s => s.Title.StartsWith("🚀", StringComparison.Ordinal));
     });
 
     [Fact]
-    public void StoppingTheTaskFromItsChatPausesTheQueue() => Run(async host =>
+    public void StoppingTheTaskFromTheChatPausesTheList() => Run(async host =>
     {
         _server.Reset((_, _) => new FakeReply.Slow(TimeSpan.FromSeconds(5), "late"));
-        var t = host.QueueAdd("A");
-        host.QueueAdd("B");
-        host.StartQueue();
+        var chat = Chat(host);
+        var t = host.QueueAdd(chat.Id, "A");
+        host.QueueAdd(chat.Id, "B");
+        host.StartQueue(chat.Id);
         await WaitUntil("in flight", () => _server.Seen.Count == 1);
-        var chat = host.Queue.Find(t.Id)?.SessionId;
-        Assert.NotNull(chat);
-        host.StopSession(chat!);
-        await WaitUntil("paused", () => !host.QueueRunning && !host.QueueStopping);
+        host.StopSession(chat.Id);
+        await WaitUntil("paused", () => !host.IsQueueRunning(chat.Id) && !host.IsQueueStopping(chat.Id));
         Assert.Equal(QueueTaskStatus.Queued, Status(host, t.Id));
-        Assert.True(host.Config.QueuePaused);
-        Assert.Equal(2, host.Queue.Tasks.Count(task => task.Status == QueueTaskStatus.Queued));
+        Assert.Equal(2, host.Queue.TasksFor(chat.Id).Count(task => task.Status == QueueTaskStatus.Queued));
+        Assert.Contains(Notes(chat), n => n.StartsWith("Task list paused — “A” was stopped", StringComparison.Ordinal));
+        Assert.DoesNotContain(chat.Id, host.Config.QueueResumeChats);
     });
 
     [Fact]
     public void DeletingTheRunningTaskSkipsToTheNextOne() => Run(async host =>
     {
-        _server.Reset((request, _) => request.AllUserText.Contains("GOAL: A")
+        _server.Reset((request, _) => request.WorkingOn("A")
             ? new FakeReply.Slow(TimeSpan.FromSeconds(5), "late")
             : new FakeReply.Text("GOAL_COMPLETE"));
-        var a = host.QueueAdd("A");
-        var b = host.QueueAdd("B");
-        host.StartQueue();
+        var chat = Chat(host);
+        var a = host.QueueAdd(chat.Id, "A");
+        var b = host.QueueAdd(chat.Id, "B");
+        host.StartQueue(chat.Id);
         await WaitUntil("A in flight", () => Status(host, a.Id) == QueueTaskStatus.Running && _server.Seen.Count == 1);
         host.QueueRemove(a.Id);
         await WaitUntil("done", () => !host.QueueRunning);
         Assert.Equal(QueueTaskStatus.Skipped, Status(host, a.Id));
         Assert.Equal(QueueTaskStatus.Complete, Status(host, b.Id));
-        Assert.False(host.Config.QueuePaused);
     });
 
     [Fact]
-    public void ErrorsFailATaskAndThreeInARowPauseTheQueue() => Run(async host =>
+    public void ErrorsFailATaskAndThreeInARowPauseTheList() => Run(async host =>
     {
         _server.Reset((_, _) => new FakeReply.Http(400, """{"error":{"message":"bad request","code":400}}"""));
-        var ids = Enumerable.Range(1, 4).Select(i => host.QueueAdd($"T{i}").Id).ToList();
-        host.StartQueue();
+        var chat = Chat(host);
+        var ids = Enumerable.Range(1, 4).Select(i => host.QueueAdd(chat.Id, $"T{i}").Id).ToList();
+        host.StartQueue(chat.Id);
         await WaitUntil("paused", () => !host.QueueRunning, 30);
         Assert.Equal(new QueueTaskStatus?[] { QueueTaskStatus.Failed, QueueTaskStatus.Failed, QueueTaskStatus.Failed, QueueTaskStatus.Queued },
             ids.Select(id => Status(host, id)));
-        Assert.True(host.Config.QueuePaused);
+        Assert.Contains(Notes(chat), n => n.StartsWith("Task list paused — 3 tasks in a row failed", StringComparison.Ordinal));
         // Each task tried its goal several rounds before giving up.
         Assert.Equal(3 * GoalProtocol.MaxConsecutiveErrors, _server.Seen.Count);
     });
@@ -288,8 +347,9 @@ public sealed class QueueRunnerTests : IDisposable
         _server.Reset((_, n) => n == 1
             ? new FakeReply.Http(400, """{"error":{"message":"template error","code":400}}""")
             : new FakeReply.Text("Fine now.\nGOAL_COMPLETE"));
-        var t = host.QueueAdd("Flaky request");
-        host.StartQueue();
+        var chat = Chat(host);
+        var t = host.QueueAdd(chat.Id, "Flaky request");
+        host.StartQueue(chat.Id);
         await WaitUntil("done", () => !host.QueueRunning);
         Assert.Equal(QueueTaskStatus.Complete, Status(host, t.Id));
         // Round 1 never got going, so round 2 re-sends the kickoff.
@@ -297,141 +357,163 @@ public sealed class QueueRunnerTests : IDisposable
     });
 
     [Fact]
-    public void BlockedTaskMovesOnThenResumeRunsJustThatTask() => Run(async host =>
+    public void ABlockedTaskPausesTheListUntilItIsResumed() => Run(async host =>
     {
         _server.Reset((request, _) =>
-            request.AllUserText.Contains("GOAL: A") && !request.LastUser.StartsWith("[Resuming]", StringComparison.Ordinal)
+            request.WorkingOn("A") && !request.LastUser.StartsWith("[Resuming]", StringComparison.Ordinal)
                 ? new FakeReply.Text("I need the API key.\nGOAL_BLOCKED: the API key")
                 : new FakeReply.Text("GOAL_COMPLETE"));
-        var a = host.QueueAdd("A");
-        var b = host.QueueAdd("B");
-        host.StartQueue();
-        await WaitUntil("done", () => !host.QueueRunning);
+        var chat = Chat(host);
+        var a = host.QueueAdd(chat.Id, "A");
+        var b = host.QueueAdd(chat.Id, "B");
+        host.StartQueue(chat.Id);
+        await WaitUntil("paused on A", () => !host.QueueRunning);
         Assert.Equal(QueueTaskStatus.Blocked, Status(host, a.Id));
-        Assert.Equal(QueueTaskStatus.Complete, Status(host, b.Id));
+        Assert.Equal(QueueTaskStatus.Queued, Status(host, b.Id)); // B doesn't talk over A's question
+        Assert.Contains(Notes(chat), n => n.StartsWith("⏸ Task blocked: “A”", StringComparison.Ordinal));
+        Assert.DoesNotContain(chat.Id, host.Config.QueueResumeChats);
 
-        var c = host.QueueAdd("C");
-        var chat = host.Queue.Find(a.Id)?.SessionId;
         host.ResumeTask(a.Id);
-        Assert.Equal(new[] { a.Id }, host.QueueOnlyTasks!);
-        await WaitUntil("resumed task done", () => !host.QueueRunning);
+        Assert.True(host.IsQueueRunning(chat.Id));
+        await WaitUntil("list done", () => !host.QueueRunning);
         Assert.Equal(QueueTaskStatus.Complete, Status(host, a.Id));
-        Assert.Equal(chat, host.Queue.Find(a.Id)?.SessionId);
-        Assert.Equal(QueueTaskStatus.Queued, Status(host, c.Id)); // Resume works only that task
+        Assert.Equal(QueueTaskStatus.Complete, Status(host, b.Id));
+        var kickoffs = Kickoffs();
+        Assert.StartsWith("[Resuming]", kickoffs[1]); // A picked up where it stopped, in the same chat
+        Assert.Contains("GOAL: A", kickoffs[1]);
+        Assert.Contains("GOAL: B", kickoffs[2]);
     });
 
     [Fact]
-    public void ResumeWhileTheQueueRunsPutsTheTaskNextInstead() => Run(async host =>
+    public void ResumeWhileTheListRunsPutsTheTaskNext() => Run(async host =>
     {
         _server.Reset((request, _) =>
         {
-            if (request.AllUserText.Contains("GOAL: A") && !request.LastUser.StartsWith("[Resuming]", StringComparison.Ordinal))
+            if (request.WorkingOn("A") && !request.LastUser.StartsWith("[Resuming]", StringComparison.Ordinal))
                 return new FakeReply.Text("GOAL_BLOCKED: need input");
-            if (request.LastUser.Contains("GOAL: B")) return new FakeReply.Slow(TimeSpan.FromMilliseconds(500), "GOAL_COMPLETE");
+            if (request.WorkingOn("B")) return new FakeReply.Slow(TimeSpan.FromMilliseconds(500), "GOAL_COMPLETE");
             return new FakeReply.Text("GOAL_COMPLETE");
         });
-        var a = host.QueueAdd("A");
-        var b = host.QueueAdd("B");
-        var c = host.QueueAdd("C");
-        host.StartQueue();
-        await WaitUntil("B running", () => Status(host, b.Id) == QueueTaskStatus.Running);
+        var chat = Chat(host);
+        var a = host.QueueAdd(chat.Id, "A");
+        var b = host.QueueAdd(chat.Id, "B");
+        var c = host.QueueAdd(chat.Id, "C");
+        host.StartQueue(chat.Id);
+        await WaitUntil("paused on A", () => !host.QueueRunning);
         Assert.Equal(QueueTaskStatus.Blocked, Status(host, a.Id));
+        // Start again without answering: B (the next waiting task) runs; A is resumed while it does.
+        host.StartQueue(chat.Id);
+        await WaitUntil("B running", () => Status(host, b.Id) == QueueTaskStatus.Running);
         host.ResumeTask(a.Id);
         Assert.Equal(QueueTaskStatus.Queued, Status(host, a.Id));
-        Assert.Equal(a.Id, host.Queue.NextTask?.Id);
+        Assert.Equal(a.Id, host.Queue.NextTaskFor(chat.Id)?.Id);
+        Assert.Contains(Notes(chat), n => n == "“A” is next on this chat's task list.");
         await WaitUntil("done", () => !host.QueueRunning);
         Assert.Equal(new QueueTaskStatus?[] { QueueTaskStatus.Complete, QueueTaskStatus.Complete, QueueTaskStatus.Complete },
             new[] { a, b, c }.Select(t => Status(host, t.Id)));
-        Assert.DoesNotContain(host.Sessions, s => s.Running);
+        var order = Kickoffs().Select(k => k.Contains("GOAL: A") ? "A" : k.Contains("GOAL: B") ? "B" : "C").ToList();
+        Assert.Equal(["A", "B", "A", "C"], order);
+        Assert.False(chat.Running);
     });
 
     [Fact]
-    public void ResumingAFailedArchivedTaskKeepsItsHistory() => Run(async host =>
+    public void AFailedTaskResumesInItsChatWithItsHistory() => Run(async host =>
     {
-        // A fails (its chat is archived and released), B keeps the queue busy.
-        _server.Reset((request, _) =>
+        _server.Reset((_, _) => new FakeReply.Http(400, """{"error":{"message":"bad","code":400}}"""));
+        var chat = Chat(host);
+        var a = host.QueueAdd(chat.Id, "A");
+        host.StartQueue(chat.Id);
+        await WaitUntil("A failed", () => !host.QueueRunning);
+        Assert.Equal(QueueTaskStatus.Failed, Status(host, a.Id));
+        Assert.Contains(Notes(chat), n => n.StartsWith("Task failed: “A”", StringComparison.Ordinal));
+        var storedBefore = host.Log.LoadItems(chat.Id).Count;
+
+        _server.Reset((_, _) => new FakeReply.Text("GOAL_COMPLETE"));
+        host.ResumeTask(a.Id);
+        await WaitUntil("done", () => !host.QueueRunning);
+        Assert.Equal(QueueTaskStatus.Complete, Status(host, a.Id));
+        Assert.Equal(chat.Id, host.Queue.Find(a.Id)?.SessionId);
+        Assert.True(host.Log.LoadItems(chat.Id).Count > storedBefore); // the history grew rather than being replaced
+    });
+
+    [Fact]
+    public void TheListWaitsForTheUsersOwnTurn() => Run(async host =>
+    {
+        _server.Reset((request, _) => request.LastUser == "my question"
+            ? new FakeReply.Slow(TimeSpan.FromMilliseconds(500), "My answer.")
+            : new FakeReply.Text("GOAL_COMPLETE"));
+        var chat = Chat(host);
+        host.Send("my question", chat.Id);
+        var t = host.QueueAdd(chat.Id, "After you");
+        host.StartQueue(chat.Id);
+        Assert.True(host.IsQueueRunning(chat.Id));
+        Assert.Equal(QueueTaskStatus.Queued, Status(host, t.Id)); // waits for the turn
+        await WaitUntil("done", () => !host.QueueRunning);
+        Assert.Equal(QueueTaskStatus.Complete, Status(host, t.Id));
+        var kickoff = _server.Seen.Single(r => r.KickoffOf("After you"));
+        Assert.Contains(kickoff.Messages, m => m.Role == "assistant" && m.Content == "My answer.");
+    });
+
+    [Fact]
+    public void QueueCommandStartsThisChatsList() => Run(async host =>
+    {
+        var chat = Chat(host);
+        host.Send("/queue", chat.Id);
+        Assert.Contains(Notes(chat), n => n.StartsWith("This chat's task list is empty", StringComparison.Ordinal));
+        var t = host.QueueAdd(chat.Id, "Via slash");
+        host.Send("/queue", chat.Id);
+        Assert.True(host.IsQueueRunning(chat.Id));
+        await WaitUntil("done", () => !host.QueueRunning);
+        Assert.Equal(QueueTaskStatus.Complete, Status(host, t.Id));
+    });
+
+    [Fact]
+    public void DeletingAChatDeletesItsListAndStopsIt() => Run(async host =>
+    {
+        _server.Reset((_, _) => new FakeReply.Slow(TimeSpan.FromSeconds(5), "late"));
+        var chat = Chat(host);
+        var keep = Chat(host);
+        host.QueueAdd(chat.Id, "A");
+        host.QueueAdd(chat.Id, "B");
+        var other = host.QueueAdd(keep.Id, "Kept");
+        host.StartQueue(chat.Id);
+        await WaitUntil("in flight", () => _server.Seen.Count == 1);
+        host.DeleteSession(chat.Id);
+        await WaitUntil("stopped", () => !host.QueueRunning && !host.IsQueueStopping(chat.Id));
+        Assert.Empty(host.Queue.TasksFor(chat.Id));
+        Assert.Equal(new[] { other.Id }, host.Queue.Tasks.Select(t => t.Id));
+        Assert.DoesNotContain(chat.Id, host.Config.QueueResumeChats);
+    });
+
+    [Fact]
+    public void TasksFromTheOldGlobalQueueMoveIntoAChat() => UiThread.Run(async () =>
+    {
+        // A queue file from before lists were per chat: no chats on its tasks.
+        var old = new TaskQueue(Path.Combine(_dir, "task-queue.json"));
+        var o1 = old.Add("Old one", cwd: Project("main"));
+        var o2 = old.Add("Old two", cwd: Project("main"));
+        var elsewhere = old.Add("Other project", cwd: Project("other"));
+        var host = MakeHost();
+        try
         {
-            if (request.LastUser.Contains("GOAL: A") || (request.LastUser.Contains("round") && request.AllUserText.Contains("GOAL: A")))
-                return new FakeReply.Http(400, """{"error":{"message":"bad","code":400}}""");
-            if (request.AllUserText.Contains("GOAL: B")) return new FakeReply.Slow(TimeSpan.FromMilliseconds(600), "GOAL_COMPLETE");
-            return new FakeReply.Text("GOAL_COMPLETE");
-        });
-        var a = host.QueueAdd("A");
-        var b = host.QueueAdd("B");
-        host.StartQueue();
-        await WaitUntil("A failed, B running", () => Status(host, a.Id) == QueueTaskStatus.Failed && Status(host, b.Id) == QueueTaskStatus.Running);
-        var chat = host.Queue.Find(a.Id)?.SessionId;
-        Assert.NotNull(chat);
-        var vm = host.Session(chat!)!;
-        var storedBefore = host.Log.LoadItems(chat!).Count;
-        Assert.True(storedBefore > 3, $"{storedBefore} rows");
-
-        _server.Reset((_, _) => new FakeReply.Text("GOAL_COMPLETE"));
-        host.ResumeTask(a.Id);
-        Assert.NotEmpty(vm.Entries);
-        // The earlier attempt's timeline is back on screen (its rounds never reached the model, so they
-        // read as not delivered).
-        Assert.Contains(vm.Entries.OfType<MessageEntryVM>(), m => m.Text.Contains("Not delivered to the model: 🚀 queue: A"));
-        await WaitUntil("done", () => !host.QueueRunning);
-        Assert.Equal(QueueTaskStatus.Complete, Status(host, a.Id));
-        // The disk history grew rather than being replaced.
-        Assert.True(host.Log.LoadItems(chat!).Count > storedBefore);
-    });
-
-    [Fact]
-    public void ResumeDuringAResumeOnlyRunIsNotLost() => Run(async host =>
-    {
-        _server.Reset((request, _) => !request.LastUser.StartsWith("[Resuming]", StringComparison.Ordinal)
-            ? new FakeReply.Text("GOAL_BLOCKED: need input")
-            : new FakeReply.Slow(TimeSpan.FromMilliseconds(300), "GOAL_COMPLETE"));
-        var a = host.QueueAdd("A");
-        var b = host.QueueAdd("B");
-        host.StartQueue();
-        await WaitUntil("both blocked", () => !host.QueueRunning);
-        Assert.Equal(new QueueTaskStatus?[] { QueueTaskStatus.Blocked, QueueTaskStatus.Blocked }, new[] { a, b }.Select(t => Status(host, t.Id)));
-        var c = host.QueueAdd("C");
-        host.ResumeTask(a.Id);
-        host.ResumeTask(b.Id); // while A's Resume run is going
-        await WaitUntil("done", () => !host.QueueRunning);
-        Assert.Equal(QueueTaskStatus.Complete, Status(host, a.Id));
-        Assert.Equal(QueueTaskStatus.Complete, Status(host, b.Id));
-        Assert.Equal(QueueTaskStatus.Queued, Status(host, c.Id));
-    });
-
-    [Fact]
-    public void TaskRunsInTheProjectItWasQueuedIn() => Run(async host =>
-    {
-        var first = Project("main");
-        var t = host.QueueAdd("Here");
-        host.AdoptProject(Project("elsewhere"));
-        host.StartQueue();
-        await WaitUntil("done", () => !host.QueueRunning);
-        var chat = host.Sessions.Single(s => s.Id == host.Queue.Find(t.Id)?.SessionId);
-        Assert.True(SamePath(first, chat.Cwd), chat.Cwd);
-    });
-
-    [Fact]
-    public void QueueDoesNotStealTheSelectionFromAnotherChat() => Run(async host =>
-    {
-        var mine = host.NewSession(Project("main"));
-        mine.AppendMessage(MessageRole.User, "my own work");
-        host.SelectedId = mine.Id;
-        host.QueueAdd("A");
-        host.QueueAdd("B");
-        host.StartQueue();
-        // First task: followed (the user just pressed Start).
-        await WaitUntil("done", () => !host.QueueRunning);
-        var queueChats = host.Queue.Tasks.Select(t => t.SessionId).OfType<string>().ToHashSet();
-        Assert.Contains(host.SelectedId!, queueChats);
-
-        // Now the user goes back to their chat; the next run must not yank them.
-        host.SelectedId = mine.Id;
-        host.QueueAdd("C");
-        host.QueueAdd("D");
-        _server.Reset((_, _) => new FakeReply.Text("GOAL_COMPLETE"));
-        host.StartQueue();
-        await WaitUntil("done again", () => !host.QueueRunning);
-        Assert.NotNull(host.SelectedId);
+            var homes = host.Sessions.Where(s => s.Title == AgentHost.EarlierTasksTitle).ToList();
+            Assert.Equal(2, homes.Count); // one per project folder
+            var main = homes.Single(s => SamePath(s.Cwd, Project("main")));
+            Assert.Equal(new[] { o1.Id, o2.Id }, host.Queue.TasksFor(main.Id).Select(t => t.Id));
+            Assert.Equal(new[] { elsewhere.Id }, host.Queue.TasksFor(homes.Single(s => s != main).Id).Select(t => t.Id));
+            // ...and they run there.
+            host.StartQueue(main.Id);
+            await WaitUntil("done", () => !host.QueueRunning);
+            Assert.Equal(QueueTaskStatus.Complete, Status(host, o2.Id));
+            // A relaunch doesn't make more chats.
+            var relaunched = MakeHost(_config);
+            Assert.Equal(2, relaunched.Sessions.Count(s => s.Title == AgentHost.EarlierTasksTitle));
+        }
+        finally
+        {
+            host.StopAll();
+            await Task.Delay(50);
+        }
     });
 
     [Fact]
@@ -440,51 +522,116 @@ public sealed class QueueRunnerTests : IDisposable
         var host = MakeHost();
         host.AdoptProject(Project("main"));
         _server.Reset((_, n) => n == 1 ? new FakeReply.Slow(TimeSpan.FromSeconds(30), "late") : new FakeReply.Text("GOAL_COMPLETE"));
-        var t = host.QueueAdd("Interrupted");
-        host.StartQueue();
+        var chat = Chat(host);
+        var t = host.QueueAdd(chat.Id, "Interrupted");
+        host.StartQueue(chat.Id);
         await WaitUntil("in flight", () => _server.Seen.Count == 1);
         // Simulate a quit: a second host reads the same files.
         var relaunched = MakeHost(_config);
         Assert.Equal(QueueTaskStatus.Queued, relaunched.Queue.Find(t.Id)?.Status);
-        var chat = relaunched.Queue.Find(t.Id)?.SessionId;
-        Assert.NotNull(chat);
+        Assert.Equal(chat.Id, relaunched.Queue.Find(t.Id)?.SessionId);
         host.StopAll(); // the old process is gone
-        await WaitUntil("old stopped", () => !host.QueueRunning);
-        relaunched.Config.QueuePaused = false;
-        relaunched.StartQueue();
+        await WaitUntil("old stopped", () => !host.QueueRunning && !host.IsQueueStopping(chat.Id));
+        relaunched.StartQueue(chat.Id);
         await WaitUntil("relaunched done", () => !relaunched.QueueRunning);
         Assert.Equal(QueueTaskStatus.Complete, relaunched.Queue.Find(t.Id)?.Status);
-        Assert.Equal(chat, relaunched.Queue.Find(t.Id)?.SessionId);
+        Assert.Equal(chat.Id, relaunched.Queue.Find(t.Id)?.SessionId);
         relaunched.StopAll();
         await Task.Delay(50);
     });
 
     [Fact]
-    public void AnInterruptedQueueResumesOnLaunchButAStoppedOneDoesNot() => UiThread.Run(async () =>
+    public void AnInterruptedListResumesOnLaunchButAStoppedOneDoesNot() => UiThread.Run(async () =>
     {
         var host = MakeHost();
         host.AdoptProject(Project("main"));
         _server.Reset((_, n) => n == 1 ? new FakeReply.Slow(TimeSpan.FromSeconds(30), "late") : new FakeReply.Text("GOAL_COMPLETE"));
-        var t = host.QueueAdd("Interrupted");
-        host.StartQueue();
+        var chat = Chat(host);
+        var t = host.QueueAdd(chat.Id, "Interrupted");
+        host.StartQueue(chat.Id);
         await WaitUntil("in flight", () => _server.Seen.Count == 1);
         // Quitting the app is not the user pressing Stop.
         host.Shutdown();
-        await WaitUntil("old stopped", () => host.Queue.Find(t.Id)?.Status == QueueTaskStatus.Queued);
-        Assert.True(host.Config.QueueResumeOnLaunch);
-        Assert.False(host.Config.QueuePaused);
+        await WaitUntil("old stopped", () => host.Queue.Find(t.Id)?.Status == QueueTaskStatus.Queued && !host.QueueRunning && !chat.Running);
+        Assert.Contains(chat.Id, host.Config.QueueResumeChats);
         var relaunched = MakeHost(_config);
         relaunched.ResumeQueueIfNeeded();
-        Assert.True(relaunched.QueueRunning);
+        Assert.True(relaunched.IsQueueRunning(chat.Id),
+            $"chat={relaunched.Session(chat.Id) is not null} status={relaunched.Queue.Find(t.Id)?.Status} " +
+            $"notes={string.Join(" | ", relaunched.Session(chat.Id) is { } again ? Notes(again) : [])}");
         await WaitUntil("relaunched done", () => !relaunched.QueueRunning);
         Assert.Equal(QueueTaskStatus.Complete, relaunched.Queue.Find(t.Id)?.Status);
+        Assert.DoesNotContain(chat.Id, relaunched.Config.QueueResumeChats);
 
-        // A queue the user stopped stays stopped.
-        relaunched.QueueAdd("Later");
-        relaunched.Config.QueuePaused = true;
+        // A list the user stopped stays stopped.
+        _server.Reset((_, _) => new FakeReply.Slow(TimeSpan.FromSeconds(30), "late"));
+        relaunched.QueueAdd(chat.Id, "Later");
+        relaunched.StartQueue(chat.Id);
+        await WaitUntil("later in flight", () => _server.Seen.Count == 1);
+        relaunched.StopQueue(chat.Id);
+        relaunched.Shutdown();
+        await WaitUntil("later stopped", () => !relaunched.IsQueueStopping(chat.Id));
         var third = MakeHost(_config);
         third.ResumeQueueIfNeeded();
         Assert.False(third.QueueRunning);
+    });
+
+    // MARK: - The panel
+
+    private AppModel PanelModel(AgentHost host) =>
+        new(host.Config, host.Log, Dispatcher.CurrentDispatcher, host);
+
+    [Fact]
+    public void AddingATaskSurvivesRefreshesWhileTyping() => Run(async host =>
+    {
+        var chat = Chat(host);
+        var other = Chat(host);
+        host.SelectedId = chat.Id;
+        var panel = new Dsh.App.Views.QueuePanel(PanelModel(host));
+        panel.BeginAdd();
+        panel.NewTitleBox.Text = "Write the docs";
+        panel.NewDetailsBox.Text = "All of them.";
+        // The clock ticks, another chat's list changes, the queue runs: every refresh used to re-parent
+        // the form's boxes and throw.
+        panel.Refresh();
+        panel.Refresh();
+        host.QueueAdd(other.Id, "Someone else's");
+        await Task.Delay(100);
+        panel.Refresh();
+        Assert.True(panel.AddFormShowing);
+        Assert.Equal("Write the docs", panel.NewTitleBox.Text);
+        Assert.Equal("All of them.", panel.NewDetailsBox.Text);
+
+        panel.SubmitAdd();
+        var added = Assert.Single(host.Queue.TasksFor(chat.Id));
+        Assert.Equal(("Write the docs", "All of them."), (added.Title, added.Details));
+        Assert.False(panel.AddFormShowing);
+        Assert.Equal("", panel.NewTitleBox.Text);
+        Assert.Equal(new[] { added.Id }, panel.RowIds); // only this chat's list shows
+
+        // Another chat: its own list.
+        host.SelectedId = other.Id;
+        Assert.Equal(host.Queue.TasksFor(other.Id).Select(t => t.Id), panel.RowIds);
+    });
+
+    [Fact]
+    public void EditingATaskSurvivesRefreshes() => Run(async host =>
+    {
+        var chat = Chat(host);
+        host.SelectedId = chat.Id;
+        var task = host.QueueAdd(chat.Id, "Edit me", "old");
+        var panel = new Dsh.App.Views.QueuePanel(PanelModel(host));
+        panel.EditTask(task.Id);
+        Assert.True(panel.EditFormShowing);
+        panel.EditDetailsBox.Text = "new instructions";
+        host.QueueAdd(chat.Id, "Another");
+        await Task.Delay(100);
+        panel.Refresh();
+        Assert.True(panel.EditFormShowing);
+        Assert.Equal("new instructions", panel.EditDetailsBox.Text); // not reset to "old"
+        panel.SubmitEdit();
+        Assert.Equal("new instructions", host.Queue.Find(task.Id)?.Details);
+        Assert.False(panel.EditFormShowing);
     });
 
     // MARK: - Vault
@@ -525,24 +672,31 @@ public sealed class QueueRunnerTests : IDisposable
     // MARK: - Background agents & tasks
 
     [Fact]
-    public void AgentQueuesABackgroundTaskAndStartsTheQueue() => Run(async host =>
+    public void AgentAddsATaskToItsChatsListThatRunsAfterTheTurn() => Run(async host =>
     {
         _server.Reset((request, n) =>
         {
-            if (request.LastUser.StartsWith("GOAL:", StringComparison.Ordinal)) return new FakeReply.Text("Wrote the tests.\nGOAL_COMPLETE");
+            if (request.WorkingOn("Write parser tests")) return new FakeReply.Text("Wrote the tests.\nGOAL_COMPLETE");
             if (n == 1 && request.Fresh)
                 return new FakeReply.ToolCall("queue_task", """{"title":"Write parser tests","details":"Cover the edge cases.","start":true}""");
             return new FakeReply.Text("Queued it.");
         });
         var vm = host.NewSession(Project("main"));
+        var chats = host.Sessions.Count;
         host.Send("queue the tests for later", vm.Id);
-        await WaitUntil("queued task done", () =>
+        await WaitUntil("task done", () =>
             host.Queue.Tasks.FirstOrDefault()?.Status == QueueTaskStatus.Complete && !host.QueueRunning && !vm.Running);
         var task = host.Queue.Tasks[0];
         Assert.Equal("Write parser tests", task.Title);
+        Assert.Equal(vm.Id, task.SessionId); // on this chat's list, run in this chat
+        Assert.Equal(chats, host.Sessions.Count);
         Assert.True(SamePath(Project("main"), task.Cwd), task.Cwd);
-        Assert.Contains(task.Log, l => l.Text.Contains("Queued by the agent"));
-        Assert.Contains(Notes(vm), n => n.Contains("The agent queued a task"));
+        Assert.Contains(task.Log, l => l.Text.Contains("Added by the agent"));
+        Assert.Contains(Notes(vm), n => n.Contains("The agent added a task to this chat's list"));
+        Assert.Contains(Replies(vm), r => r.Contains("Wrote the tests."));
+        // It began only once the turn that added it was over.
+        var kickoff = _server.Seen.Single(r => r.KickoffOf("Write parser tests"));
+        Assert.Contains(kickoff.Messages, m => m.Role == "assistant" && m.Content == "Queued it.");
     });
 
     [Fact]

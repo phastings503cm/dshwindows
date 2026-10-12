@@ -139,7 +139,7 @@ public sealed record ProviderProfile
     /// (<see cref="RoutePrivacy.IsPrivateAddress"/>): your own machines are private, online services aren't. A route
     /// that isn't private gets sensitive details masked before anything is sent.</summary>
     public bool? IsPrivate { get; set; }
-    /// <summary>The plan's terms allow only interactive use (the Qwen Coding Plan): the task queue and other unattended
+    /// <summary>The plan's terms allow only interactive use (the Qwen Coding Plan): task lists and other unattended
     /// runs don't use it as the primary. null = no restriction.</summary>
     public bool? InteractiveOnly { get; set; }
 
@@ -456,6 +456,27 @@ public static class Fmt
 {
     /// <summary>"262,144" (grouped, current culture).</summary>
     public static string N(long value) => value.ToString("N0", CultureInfo.CurrentCulture);
+
+    /// <summary>"Fri, Oct 2, 2026 · 11:42:05 AM" — when a message was sent, on this PC's clock and in the
+    /// user's own date and time format ("Fri 2 Oct 2026 · 11:42:05" where the day comes first).</summary>
+    /// <param name="zone">The clock to show it on (default: this PC's).</param>
+    public static string Stamp(DateTimeOffset date, CultureInfo? culture = null, TimeZoneInfo? zone = null)
+    {
+        culture ??= CultureInfo.CurrentCulture;
+        var local = TimeZoneInfo.ConvertTime(date, zone ?? TimeZoneInfo.Local);
+        var monthDay = culture.DateTimeFormat.MonthDayPattern.Replace("MMMM", "MMM", StringComparison.Ordinal);
+        string weekday = local.ToString("ddd", culture), day = local.ToString(monthDay, culture), year = local.ToString("yyyy", culture);
+        var calendar = monthDay.TrimStart().StartsWith('d') ? $"{weekday} {day} {year}" : $"{weekday}, {day}, {year}";
+        return $"{calendar} · {local.ToString("T", culture)}";
+    }
+
+    /// <summary>"Friday, October 2, 2026 11:42:05 AM (UTC-07:00)" — the full date, time and offset.</summary>
+    public static string FullStamp(DateTimeOffset date, CultureInfo? culture = null, TimeZoneInfo? zone = null)
+    {
+        culture ??= CultureInfo.CurrentCulture;
+        var local = TimeZoneInfo.ConvertTime(date, zone ?? TimeZoneInfo.Local);
+        return $"{local.ToString("F", culture)} (UTC{local.ToString("zzz", CultureInfo.InvariantCulture)})";
+    }
 
     /// <summary>"1M", "512K", "32K" — compact window sizes for menus.</summary>
     public static string Short(int tokens) => tokens >= 1_000_000
