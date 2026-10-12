@@ -366,9 +366,9 @@ public sealed partial class AgentHost
             }
             else
             {
-                // (A task with no folder at all runs as a chat without a project, in a scratch folder of its own — never in
-                // whichever project some other chat happens to have.)
-                var cwd = task.Cwd ?? ProjectContext?.Root;
+                // (A task with no folder at all was queued without a project: it runs as a chat without one, in a scratch folder
+                // of its own — not in whatever project is open by then, nor in one some other chat happens to have.)
+                var cwd = task.Cwd;
                 vm = NewSession(cwd, select: false);
                 RenameSession(vm.Id, $"🚀 {task.Title}");
                 Queue.AttachSession(taskId, vm.Id);
