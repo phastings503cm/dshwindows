@@ -208,13 +208,15 @@ public sealed partial class SensitiveDetector
     [GeneratedRegex(@"^[A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)+$", RegexOptions.CultureInvariant, SensitiveKinds.MatchTimeoutMs)]
     private static partial Regex DottedPath();
 
-    [GeneratedRegex(@"^[A-Z][a-z0-9]+(?:[A-Z][a-z0-9]*)+$", RegexOptions.CultureInvariant, SensitiveKinds.MatchTimeoutMs)]
+    // Identifiers, in letters only (as in DSH for macOS): with digits allowed, a password such as Tr0ub4dorX9 would
+    // read as PascalCase.
+    [GeneratedRegex(@"^[A-Z][a-z]+(?:[A-Z][a-z]*)+$", RegexOptions.CultureInvariant, SensitiveKinds.MatchTimeoutMs)]
     private static partial Regex PascalCase();
 
-    [GeneratedRegex(@"^[a-z]+(?:[A-Z][a-z0-9]*)+$", RegexOptions.CultureInvariant, SensitiveKinds.MatchTimeoutMs)]
+    [GeneratedRegex(@"^[a-z]+(?:[A-Z][a-z]*)+$", RegexOptions.CultureInvariant, SensitiveKinds.MatchTimeoutMs)]
     private static partial Regex CamelCase();
 
-    [GeneratedRegex(@"^[a-z]+(?:_[a-z0-9]+)+$", RegexOptions.CultureInvariant, SensitiveKinds.MatchTimeoutMs)]
+    [GeneratedRegex(@"^[a-z]+(?:_[a-z]+)+$", RegexOptions.CultureInvariant, SensitiveKinds.MatchTimeoutMs)]
     private static partial Regex SnakeCase();
 
     /// <summary>Whether a bare (unquoted) assigned value is a secret rather than code: not a type, a dotted path or an

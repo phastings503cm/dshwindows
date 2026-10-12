@@ -189,6 +189,7 @@ public sealed class ShieldV2Tests
     [InlineData("accessToken", false)]
     [InlineData("user_password", false)]
     [InlineData("hunter22x", true)]       // a digit
+    [InlineData("Tr0ub4dorX9", true)]     // reads like PascalCase only if identifiers may hold digits
     [InlineData("hunter-two", true)]      // a symbol
     [InlineData("correcthorse", true)]    // eight letters or more, one case
     [InlineData("CORRECTHORSE", true)]
