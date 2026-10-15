@@ -11,6 +11,11 @@
   process, no web view.
 </p>
 
+<p align="center">
+  <img src="assets/screenshots/agent-at-work-dark.png" width="920"
+       alt="Vision working through a task: its plan beside the chat with three of four steps done, the tests running, and a review subagent working on a second model server" />
+</p>
+
 ---
 
 This is the Windows edition of [Vision for macOS](https://github.com/phastings503cm/vision-mac), written in C#
@@ -23,6 +28,22 @@ keys, and a project's `.dsh` folder and `DSH.md` keep working.
 ```
 you → Vision.Core.Engine → OpenAI-compatible /chat/completions → tool calls → files & shell → you
 ```
+
+## Screenshots
+
+| | |
+|---|---|
+| ![The finished task: what changed, the checks it ran and the files it touched](assets/screenshots/task-done-light.png) | ![Code mode: the project's files, an editor and a PowerShell terminal beside the chat](assets/screenshots/code-mode-dark.png) |
+| The finished task: what changed, the checks it ran, the files it touched | Code mode: files, editor and a terminal beside the chat |
+| ![The setup wizard's first page](assets/screenshots/setup-wizard-light.png) | ![Settings, AI Models: a DGX Spark as the private primary and Amazon Bedrock](assets/screenshots/ai-models-dark.png) |
+| Setting up: a Spark Swapper code, a subscription plan, a DGX Spark from scratch, or Bedrock | AI Models: primary, subagents, backups and private routes |
+| ![Settings, Model servers: a DGX Spark serving one model while it installs another](assets/screenshots/model-servers-light.png) | ![A chat's task list beside the chat: done, waiting on you, and queued tasks](assets/screenshots/task-list-light.png) |
+| Model servers: what each Spark Swapper box serves and can install | Task lists: work queued for a chat, done one by one |
+| ![The credentials vault](assets/screenshots/credentials-vault-dark.png) | ![The Amazon Bedrock guide's first page](assets/screenshots/bedrock-guide-light.png) |
+| The credentials vault: the agent writes `{{vault:NAME}}` and never sees the value | The Amazon Bedrock guide: sign-in, model access and terms, step by step |
+
+These are taken by CI from the app's own self-test (`Vision.exe --self-test`, see
+[Build from source](#build-from-source)) against a demo project, in light and dark; no model server is involved.
 
 ## Download
 
