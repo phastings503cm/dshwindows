@@ -8,8 +8,8 @@ namespace Vision.App.Infrastructure;
 /// or installed without the user clicking through.</summary>
 public static class UpdateChecker
 {
-    /// <summary>The repository releases are published from. (It was renamed from DSH's; GitHub sends the old name's
-    /// API calls here, so builds from before the rename still find new releases.)</summary>
+    /// <summary>The repository releases are published from. Builds from before the repository was renamed still ask
+    /// for it under its old name, and GitHub redirects those API calls here, so they find new releases too.</summary>
     public const string Repository = "phastings503cm/vision-windows";
     public static string ReleasesPage => $"https://github.com/{Repository}/releases/latest";
 
@@ -33,11 +33,26 @@ public static class UpdateChecker
             http.DefaultRequestHeaders.UserAgent.ParseAdd($"Vision-Windows/{Vision.Core.AppInfo.Version}");
             http.DefaultRequestHeaders.Accept.ParseAdd("application/vnd.github+json");
             var json = await http.GetStringAsync($"https://api.github.com/repos/{Repository}/releases/latest", cancellationToken);
+            return NewerThan(json, Current);
+        }
+        catch (Exception)
+        {
+            return null;
+        }
+    }
+
+    /// <summary>The release in <paramref name="json"/> (GitHub's "latest release" answer) when it is newer than
+    /// <paramref name="current"/>, else null. Only the tag ("v0.9.90") counts: release titles and file names changed
+    /// when the app was renamed in 0.9, and may again; the tag format never has.</summary>
+    internal static Release? NewerThan(string json, Version current)
+    {
+        try
+        {
             if (JsonNode.Parse(json) is not JsonObject obj) return null;
             var tag = obj["tag_name"]?.GetValue<string>() ?? "";
             var url = obj["html_url"]?.GetValue<string>() ?? ReleasesPage;
             if (!Version.TryParse(tag.TrimStart('v', 'V').Split('-')[0], out var latest)) return null;
-            return Normalize(latest) > Normalize(Current) ? new Release(latest, tag, url) : null;
+            return Normalize(latest) > Normalize(current) ? new Release(latest, tag, url) : null;
         }
         catch (Exception)
         {

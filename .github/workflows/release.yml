@@ -72,7 +72,7 @@ jobs:
           $version = "$($parts[0]).$($parts[1]).$count"
           "version=$version" >> $env:GITHUB_OUTPUT
           "tag=v$version" >> $env:GITHUB_OUTPUT
-          Write-Host "DSH $version"
+          Write-Host "Vision $version"
 
       - name: Test
         run: dotnet test tests/Vision.Core.Tests -c Release --logger "console;verbosity=minimal"
@@ -98,11 +98,20 @@ jobs:
 
       - name: UI self-test (smoke test of the packaged app)
         shell: pwsh
-        run: ./scripts/self-test.ps1 -Exe artifacts/publish/win-x64/DSH/Vision.exe -Output "$env:RUNNER_TEMP/selftest"
+        run: ./scripts/self-test.ps1 -Exe artifacts/publish/win-x64/Vision/Vision.exe -Output "$env:RUNNER_TEMP/selftest"
 
-      - name: "Installer test: silent install, launch, uninstall"
+      # Legacy: the last release under the app's former name (DSH), for the upgrade check below.
+      - name: Download the last release under the former name
         shell: pwsh
-        run: ./scripts/installer-test.ps1 -Installer "artifacts/DSH-${{ steps.version.outputs.version }}-win-x64-setup.exe" -Output "$env:RUNNER_TEMP/installer-test"
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release download v0.8.85 --repo "${{ github.repository }}" --pattern 'DSH-0.8.85-win-x64-setup.exe' --dir "$env:RUNNER_TEMP/legacy"
+          if ($LASTEXITCODE -ne 0) { throw 'Downloading the former version for the upgrade test failed.' }
+
+      - name: "Installer test: upgrade from the former name, launch, uninstall"
+        shell: pwsh
+        run: ./scripts/installer-test.ps1 -Installer "artifacts/Vision-${{ steps.version.outputs.version }}-win-x64-setup.exe" -LegacyInstaller "$env:RUNNER_TEMP/legacy/DSH-0.8.85-win-x64-setup.exe" -Output "$env:RUNNER_TEMP/installer-test"
 
       - name: Upload screenshots and logs
         if: always()
@@ -126,15 +135,22 @@ jobs:
           $range = if ($previous) { "$previous..HEAD" } else { 'HEAD' }
           $changes = git log $range --no-merges --pretty=format:'- %s (%h)' | Select-Object -First 60
           $base = "https://github.com/${{ github.repository }}/releases/download/$env:TAG"
-          $lines = @(
+          $lines = @()
+          # Legacy: the first release after the rename says once that the app was called DSH (releases before 0.9).
+          $previousVersion = if ($previous) { [version] ($previous.TrimStart('v')) } else { $null }
+          if ($previousVersion -and $previousVersion -lt [version] '0.9.0') {
+            $lines += "Vision was previously called DSH: installing it upgrades DSH in place and keeps your chats, settings and keys."
+            $lines += ""
+          }
+          $lines += @(
             "## Download"
             ""
             "| | Installer | Portable zip |"
             "|---|---|---|"
-            "| **Windows x64** (most PCs) | [DSH-$env:VERSION-win-x64-setup.exe]($base/DSH-$env:VERSION-win-x64-setup.exe) | [DSH-$env:VERSION-win-x64-portable.zip]($base/DSH-$env:VERSION-win-x64-portable.zip) |"
-            "| **Windows on ARM** (Snapdragon, Surface Pro X) | [DSH-$env:VERSION-win-arm64-setup.exe]($base/DSH-$env:VERSION-win-arm64-setup.exe) | [DSH-$env:VERSION-win-arm64-portable.zip]($base/DSH-$env:VERSION-win-arm64-portable.zip) |"
+            "| **Windows x64** (most PCs) | [Vision-$env:VERSION-win-x64-setup.exe]($base/Vision-$env:VERSION-win-x64-setup.exe) | [Vision-$env:VERSION-win-x64-portable.zip]($base/Vision-$env:VERSION-win-x64-portable.zip) |"
+            "| **Windows on ARM** (Snapdragon, Surface Pro X) | [Vision-$env:VERSION-win-arm64-setup.exe]($base/Vision-$env:VERSION-win-arm64-setup.exe) | [Vision-$env:VERSION-win-arm64-portable.zip]($base/Vision-$env:VERSION-win-arm64-portable.zip) |"
             ""
-            "The installer needs no administrator rights (it installs for your user) and adds DSH to the Start menu and, optionally, to the folder right-click menu. The portable zip runs from anywhere: unzip and start ``DSH\Vision.exe``."
+            "The installer needs no administrator rights (it installs for your user) and adds Vision to the Start menu and, optionally, to the folder right-click menu. The portable zip runs from anywhere: unzip and start ``Vision\Vision.exe``."
             ""
             "Windows 10 (1809 or later) or Windows 11. Builds are self-contained: no .NET install needed. They are not code-signed yet, so SmartScreen may say *Windows protected your PC* — choose **More info → Run anyway**. Checksums are in ``SHA256SUMS.txt``."
             ""
@@ -152,12 +168,12 @@ jobs:
           VERSION: ${{ steps.version.outputs.version }}
           TAG: ${{ steps.version.outputs.tag }}
         run: |
-          $files = @(Get-ChildItem artifacts -File | Where-Object { $_.Name -like "DSH-$env:VERSION-*" } | ForEach-Object { $_.FullName }) + (Resolve-Path artifacts/SHA256SUMS.txt).Path
+          $files = @(Get-ChildItem artifacts -File | Where-Object { $_.Name -like "Vision-$env:VERSION-*" } | ForEach-Object { $_.FullName }) + (Resolve-Path artifacts/SHA256SUMS.txt).Path
           gh release view $env:TAG *> $null
           if ($LASTEXITCODE -eq 0) {
             # A re-run of the same commit: refresh the assets in place.
             gh release upload $env:TAG @files --clobber
           } else {
-            gh release create $env:TAG @files --title "DSH $env:VERSION" --notes-file release-notes.md --target $env:GITHUB_SHA --latest
+            gh release create $env:TAG @files --title "Vision $env:VERSION" --notes-file release-notes.md --target $env:GITHUB_SHA --latest
           }
           if ($LASTEXITCODE -ne 0) { throw "Publishing the release failed." }

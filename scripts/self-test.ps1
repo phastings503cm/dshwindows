@@ -3,7 +3,7 @@
     Runs the built-in UI self-test (Vision.exe --self-test) and fails when it reports a problem.
 
 .DESCRIPTION
-    The self-test starts DSH against a throwaway data folder and a demo project, fills a chat with
+    The self-test starts Vision against a throwaway data folder and a demo project, fills a chat with
     every kind of transcript row, opens code mode with a terminal, and renders the main window and
     every settings page, the setup wizard and Memory & Skills to PNG files in -Output. Any exception
     while doing so makes it exit non-zero.

@@ -77,11 +77,21 @@ jobs:
 
       - name: UI self-test
         shell: pwsh
-        run: ./scripts/self-test.ps1 -Exe artifacts/publish/win-x64/DSH/Vision.exe -Output "$env:RUNNER_TEMP/selftest"
+        run: ./scripts/self-test.ps1 -Exe artifacts/publish/win-x64/Vision/Vision.exe -Output "$env:RUNNER_TEMP/selftest"
 
-      - name: "Installer test: silent install, launch, uninstall"
+      # Legacy: the last release under the app's former name (DSH). The installer test installs it first, so
+      # it checks the upgrade users get: the old folder, shortcuts and folder menu replaced, data untouched.
+      - name: Download the last release under the former name
         shell: pwsh
-        run: ./scripts/installer-test.ps1 -Installer "artifacts/DSH-${{ steps.package.outputs.version }}-win-x64-setup.exe" -Output "$env:RUNNER_TEMP/installer-test"
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release download v0.8.85 --repo "${{ github.repository }}" --pattern 'DSH-0.8.85-win-x64-setup.exe' --dir "$env:RUNNER_TEMP/legacy"
+          if ($LASTEXITCODE -ne 0) { throw 'Downloading the former version for the upgrade test failed.' }
+
+      - name: "Installer test: upgrade from the former name, launch, uninstall"
+        shell: pwsh
+        run: ./scripts/installer-test.ps1 -Installer "artifacts/Vision-${{ steps.package.outputs.version }}-win-x64-setup.exe" -LegacyInstaller "$env:RUNNER_TEMP/legacy/DSH-0.8.85-win-x64-setup.exe" -Output "$env:RUNNER_TEMP/installer-test"
 
       - name: Upload screenshots and logs
         if: always()

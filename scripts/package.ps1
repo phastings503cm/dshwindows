@@ -1,6 +1,6 @@
 <#
 .SYNOPSIS
-    Builds DSH for Windows release artifacts: a self-contained publish per architecture, a portable
+    Builds Vision for Windows release artifacts: a self-contained publish per architecture, a portable
     zip, an Inno Setup installer, and SHA256SUMS.txt.
 
 .DESCRIPTION
@@ -34,7 +34,7 @@ if (-not $Version) {
     $count = (git -C $root rev-list --count HEAD).Trim()
     $Version = "$($parts[0]).$($parts[1]).$count"
 }
-Write-Host "Packaging DSH $Version for $($Arch -join ', ')"
+Write-Host "Packaging Vision $Version for $($Arch -join ', ')"
 
 $iscc = $null
 if (-not $SkipInstaller) {
@@ -47,8 +47,8 @@ Add-Type -AssemblyName System.IO.Compression.FileSystem
 
 foreach ($a in $Arch) {
     $rid = "win-$a"
-    # Publish into a folder named DSH so the portable zip unpacks to DSH\Vision.exe.
-    $publish = [System.IO.Path]::Combine($out, 'publish', $rid, 'DSH')
+    # Publish into a folder named Vision so the portable zip unpacks to Vision\Vision.exe.
+    $publish = [System.IO.Path]::Combine($out, 'publish', $rid, 'Vision')
     if (Test-Path $publish) { Remove-Item -Recurse -Force $publish }
 
     $readyToRun = if ($SkipReadyToRun) { 'false' } else { 'true' }
@@ -56,7 +56,7 @@ foreach ($a in $Arch) {
         "-p:Version=$Version" "-p:PublishReadyToRun=$readyToRun" -p:DebugType=none -p:DebugSymbols=false -o $publish
     if ($LASTEXITCODE -ne 0) { throw "dotnet publish failed for $rid" }
 
-    $zip = Join-Path $out "DSH-$Version-$rid-portable.zip"
+    $zip = Join-Path $out "Vision-$Version-$rid-portable.zip"
     if (Test-Path $zip) { Remove-Item -Force $zip }
     [System.IO.Compression.ZipFile]::CreateFromDirectory($publish, $zip, [System.IO.Compression.CompressionLevel]::Optimal, $true)
     Write-Host "  $zip"
@@ -64,11 +64,11 @@ foreach ($a in $Arch) {
     if (-not $SkipInstaller) {
         & $iscc /Q "/DAppVersion=$Version" "/DArch=$a" "/DSourceDir=$publish" "/DOutputDir=$out" ([System.IO.Path]::Combine($root, 'installer', 'Vision.iss'))
         if ($LASTEXITCODE -ne 0) { throw "Inno Setup failed for $rid" }
-        Write-Host "  $(Join-Path $out "DSH-$Version-$rid-setup.exe")"
+        Write-Host "  $(Join-Path $out "Vision-$Version-$rid-setup.exe")"
     }
 }
 
-$sums = Get-ChildItem $out -File | Where-Object { $_.Name -like "DSH-$Version-*" -and $_.Extension -in '.zip', '.exe' } | Sort-Object Name |
+$sums = Get-ChildItem $out -File | Where-Object { $_.Name -like "Vision-$Version-*" -and $_.Extension -in '.zip', '.exe' } | Sort-Object Name |
     ForEach-Object { '{0}  {1}' -f (Get-FileHash $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant(), $_.Name }
 Set-Content -Path (Join-Path $out 'SHA256SUMS.txt') -Value $sums -Encoding ascii
 Write-Host "  $(Join-Path $out 'SHA256SUMS.txt')"
