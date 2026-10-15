@@ -1,8 +1,8 @@
 <p align="center">
-  <img src="assets/logo-256.png" alt="DSH for Windows" width="112" />
+  <img src="assets/logo-256.png" alt="Vision for Windows" width="112" />
 </p>
 
-<h1 align="center">DSH for Windows</h1>
+<h1 align="center">Vision for Windows</h1>
 
 <p align="center">
   A native Windows coding agent that <em>is</em> the harness. It runs the tool loop itself and talks
@@ -13,9 +13,12 @@
 
 ---
 
-This is a Windows port of [DSH for macOS](https://github.com/gnubyte/deepharness), rewritten in C#
+This is the Windows edition of [Vision for macOS](https://github.com/phastings503cm/vision-mac), written in C#
 (.NET 10, WPF). The agent engine, tools, permission model, skills, plugins and conversation format
 match the macOS app; the shell, terminal, paths, secrets and installer are Windows-native.
+
+Vision was previously called DSH: installing Vision upgrades DSH in place and keeps your chats, settings and
+keys, and a project's `.dsh` folder and `DSH.md` keep working.
 
 ```
 you → Vision.Core.Engine → OpenAI-compatible /chat/completions → tool calls → files & shell → you
@@ -24,24 +27,24 @@ you → Vision.Core.Engine → OpenAI-compatible /chat/completions → tool call
 ## Download
 
 Every push to the default branch builds, tests and publishes a release. Get the latest from
-**[Releases](https://github.com/phastings503cm/dshwindows/releases/latest)**:
+**[Releases](https://github.com/phastings503cm/vision-windows/releases/latest)**:
 
 | | Installer | Portable |
 |---|---|---|
-| **Windows x64** (most PCs) | `DSH-<version>-win-x64-setup.exe` | `DSH-<version>-win-x64-portable.zip` |
-| **Windows on ARM** | `DSH-<version>-win-arm64-setup.exe` | `DSH-<version>-win-arm64-portable.zip` |
+| **Windows x64** (most PCs) | `Vision-<version>-win-x64-setup.exe` | `Vision-<version>-win-x64-portable.zip` |
+| **Windows on ARM** | `Vision-<version>-win-arm64-setup.exe` | `Vision-<version>-win-arm64-portable.zip` |
 
 - **Installer** — no administrator rights needed (installs for your user under
-  `%LOCALAPPDATA%\Programs\DSH`), adds a Start menu entry, and optionally **Open with DSH** on the
+  `%LOCALAPPDATA%\Programs\Vision`), adds a Start menu entry, and optionally **Open with Vision** on the
   folder right-click menu. Uninstall from *Settings › Apps*; your chats and settings stay.
-- **Portable** — unzip anywhere and run `DSH\Vision.exe`. Put an empty file named `portable` next to
-  `Vision.exe` to keep settings and chats in a `data` folder beside it instead of `%APPDATA%\DSH`.
+- **Portable** — unzip anywhere and run `Vision\Vision.exe`. Put an empty file named `portable` next to
+  `Vision.exe` to keep settings and chats in a `data` folder beside it instead of `%APPDATA%\Vision`.
 
 Requires Windows 10 1809 or later, or Windows 11. Builds are self-contained (no .NET install
 needed). They aren't code-signed yet, so SmartScreen may show *Windows protected your PC* — choose
 **More info → Run anyway**. `SHA256SUMS.txt` in each release lists the checksums.
 
-DSH checks for a newer release on startup (Settings › General › Check for updates) and offers a
+Vision checks for a newer release on startup (Settings › General › Check for updates) and offers a
 download link; it never installs anything on its own.
 
 ## First run
@@ -77,17 +80,17 @@ in the address of the one you pick.
 
 [Spark Swapper](https://github.com/gnubyte/DGX-Spark-Swapper) 2.0 runs on a DGX Spark or an AMD Strix
 Halo box, and gives out *connection codes*: on its page (`https://<box>:8999`) choose **Connect**, then
-**Connect DSH**, and copy the code. In DSH choose **My Spark Swapper (DGX Spark or Strix Halo)** on the
+**Connect Vision**, and copy the code. In Vision choose **My Spark Swapper (DGX Spark or Strix Halo)** on the
 wizard's first page — or **Settings › Model servers › Add with a connection code…**, or **Settings › AI
 Models › Add › Spark Swapper (connection code)…** — and paste it:
 
-1. **Check it** — DSH connects with the code's certificate fingerprint pinned (the box must show exactly
+1. **Check it** — Vision connects with the code's certificate fingerprint pinned (the box must show exactly
    that certificate) and says what the box is serving.
 2. **Pick the model** — the box's models with their context and speed (*27 tok/s measured here*,
    *~58 tok/s*, or an estimate). A model the box doesn't have yet is marked *Not installed* with its
-   download size and time; **Install on <box>** installs it, DSH follows the install, and then offers to
+   download size and time; **Install on <box>** installs it, Vision follows the install, and then offers to
    start it. Picking another installed model offers to switch the box now (or keep what it serves).
-3. **How should DSH use it?** — primary, subagent or backup (see *AI Models*), and private: it's your own
+3. **How should Vision use it?** — primary, subagent or backup (see *AI Models*), and private: it's your own
    hardware.
 4. **Save and say hello** — the model route (`https://<box>:11443/v1` with the certificate pinned) and the
    box itself, for switching models. The app token and the model's key go to Windows Credential Manager,
@@ -95,7 +98,7 @@ Models › Add › Spark Swapper (connection code)…** — and paste it:
 
 A Swapper older than 2.0 has no connection codes: **Connect with an address and login instead** takes its
 address (a bare host name or IP is fine), username and password. A 2.0 Swapper trades that login for an
-app token labelled *DSH on <this PC>*, so the password isn't kept.
+app token labelled *Vision on <this PC>*, so the password isn't kept.
 
 **Settings › Model servers** lists every box — DGX Spark or Strix Halo, online or not, what it serves and
 its context, the Swapper version — with **Open its web page**, **Rename** and **Remove**, and each box's
@@ -103,7 +106,7 @@ models with **Switch**, or **Install on <box>** for one it doesn't have yet. The
 composer has a section per box (models that aren't installed are greyed out); picking a model asks that
 box to switch, and every route at that box's address follows the new model. `/swap` lists every box's
 models; `/swap <model>` switches the box behind the primary model, and `/swap <box> <model>` picks the box
-by name. A Swapper that was reset, or that revoked DSH's token, is reported as such, with a button to
+by name. A Swapper that was reset, or that revoked Vision's token, is reported as such, with a button to
 paste a fresh code. A Spark set up in an earlier version (one *Settings › DGX Spark* page) moves over by
 itself, password and all.
 
@@ -118,28 +121,28 @@ closed at any point and picks up where you left off.
    setup page (username, password, home Wi-Fi) and the ~10-minute update, while it watches your
    network for the Spark to come back. *Start fresh* makes NVIDIA's recovery USB stick for you: pick
    the recovery archive you downloaded from NVIDIA (`.tar.gz`, `.zip` or an unpacked folder) and a USB
-   stick; DSH checks the files fit FAT32, asks Windows for permission (a small elevated helper,
+   stick; Vision checks the files fit FAT32, asks Windows for permission (a small elevated helper,
    `Vision.exe --write-recovery-usb`, does the erasing — only USB disks between 8 and 256 GB that don't
    hold Windows are offered, and the disk is re-checked right before it is wiped), writes the
    known-good layout (MBR, one active FAT32 partition ≤ 31 GB labelled `BOOTME`,
    `EFI\BOOT\recovery.txt`) and shows how to boot from it.
 2. **Find your Spark** — a network scan shows friendly cards ("DGX Spark at 192.168.1.42 —
    spark-3f2a"); an address can also be typed in.
-3. **Install Spark Swapper** — DSH signs in over SSH with the account from the Spark's setup page
+3. **Install Spark Swapper** — Vision signs in over SSH with the account from the Spark's setup page
    (the host key is trusted on first use and remembered in `known_hosts.json`), runs
    [Spark Swapper](https://github.com/gnubyte/DGX-Spark-Swapper)'s one-line installer in a terminal,
    answers `sudo`'s password prompt itself (never shown or saved), and adds an nginx HTTPS front for
-   the model API on port 11443 if there isn't one (Spark Swapper 2.0 writes its own, which DSH leaves
+   the model API on port 11443 if there isn't one (Spark Swapper 2.0 writes its own, which Vision leaves
    alone).
 4. **The padlock warning** — what a self-signed certificate is, why browsers say *Your connection
    isn't private*, why that's fine for your own Spark, and its fingerprint (checked against the
-   certificate file on the Spark over SSH). DSH pins it; optionally Windows trusts it too.
+   certificate file on the Spark over SSH). Vision pins it; optionally Windows trusts it too.
 5. **Your Swapper login** — creates Spark Swapper's admin account right away (the first visitor
    becomes admin).
 6. **Get a model running** — the Swapper's models with their context and speed; one that isn't
    installed yet shows its download size and time, and **Install and start** installs it through the
    Swapper (following the Spark's log) before starting it.
-7. **Connect DSH** — fetches the model's API key, saves the route
+7. **Connect Vision** — fetches the model's API key, saves the route
    `https://<spark>:11443/v1` with the certificate pinned, adds the Spark to Settings › Model servers
    (so `/swap` works) — with an app token from Spark Swapper 2.0 in place of your Swapper password —
    and says hello.
@@ -199,7 +202,7 @@ rewrite the task without them.
 ### Sensitive data
 
 **Mask sensitive data before sending it to models that aren't private** (on by default, in **Settings ›
-AI Models › Sensitive data**). Before a request leaves this PC for a model that isn't private, DSH
+AI Models › Sensitive data**). Before a request leaves this PC for a model that isn't private, Vision
 replaces sensitive values with placeholders such as `⟦EMAIL_1⟧` — in the system prompt, every message,
 tool results, earlier tool calls and text attachments — and tells the model to use them as written. What
 comes back has the real values put back before you, the tools or the transcript see it, so the model can
@@ -232,17 +235,17 @@ AI Models › Add › Subscription plan…**, walks through connecting one:
 
 | Plan | Notes |
 |---|---|
-| Z.ai — GLM Coding Plan, and pay-as-you-go API | International or China (BigModel). GLM-5.3 always thinks; DSH never asks it not to. |
-| Kimi Code (subscription), and Moonshot pay-as-you-go API | Overseas or China. DSH tells Kimi who is calling (`DSH/<version> (Windows)`) and never poses as another tool; if Kimi refuses that, the guide suggests the Moonshot API. |
+| Z.ai — GLM Coding Plan, and pay-as-you-go API | International or China (BigModel). GLM-5.3 always thinks; Vision never asks it not to. |
+| Kimi Code (subscription), and Moonshot pay-as-you-go API | Overseas or China. Vision tells Kimi who is calling (`Vision/<version> (Windows)`) and never poses as another tool; if Kimi refuses that, the guide suggests the Moonshot API. |
 | OpenAI API | A ChatGPT Plus or Pro subscription doesn't include API access — the API is billed separately. |
 | Qwen — Alibaba Cloud Coding Plan, and Model Studio pay-as-you-go | International or China. Coding Plan keys start with `sk-sp-`. |
 
 Pick the plan and region; the guide shows where to get the key, step by step (with a button to open
 the page), checks the key you paste — saying what's wrong when it isn't accepted: the wrong region or
 endpoint, a plan that doesn't allow this app, a usage limit — lets you pick the model (the
-recommended one first), asks how DSH should use it (primary, subagent, backup, or just add it), saves
+recommended one first), asks how Vision should use it (primary, subagent, backup, or just add it), saves
 the route and says hello through it. The key goes to Windows Credential Manager. Plans are online
-services, so they aren't private: DSH masks sensitive data before sending (*Sensitive data*, above).
+services, so they aren't private: Vision masks sensitive data before sending (*Sensitive data*, above).
 
 Alibaba allows the Qwen Coding Plan only for interactive use, so its route is marked **Interactive use
 only (plan terms)** (a switch in the route editor, for any route): while it is the primary, a chat's
@@ -256,35 +259,35 @@ On the wizard's first page, **Use Amazon Bedrock with my AWS account (guided)** 
 AI Models › Add › Amazon Bedrock…** — starts a guide for people who have never used the AWS CLI. All it
 needs is an AWS account you can sign in to on the website.
 
-1. **The AWS CLI.** DSH looks for it and installs it if it's missing (or updates it if it's too old
+1. **The AWS CLI.** Vision looks for it and installs it if it's missing (or updates it if it's too old
    for the browser sign-in, which needs 2.32 or later): Amazon's per-user MSI, no administrator
    prompt, with its Authenticode signature checked (signer *Amazon Web Services, Inc.*) before it
    runs. If that's blocked, it can install for all users (Windows asks for permission) or with
    `winget`.
-2. **Sign in.** Pick a Region, then **Sign in with my browser**: DSH runs `aws login` into its own
-   profile, `dsh-bedrock`, so profiles you already have are left alone. Your browser opens to the
-   AWS sign-in page; DSH never sees your password. Signing in on a PC without a browser works too
+2. **Sign in.** Pick a Region, then **Sign in with my browser**: Vision runs `aws login` into its own
+   profile, `vision-bedrock`, so profiles you already have are left alone. Your browser opens to the
+   AWS sign-in page; Vision never sees your password. Signing in on a PC without a browser works too
    (the CLI's `--remote` mode: open the link elsewhere and paste the code back). Already set up with
-   IAM Identity Center (SSO), keys or a role? Choose **Use a profile I already have** — DSH runs
+   IAM Identity Center (SSO), keys or a role? Choose **Use a profile I already have** — Vision runs
    `aws sso login` for SSO profiles. The guide then shows the account you're signed in to.
 3. **Pick a model.** The Region's chat models (Claude, Amazon Nova, Llama, Mistral, DeepSeek, …)
    with the best of each family first, using a cross-Region inference profile where the model needs
-   one. DSH checks what each one needs before first use.
+   one. Vision checks what each one needs before first use.
 4. **Enable it** — only when needed; most models are ready immediately:
-   - **Claude** needs Anthropic's one-time *use case* form per AWS account. DSH asks the same
+   - **Claude** needs Anthropic's one-time *use case* form per AWS account. Vision asks the same
      questions (company, website, industry, who will use it, what for) and submits it
      (`PutUseCaseForModelAccess`).
    - **Marketplace models** show their offer first — price per unit, licence (EULA) link, refund
      policy — and are enabled only after you tick *I accept* and press **Accept and enable**
      (`CreateFoundationModelAgreement`).
-   - Then DSH waits for AWS to finish (usually seconds, up to 15 minutes for a new subscription).
+   - Then Vision waits for AWS to finish (usually seconds, up to 15 minutes for a new subscription).
    If your AWS identity isn't allowed to do something, the page says which permission is missing
    and has a ready-made IAM policy to copy for your administrator.
 5. **Connect** — saves the route (profile, Region, model) and says hello through Bedrock.
 
 Requests are signed with SigV4 using short-lived credentials the AWS CLI exports for the profile
 (`aws configure export-credentials`), refreshed before they expire; nothing secret is stored in
-DSH's settings. Chats use Bedrock's Converse API with streaming, tools, images, prompt caching for
+Vision's settings. Chats use Bedrock's Converse API with streaming, tools, images, prompt caching for
 Claude and Nova, and Claude's extended thinking. When the sign-in runs out, the banner offers **Sign
 in to AWS…** (the browser opens, and your next message goes through); **Settings › AI Models** has
 **Sign in again** and **Change…** (another model, Region or account) for each Bedrock route.
@@ -293,7 +296,7 @@ Need a **Bedrock API key** for another tool? The guide's last page can create on
 (valid up to 12 hours) and save it in the Credentials Vault as `AWS_BEARER_TOKEN_BEDROCK`.
 
 Costs are billed by AWS to your account (Amazon Bedrock, and AWS Marketplace for Marketplace models).
-To remove DSH's sign-in: `aws logout --profile dsh-bedrock`.
+To remove Vision's sign-in: `aws logout --profile vision-bedrock`.
 
 ## The window
 
@@ -310,7 +313,7 @@ thinking level, skills, and a live context gauge.
 sidebar — even while a folder is open) are regular conversations: the model is told no project folder
 is needed and answers directly, using the web, your skills and long-term memory when they help. Your own
 instruction files, skills and plugins apply; a project's don't. When something needs files or
-commands, the chat works in a scratch folder of its own, `%APPDATA%\DSH\Chats\<chat id>` — made on
+commands, the chat works in a scratch folder of its own, `%APPDATA%\Vision\Chats\<chat id>` — made on
 first use, treated by the permission preset like a project folder, and moved to the Recycle Bin when the
 chat is deleted. Its task list runs in the chat too, so its tasks work in that folder. Its first screen
 offers openers like *Explain something simply* or *Summarise a web page* (and your skills), with a link
@@ -382,9 +385,9 @@ a scoped task). On top of those:
 - **Kinds of subagent, and fan-out** — `agent` takes an `agent_type`: `general` (the default),
   `explore` (read-only search), `plan`, `review`, `worker`, or your own. Your own are Claude
   Code-style agent files — a `*.md` with `name`, `description`, `tools`, `server` and `max_steps` in
-  its frontmatter and the instructions as the body — in `%APPDATA%\DSH\agents`,
-  `%USERPROFILE%\.claude\agents`, or a project's `.dsh\agents` / `.claude\agents`. (A file with no
-  `tools` line gets every tool; a `tools` line that is blank, or names only tools DSH doesn't have,
+  its frontmatter and the instructions as the body — in `%APPDATA%\Vision\agents`,
+  `%USERPROFILE%\.claude\agents`, or a project's `.vision\agents` / `.claude\agents`. (A file with no
+  `tools` line gets every tool; a `tools` line that is blank, or names only tools Vision doesn't have,
   gets just the ones that read.) Several `agent` calls in one turn run at the same time, and
   `delegate` hands a list of independent tasks out and returns every report together. `/agents` shows
   what exists and what is running.
@@ -424,7 +427,7 @@ into a chat called *📋 Earlier tasks* (one per project folder) the first time 
 
 Keep API keys, tokens and passwords in the vault and the agent can use them without ever seeing
 them: it writes `{{vault:NAME}}` wherever the value goes — a shell command, a `.env` file, a request
-header — and DSH substitutes the real value only when the tool runs. Tool output shows
+header — and Vision substitutes the real value only when the tool runs. Tool output shows
 `[vault:NAME]` instead of the value, so the secret never reaches the model, the transcript or the
 logs. Each credential is **Agent may use**, **Ask first** (once per chat) or **Never**. Values are
 encrypted for your Windows account with DPAPI; the window shows a fingerprint until you reveal a
@@ -461,7 +464,7 @@ pressing Stop, the agent saying it needs you, or it going in circles: the same c
 result again and again — even when it alternates between two calls (a longer cycle of up to eight
 different calls is caught too, a little later), or a todo update comes between, or every attempt fails
 with the same error — or a call you keep refusing. The agent is warned at the fourth
-repeat and the run ends at the eighth; DSH then says why and waits for a new direction, and a `/goal`
+repeat and the run ends at the eighth; Vision then says why and waits for a new direction, and a `/goal`
 that goes in circles for three rounds in a row pauses the same way. (Waiting on something — a command
 with `sleep` in it, polling a process or a background agent — is not going in circles, up to a point: the same wait
 giving the same answer twenty times gets a note and forty ends the run, and a wait that *fails* is not waiting. Neither is a
@@ -472,32 +475,32 @@ the only call in its turn, so the agent has seen the results of everything else 
 
 ## Bringing in Claude Code and Cursor
 
-If Claude Code or Cursor is on your PC, DSH offers to bring your setup across: once, with a notice at the
+If Claude Code or Cursor is on your PC, Vision offers to bring your setup across: once, with a notice at the
 top of the window, and any time after that from **Session › Bring in from Claude Code & Cursor…**,
 **Settings › Skills**, or **Memory & Skills**. It looks in `%USERPROFILE%\.claude` and
 `%USERPROFILE%\.cursor` (or wherever `CLAUDE_CONFIG_DIR` points), lists what it found with the new,
-safe items already ticked, and **Import** copies them into DSH. Nothing in those folders is changed and
+safe items already ticked, and **Import** copies them into Vision. Nothing in those folders is changed and
 nothing is run.
 
-| Found | Becomes in DSH |
+| Found | Becomes in Vision |
 |---|---|
-| `CLAUDE.md` in Claude Code's folder (your global instructions) | One of **your instructions** (`%APPDATA%\DSH\instructions`): read on every request, in every project and in chats with no folder. Edit it in *Memory & Skills*. |
-| Skills — your own and those of installed plugins, from both tools | DSH skills, with their bundled files. |
+| `CLAUDE.md` in Claude Code's folder (your global instructions) | One of **your instructions** (`%APPDATA%\Vision\instructions`): read on every request, in every project and in chats with no folder. Edit it in *Memory & Skills*. |
+| Skills — your own and those of installed plugins, from both tools | Vision skills, with their bundled files. |
 | Commands (`/name`) | Skills only you run, by typing `/name` in a chat. |
 | Rules (`.claude\rules`, `.cursor\rules`) | Rules: always on, or attached to the files they name. |
 | Subagents | Skills that tell the agent to hand the work to a subagent (the `agent` tool) with those instructions. |
-| The notes Claude Code saved per project (`.claude\projects\<project>\memory`) | Notes for that project (`%APPDATA%\DSH\project-notes`), kept out of the repository. When you open the project, the model is shown the `MEMORY.md` index and reads the notes it needs. |
+| The notes Claude Code saved per project (`.claude\projects\<project>\memory`) | Notes for that project (`%APPDATA%\Vision\project-notes`), kept out of the repository. When you open the project, the model is shown the `MEMORY.md` index and reads the notes it needs. |
 
 Only installed plugins count (Claude Code's install list, or Cursor's plugin cache); one installed for a
 single project isn't ticked. Cursor's own built-in skills are listed but not ticked. Anything already in
-DSH shows as *Already in DSH*, so running the import again changes nothing. If a skill has changed since,
+Vision shows as *Already in Vision*, so running the import again changes nothing. If a skill has changed since,
 ticking it keeps both, the second under a numbered name (`review-2`) and switched on. Notes Claude Code
 has added to since show as *Updated since* and aren't ticked; updating them, or re-importing changed
 instructions, keeps the files it replaces beside them as `.bak`. **Let me approve skills first** holds
 skills in *Settings › Skills › To approve* instead of switching them on, and they show as *Waiting for
 your approval* until you decide.
 
-Listed at the bottom of the window and left alone: MCP servers (DSH can't run them yet), hooks,
+Listed at the bottom of the window and left alone: MCP servers (Vision can't run them yet), hooks,
 tool-permission rules, conversation history, and what Cursor keeps inside its app (User Rules and
 Memories). Anything that looks like a key or token, including in a file bundled with a skill (a `.env`, a
 `.pem`), isn't ticked for you, because instructions and notes go to your model provider with each
@@ -507,17 +510,17 @@ them.
 
 ## Bringing in OpenClaw
 
-**Session › Bring in from OpenClaw…** copies what an OpenClaw install has learned into DSH: its
+**Session › Bring in from OpenClaw…** copies what an OpenClaw install has learned into Vision: its
 **skills**, its **memory** (`MEMORY.md`, the daily logs, `USER.md` and the like, cut into searchable
 remembered notes), the **keys and passwords** in its configuration (into the Credentials Vault, *ask
 first* unless you choose otherwise) and its **model servers** (as routes). The first page asks where it
 runs:
 
-- **This PC** — DSH looks in the usual places (`~/.openclaw`, the older `.clawdbot` and `.moltbot`
+- **This PC** — Vision looks in the usual places (`~/.openclaw`, the older `.clawdbot` and `.moltbot`
   names, profile folders such as `.openclaw-work`, `OPENCLAW_STATE_DIR`) and, failing that, searches for
   `openclaw.json`.
 - **Another computer (over SSH)** — give an address (a name from your `~/.ssh/config` works) and a
-  password or key file, or leave both blank to try the keys in your `~/.ssh` folder. DSH signs in,
+  password or key file, or leave both blank to try the keys in your `~/.ssh` folder. Vision signs in,
   finds the install the same way (Docker bind mounts and the usual `/data`, `/app` and `/home/node`
   places included), and reads the files over SFTP — or with shell commands on a server that has none —
   fetching only what you tick. The server's host key is trusted on first use, remembered in
@@ -533,9 +536,9 @@ than duplicating them, and a skill that hasn't changed isn't copied twice.
 
 ## Remembered notes
 
-DSH keeps a long-term memory that survives between chats: short notes about you and your projects — *the
+Vision keeps a long-term memory that survives between chats: short notes about you and your projects — *the
 staging server is called orion*, *tests run with `npm run t:unit`*, *the user prefers tabs*. Nothing is
-loaded up front, so a long list costs nothing. When you send a message, DSH searches the notes (full
+loaded up front, so a long list costs nothing. When you send a message, Vision searches the notes (full
 text with word stemming, weighted by how well they match, how recent they are and how often they have
 helped) and puts the few that bear on it in front of the message inside `<recalled_memory>` tags: at
 most four, about 600 tokens, none twice within eight turns, and nothing at all when nothing matches. The
@@ -545,7 +548,7 @@ Notes come from you (`/remember the staging server is called orion` — it belon
 chat works in; start with `global:` for a note that applies everywhere — or **Session › Remembered
 Notes…** to add, edit, pin and delete them), from the agent (`memory_save` when it learns something
 durable and non-obvious; `memory_search` and `memory_forget` to look things up and correct them) and
-from OpenClaw. They are plain text in `%APPDATA%\DSH\memory`. Anything that looks like a key or a
+from OpenClaw. They are plain text in `%APPDATA%\Vision\memory`. Anything that looks like a key or a
 password is refused, whoever wrote it and however it got there (an import, a mirrored file) — that
 belongs in the vault. Saving a note that repeats one of the agent's own updates it, but the agent never
 rewrites a note you wrote or pinned (it adds its own beside it), can't pin a note, and can't delete one
@@ -559,15 +562,15 @@ window. The switch is at the top of the notes window.
 ## Memory, skills and plugins
 
 **Instruction files** in the project root are loaded into every prompt: `AGENTS.md`, `QWEN.md`,
-`CLAUDE.md`, `.claude/CLAUDE.md`, `CLAUDE.local.md`, `.cursorrules`, `DSH.md`, `MEMORY.md`, and
-today's `memory/YYYY-MM-DD.md`. Your own instruction files in `%APPDATA%\DSH\instructions` (any `*.md`)
+`CLAUDE.md`, `.claude/CLAUDE.md`, `CLAUDE.local.md`, `.cursorrules`, `VISION.md`, `MEMORY.md`, and
+today's `memory/YYYY-MM-DD.md`. Your own instruction files in `%APPDATA%\Vision\instructions` (any `*.md`)
 are loaded into every prompt in every project, ahead of the project's — and in chats without a project.
 **Session › Memory & Skills…** (Ctrl+Shift+M) edits them all and shows the exact system prompt; in a chat
 without a project it shows your own files and skills.
 
 **Skills** are folders with a `SKILL.md` — the format Claude Code, Cursor and Agent Skills share, so
-DSH reads their folders in place (`.claude`, `.cursor`, `.agents`, `.qwen`, and `%USERPROFILE%`
-equivalents) alongside its own (`<project>\.dsh\skills`, `%APPDATA%\DSH\skills`). The Skills button
+Vision reads their folders in place (`.claude`, `.cursor`, `.agents`, `.qwen`, and `%USERPROFILE%`
+equivalents) alongside its own (`<project>\.vision\skills`, `%APPDATA%\Vision\skills`). The Skills button
 under the composer picks the skills a chat uses; **Settings › Skills** switches them on or off, edits,
 generates new ones with the model (nothing is active until you approve it), and imports from a
 folder, a zip, a file or a GitHub link, or exports for Claude Code, Cursor or Agent Skills. One skill
@@ -575,7 +578,7 @@ ships with the app: **godot-debugging**, which runs a Godot game, reads its outp
 with the computer-use tools.
 
 **Plugins** are JSON manifests declaring tools backed by shell commands — drop one in
-`%APPDATA%\DSH\plugins` or `<project>\.dsh\plugins` and reload in **Settings › Plugins**.
+`%APPDATA%\Vision\plugins` or `<project>\.vision\plugins` and reload in **Settings › Plugins**.
 
 ```json
 {
@@ -597,16 +600,16 @@ with the computer-use tools.
 
 | What | Where |
 |---|---|
-| Settings, conversations, skills, plugins, crash logs | `%APPDATA%\DSH` (or the portable `data` folder; `DSH_HOME` overrides both) |
-| API keys, Spark Swapper app tokens and passwords | Windows Credential Manager (`DSH/…` entries; a Swapper's under `DSH/swapper/<id>`) |
-| Scratch folders of chats without a project | `%APPDATA%\DSH\Chats\<chat id>` |
-| Your instructions (every project) | `%APPDATA%\DSH\instructions\*.md` |
-| Remembered notes | `%APPDATA%\DSH\memory\memories.jsonl` |
-| Your subagent types | `%APPDATA%\DSH\agents\*.md` |
-| Notes imported per project | `%APPDATA%\DSH\project-notes\<project>` |
-| Task lists (every chat's) | `%APPDATA%\DSH\task-queue.json` |
-| Credentials vault | `%APPDATA%\DSH\vault.json` (names and details) and `vault.bin` (values, DPAPI-encrypted) |
-| Program | `%LOCALAPPDATA%\Programs\DSH` (installer) |
+| Settings, conversations, skills, plugins, crash logs | `%APPDATA%\Vision` (or the portable `data` folder; `VISION_HOME` overrides both) |
+| API keys, Spark Swapper app tokens and passwords | Windows Credential Manager (`Vision/…` entries; a Swapper's under `Vision/swapper/<id>`) |
+| Scratch folders of chats without a project | `%APPDATA%\Vision\Chats\<chat id>` |
+| Your instructions (every project) | `%APPDATA%\Vision\instructions\*.md` |
+| Remembered notes | `%APPDATA%\Vision\memory\memories.jsonl` |
+| Your subagent types | `%APPDATA%\Vision\agents\*.md` |
+| Notes imported per project | `%APPDATA%\Vision\project-notes\<project>` |
+| Task lists (every chat's) | `%APPDATA%\Vision\task-queue.json` |
+| Credentials vault | `%APPDATA%\Vision\vault.json` (names and details) and `vault.bin` (values, DPAPI-encrypted) |
+| Program | `%LOCALAPPDATA%\Programs\Vision` (installer) |
 
 ## Build from source
 
@@ -651,8 +654,10 @@ a throwaway data folder and a demo project, and exits non-zero on any error. CI 
 - **`ci.yml`** runs on pull requests and pushes to any branch other than the default one: core tests
   on Linux; on Windows a Release build, the full test suite (including the ConPTY, path and
   PowerShell tests, the app tests and the computer-use tests), the x64 zip and installer, the UI self-test (screenshots are uploaded as an
-  artifact), and an installer test: silent install, launch the installed app, check the Start menu
-  and folder-menu entries, uninstall, and check nothing is left behind.
+  artifact), and an installer test: a silent upgrade of the last release under the app's former name, which
+  must leave one app in Settings › Apps and none of the old folder, shortcuts or folder-menu entries; then
+  launch the installed app, check the Start menu and folder-menu entries, uninstall, and check nothing is
+  left behind.
 - **`release.yml`** runs on every push to the default branch, whatever it is named: tests, packages
   x64 and ARM64 (ReadyToRun, self-contained) into installers and portable zips, runs the self-test
   and the installer test on the packaged x64 build, and publishes a GitHub release tagged
