@@ -6,7 +6,7 @@ namespace Vision.Core.Tests;
 
 /// <summary>The shield's second revision: two passes per request (a value found once is masked wherever it turns up),
 /// the stricter rule for <c>key = value</c>, attachments in other encodings and ones that can't be checked, a provider's
-/// replayed state, and speed. DSH for macOS runs the same cases.</summary>
+/// replayed state, and speed. Vision for macOS runs the same cases.</summary>
 public sealed class ShieldV2Tests
 {
     private static readonly ProviderProfile Kimi = new(ProviderKind.OpenAICompat, "Kimi Code", "https://api.kimi.ai/coding/v1", "k");
@@ -228,7 +228,7 @@ public sealed class ShieldV2Tests
         Assert.Same(pdf, sent[0].Messages[0].Attachments![0]); // sent as it is
         Assert.Equal(2, report!.Unchecked);
         Assert.Equal("Masked 1 email before sending to Kimi Code · 2 attachments not checked", report.Summary);
-        Assert.Equal("Pictures and files that aren't plain text are sent as they are — DSH can't check them for sensitive details.",
+        Assert.Equal("Pictures and files that aren't plain text are sent as they are — Vision can't check them for sensitive details.",
             ShieldReport.UncheckedNotice);
     }
 

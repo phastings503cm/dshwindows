@@ -71,7 +71,7 @@ public sealed class SetupWizardWindow : Window, IGuideHost
     public SetupWizardWindow(AppModel model)
     {
         _model = model;
-        Title = "Set Up DSH";
+        Title = "Set Up Vision";
         Width = 780;
         Height = 640;
         MinWidth = 640;
@@ -569,7 +569,7 @@ public sealed class SetupWizardWindow : Window, IGuideHost
             HorizontalAlignment = HorizontalAlignment.Left,
             Margin = new Thickness(0, 0, 0, 12),
         };
-        var title = Ui.Text("Set up DSH", 28, FontWeights.SemiBold);
+        var title = Ui.Text("Set up Vision", 28, FontWeights.SemiBold);
         var panel = Ui.Stack(logo, title,
             Lead("This app is the agent harness — it runs the tool loop itself and talks straight to a model server. Nothing else has to be installed or kept running."));
         if (GuideState.Load() is { HasProgress: true } saved)
@@ -584,12 +584,12 @@ public sealed class SetupWizardWindow : Window, IGuideHost
             "Use your Z.ai, Kimi, Alibaba Cloud or OpenAI plan. A guide shows where to get the key.",
             false, () => StartPlanGuide()));
         panel.Children.Add(Choice(Icons.Education, "I have a DGX Spark — walk me through everything (beginner)",
-            "Step by step, with a picture for each: power it on, find it on your network, install Spark Swapper, and connect DSH. No terminal needed — it can even make a USB stick to reinstall it.",
+            "Step by step, with a picture for each: power it on, find it on your network, install Spark Swapper, and connect Vision. No terminal needed — it can even make a USB stick to reinstall it.",
             false, () => StartGuide(resume: false)));
         panel.Children.Add(Choice(Icons.Cloud, "Use Amazon Bedrock with my AWS account (guided)",
-            "Claude, Amazon Nova, Llama and more, billed to your AWS account. DSH installs the AWS CLI if needed, signs you in through your browser, and takes care of each model's first-time form or terms — showing you the price first.",
+            "Claude, Amazon Nova, Llama and more, billed to your AWS account. Vision installs the AWS CLI if needed, signs you in through your browser, and takes care of each model's first-time form or terms — showing you the price first.",
             false, () => StartBedrockGuide()));
-        var or = Ui.Secondary("Or press Continue to set DSH up yourself:");
+        var or = Ui.Secondary("Or press Continue to set Vision up yourself:");
         or.Margin = new Thickness(0, 6, 0, 12);
         panel.Children.Add(or);
         panel.Children.Add(Bullet(Icons.Connect, "Point it at a model", "A DGX Spark or any OpenAI-compatible server on your network, a local Ollama or LM Studio, or a cloud provider."));

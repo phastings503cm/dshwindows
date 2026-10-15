@@ -5,10 +5,10 @@ using System.Text.Json;
 
 namespace Vision.Core;
 
-// MARK: - Bringing an OpenClaw install into DSH
+// MARK: - Bringing an OpenClaw install into Vision
 //
 // The user picks what to bring; this applies exactly that.
-//   skills       → copied (files fetched from the machine they live on) into DSH's skills, through the same
+//   skills       → copied (files fetched from the machine they live on) into Vision's skills, through the same
 //                  importer the Settings › Skills sheet uses — its validation, naming and conflict rules
 //   memory       → notes in the memory store (re-importing updates them, never duplicates)
 //   credentials  → the Credentials Vault, "ask first" unless the user chose otherwise; values are moved,
@@ -261,7 +261,7 @@ public static class OpenClawImporter
                     var hash = FolderHash(target);
                     if (!asDrafts && ledger.IsCurrent(LedgerKey(source, skill), hash))
                     {
-                        skipped[skill.Name] = "Already in DSH, unchanged since it was brought in.";
+                        skipped[skill.Name] = "Already in Vision, unchanged since it was brought in.";
                         continue;
                     }
                     staged[unique] = (skill, hash);
@@ -294,7 +294,7 @@ public static class OpenClawImporter
                 }
                 foreach (var note in plan.Notes) problems.Add(note);
                 foreach (var (folder, entry) in staged.Where(e => landed.All(l => !l.Equals(e.Value.Skill.Name, StringComparison.Ordinal)) && !skipped.ContainsKey(e.Value.Skill.Name)))
-                    skipped[entry.Skill.Name] = "DSH couldn't read it as a skill.";
+                    skipped[entry.Skill.Name] = "Vision couldn't read it as a skill.";
                 ledger.Save();
                 return (landed, skipped);
             }
@@ -316,7 +316,7 @@ public static class OpenClawImporter
         }
     }
 
-    /// <summary>The folder name a skill landed under in DSH's skills, from the paths <see cref="SkillImporter.Perform"/> reports.</summary>
+    /// <summary>The folder name a skill landed under in Vision's skills, from the paths <see cref="SkillImporter.Perform"/> reports.</summary>
     private static string? LandedFolder(ImportResult result, string skillName)
     {
         var slug = SkillNaming.Slug(skillName);
@@ -361,7 +361,7 @@ public static class OpenClawImporter
         // The listing names files of their own, not links: a SKILL.md that is a link to some other file on that machine (a
         // dotfile, a config with keys in it) would be read through the link and copied into a skill the model can read.
         if (!files.Any(f => f.Equals("SKILL.md", StringComparison.OrdinalIgnoreCase)))
-            return (false, "Its SKILL.md is a link to another file, not a file of its own — DSH doesn't follow links out of a skill. Copy the real file into the skill and try again.");
+            return (false, "Its SKILL.md is a link to another file, not a file of its own — Vision doesn't follow links out of a skill. Copy the real file into the skill and try again.");
         // (The scan lists at most this many, so a full list means there may be more.)
         if (skill.Files.Count >= MaxFilesPerSkill)
             problems.Add($"Skill “{skill.Name}”: it has {MaxFilesPerSkill} files or more, and only the first {MaxFilesPerSkill} were brought in.");

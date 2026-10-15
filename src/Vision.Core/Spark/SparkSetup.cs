@@ -4,7 +4,7 @@ using System.Text;
 
 namespace Vision.Core;
 
-// MARK: - Spark addresses and the DSH route
+// MARK: - Spark addresses and the Vision route
 //
 // Where things live on a DGX Spark running Spark Swapper, and the provider route the setup guide
 // saves: the model API through the Spark's HTTPS front (nginx on :11443), with the Swapper's
@@ -37,7 +37,7 @@ public static class SparkSetup
 
     public static string ModelBaseUrl(string host) => $"https://{UrlHost(host)}:{ModelFrontPort}/v1";
 
-    /// <summary>The route DSH uses to talk to the Spark's model.</summary>
+    /// <summary>The route Vision uses to talk to the Spark's model.</summary>
     public static ProviderProfile Provider(string host, string model, string? apiKey, string? pinnedCertificate) =>
         new(ProviderKind.OpenAICompat, ProviderName, ModelBaseUrl(host), model)
         {

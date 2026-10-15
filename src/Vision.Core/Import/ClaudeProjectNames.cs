@@ -3,7 +3,7 @@ namespace Vision.Core;
 /// <summary>How Claude Code names the per-project folder under ~/.claude/projects: the project's full
 /// path with every character that isn't an ASCII letter or digit replaced by "-"
 /// (<c>C:\Users\Pat\my_app</c> → <c>C--Users-Pat-my-app</c>, <c>/Users/pat/app</c> → <c>-Users-pat-app</c>).
-/// DSH keeps imported project notes under the same name, so the notes for a project are found from its
+/// Vision keeps imported project notes under the same name, so the notes for a project are found from its
 /// path alone — and the same path always finds the same notes.</summary>
 public static class ClaudeProjectNames
 {

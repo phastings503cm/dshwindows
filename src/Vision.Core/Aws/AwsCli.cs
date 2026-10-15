@@ -11,14 +11,14 @@ namespace Vision.Core;
 
 // MARK: - The AWS CLI
 //
-// DSH never talks to AWS's sign-in or account APIs itself: the AWS CLI (v2) owns sign-in (`aws login`,
+// Vision never talks to AWS's sign-in or account APIs itself: the AWS CLI (v2) owns sign-in (`aws login`,
 // `aws sso login`), keeps and refreshes the tokens, and makes the account calls (Bedrock model access,
-// agreements, the Anthropic use-case form). DSH runs it as a child process — never through a shell, so
+// agreements, the Anthropic use-case form). Vision runs it as a child process — never through a shell, so
 // no argument is ever re-parsed — and reads its JSON output. Everything goes through IAwsCliRunner so
 // the setup flow is testable with scripted output and no AWS account.
 
 /// <summary>What one run of the AWS CLI printed and how it ended.</summary>
-/// <param name="TimedOut">True when DSH stopped it because it ran past its time limit (the exit code is
+/// <param name="TimedOut">True when Vision stopped it because it ran past its time limit (the exit code is
 /// then -1).</param>
 public sealed record AwsCliResult(int ExitCode, string Stdout, string Stderr, bool TimedOut = false)
 {
@@ -238,7 +238,7 @@ public sealed class ProcessAwsCliRunner(string executable) : IAwsCliRunner
 
 // MARK: - Finding it and checking its version
 
-/// <summary>Where DSH looks for the AWS CLI. <see cref="ForThisMachine"/> is the real list; tests build
+/// <summary>Where Vision looks for the AWS CLI. <see cref="ForThisMachine"/> is the real list; tests build
 /// their own.</summary>
 public sealed record AwsCliSearch
 {
@@ -266,8 +266,8 @@ public sealed record AwsCliSearch
     public static string UserInstallFolder() =>
         Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Programs", "Amazon", "AWSCLIV2");
 
-    /// <summary>The real search. On Windows PATH is read three ways: this process's copy (what DSH
-    /// started with) and the user and machine values Windows has now — an installer that ran after DSH
+    /// <summary>The real search. On Windows PATH is read three ways: this process's copy (what Vision
+    /// started with) and the user and machine values Windows has now — an installer that ran after Vision
     /// started only changed the latter.</summary>
     public static AwsCliSearch ForThisMachine(string? explicitPath = null)
     {
@@ -302,30 +302,30 @@ public sealed record AwsCliSearch
     }
 }
 
-/// <summary>Whether the AWS CLI is there and new enough for DSH.</summary>
+/// <summary>Whether the AWS CLI is there and new enough for Vision.</summary>
 public abstract record AwsCliStatus
 {
     /// <summary>A sentence for the setup guide.</summary>
     public abstract string Summary { get; }
 
-    /// <summary>No aws.exe anywhere DSH looks.</summary>
+    /// <summary>No aws.exe anywhere Vision looks.</summary>
     public sealed record Missing : AwsCliStatus
     {
-        public override string Summary => "The AWS CLI isn't installed. DSH can install it for you.";
+        public override string Summary => "The AWS CLI isn't installed. Vision can install it for you.";
     }
 
     /// <summary>Found, but older than <see cref="AwsCli.MinimumVersion"/> (AWS CLI v1 included).</summary>
     public sealed record TooOld(Version Version, string Path) : AwsCliStatus
     {
         public override string Summary => Version.Major < 2
-            ? $"AWS CLI {Version.ToString(3)} is installed, but DSH needs version 2. DSH can install it for you."
-            : $"AWS CLI {Version.ToString(3)} is installed, but signing in from the browser needs {AwsCli.MinimumVersion.ToString(3)} or newer. DSH can update it.";
+            ? $"AWS CLI {Version.ToString(3)} is installed, but Vision needs version 2. Vision can install it for you."
+            : $"AWS CLI {Version.ToString(3)} is installed, but signing in from the browser needs {AwsCli.MinimumVersion.ToString(3)} or newer. Vision can update it.";
     }
 
     /// <summary>Found, but it didn't run or didn't say which version it is.</summary>
     public sealed record Broken(string Path, string Problem) : AwsCliStatus
     {
-        public override string Summary => $"The AWS CLI at {Path} didn't start properly ({Problem}). DSH can reinstall it.";
+        public override string Summary => $"The AWS CLI at {Path} didn't start properly ({Problem}). Vision can reinstall it.";
     }
 
     public sealed record Ready(Version Version, string Path) : AwsCliStatus
@@ -341,7 +341,7 @@ public sealed partial class AwsCli(IAwsCliRunner runner)
     /// <summary>`aws login` (sign in with the browser, using the AWS console sign-in) arrived in 2.32.0.</summary>
     public static readonly Version MinimumVersion = new(2, 32, 0);
 
-    /// <summary>How long an account call may take before DSH gives up on it.</summary>
+    /// <summary>How long an account call may take before Vision gives up on it.</summary>
     public static readonly TimeSpan DefaultTimeout = TimeSpan.FromMinutes(2);
 
     public IAwsCliRunner Runner { get; } = runner;
@@ -503,7 +503,7 @@ public sealed partial class AwsCli(IAwsCliRunner runner)
         catch (JsonException ex)
         {
             throw new AwsCliException(new AwsCliError(AwsCliFailure.Other,
-                "The AWS CLI answered with something DSH couldn't read.", Details: TextUtil.Prefix(text, 500)), ex);
+                "The AWS CLI answered with something Vision couldn't read.", Details: TextUtil.Prefix(text, 500)), ex);
         }
     }
 }
@@ -569,13 +569,13 @@ public static partial class AwsCliErrors
             return SignIn("Your AWS password changed since you signed in. Sign in again with the new password.");
         if (Has("Your session has expired") || Has("reauthenticate using 'aws login'") || Has("reauthenticate with 'aws login'")
             || Has("Error loading login session token") || Has("refreshing a login session profile"))
-            return SignIn("Your AWS sign-in has expired. Sign in again — DSH opens your browser.");
+            return SignIn("Your AWS sign-in has expired. Sign in again — Vision opens your browser.");
         if (Has("Error loading SSO Token") || Has("SSO session associated with this profile has expired")
             || Has("Token has expired and refresh failed") || Has("retrieving token from sso") || Has("UnauthorizedSSOTokenError"))
             return SignIn("Your AWS IAM Identity Center (SSO) sign-in has expired. Sign in again.");
         if (Has("Unable to locate credentials") || Has("no credentials found") || Has("NoCredentials")
             || (Has("config profile") && Has("could not be found")))
-            return SignIn("DSH isn't signed in to AWS yet. Sign in to continue.");
+            return SignIn("Vision isn't signed in to AWS yet. Sign in to continue.");
         if (CodeIs("ExpiredToken", "ExpiredTokenException", "RequestExpired") || Has("security token included in the request is expired"))
             return SignIn("Your AWS sign-in has expired. Sign in again.");
         if (CodeIs("UnrecognizedClientException", "InvalidClientTokenId", "InvalidSignatureException")
@@ -590,16 +590,16 @@ public static partial class AwsCliErrors
             var what = permission ?? "this";
             var message = Has("explicit deny")
                 ? $"An AWS policy explicitly blocks {what} for your sign-in (for example a policy set by your organization). Ask whoever manages your AWS account."
-                : $"Your AWS permissions don't allow {what}. Ask whoever manages your AWS account to allow it — DSH can show the exact policy to send them.";
+                : $"Your AWS permissions don't allow {what}. Ask whoever manages your AWS account to allow it — Vision can show the exact policy to send them.";
             return new(AwsCliFailure.AccessDenied, message, code, operation, permission, raw);
         }
         if (Has("Found invalid choice") || Has("Invalid choice") || Has("Unknown options"))
             return new(AwsCliFailure.NotSupported,
-                "This version of the AWS CLI doesn't have that command. Update the AWS CLI — DSH can do it for you.", code, operation, Details: raw);
+                "This version of the AWS CLI doesn't have that command. Update the AWS CLI — Vision can do it for you.", code, operation, Details: raw);
         if (Has("Could not connect to the endpoint URL") || Has("Connect timeout on endpoint URL") || Has("Read timeout on endpoint URL")
             || Has("SSL validation failed") || Has("Failed to connect to proxy") || Has("ProxyConnectionError") || Has("EndpointConnectionError"))
             return new(AwsCliFailure.Network,
-                "DSH couldn't reach AWS. Check your internet connection (and any proxy or VPN), then try again.", code, operation, Details: raw);
+                "Vision couldn't reach AWS. Check your internet connection (and any proxy or VPN), then try again.", code, operation, Details: raw);
         if (CodeIs("ThrottlingException", "Throttling", "TooManyRequestsException", "ServiceQuotaExceededException") || Has("Rate exceeded"))
             return new(AwsCliFailure.Throttled, "AWS is busy right now (too many requests). Wait a moment and try again.", code, operation, Details: raw);
         if (Has("You must specify a region"))

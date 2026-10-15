@@ -118,12 +118,12 @@ public static partial class SubscriptionPlans
                 "Subscribe to the GLM Coding Plan if you haven't yet (z.ai/subscribe).",
                 "Open the API keys page — the button below does it.",
                 "Create a new API key.",
-                "Copy it. It's shown only once, so paste it into DSH straight away.",
+                "Copy it. It's shown only once, so paste it into Vision straight away.",
             ],
             KeyHint = "A long string of letters and digits with a dot in it.",
             Models = [new("glm-5.3", "GLM-5.3 · always thinks", 1_000_000)],
             TermsNote = "Z.ai offers the Coding Plan for use in coding tools.",
-            Note = "Coding Plan keys work only on the coding address DSH uses. A key refused there may be for the other region, or a pay-as-you-go key.",
+            Note = "Coding Plan keys work only on the coding address Vision uses. A key refused there may be for the other region, or a pay-as-you-go key.",
         },
         new()
         {
@@ -139,7 +139,7 @@ public static partial class SubscriptionPlans
                 "Sign in at z.ai (open.bigmodel.cn in China) and add credit to your account.",
                 "Open the API keys page — the button below does it.",
                 "Create a new API key (an API key, not a Coding Plan key).",
-                "Copy it. It's shown only once, so paste it into DSH straight away.",
+                "Copy it. It's shown only once, so paste it into Vision straight away.",
             ],
             KeyHint = "A long string of letters and digits with a dot in it.",
             Models = [new("glm-5.3", "GLM-5.3 · always thinks", 1_000_000)],
@@ -160,7 +160,7 @@ public static partial class SubscriptionPlans
                 "Sign in at kimi.com and subscribe to Kimi Code if you haven't yet.",
                 "Open the Kimi Code console — the button below does it.",
                 "Create an API key (you can have up to 5).",
-                "Copy it. Each key is shown only once, so paste it into DSH straight away.",
+                "Copy it. Each key is shown only once, so paste it into Vision straight away.",
             ],
             KeyHint = "Starts with sk-.",
             Models =
@@ -170,7 +170,7 @@ public static partial class SubscriptionPlans
                 new("k3-256k", "K3 · 256K context", 262_144),
                 new("kimi-for-coding-highspeed", "faster replies"),
             ],
-            TermsNote = "Kimi Code checks which app is calling. DSH identifies itself honestly as DSH and never pretends to be another tool — Kimi's terms call that a violation.",
+            TermsNote = "Kimi Code checks which app is calling. Vision identifies itself honestly as Vision and never pretends to be another tool — Kimi's terms call that a violation.",
             Note = "If Kimi says the plan is only for certain coding agents, use the Moonshot pay-as-you-go API instead.",
         },
         new()
@@ -187,7 +187,7 @@ public static partial class SubscriptionPlans
                 "Sign in at platform.moonshot.ai (platform.moonshot.cn in China) and add credit.",
                 "Open the API keys page — the button below does it.",
                 "Create a new API key.",
-                "Copy it. It's shown only once, so paste it into DSH straight away.",
+                "Copy it. It's shown only once, so paste it into Vision straight away.",
             ],
             KeyHint = "Starts with sk-.",
             Models = [new("kimi-k2.7-code")],
@@ -204,7 +204,7 @@ public static partial class SubscriptionPlans
                 "Sign in at platform.openai.com and add a payment method or credit.",
                 "Open the API keys page — the button below does it.",
                 "Create a new secret key.",
-                "Copy it. It's shown only once, so paste it into DSH straight away.",
+                "Copy it. It's shown only once, so paste it into Vision straight away.",
             ],
             KeyHint = "Starts with sk-.",
             Models = [new("gpt-5")],
@@ -229,7 +229,7 @@ public static partial class SubscriptionPlans
                 "Sign in to Alibaba Cloud Model Studio (Bailian in China).",
                 "Open the Coding Plan page and subscribe if you haven't yet.",
                 "Create the Coding Plan's API key — it starts with sk-sp-.",
-                "Copy it and paste it into DSH.",
+                "Copy it and paste it into Vision.",
             ],
             KeyHint = "Starts with sk-sp-. A key that starts with just sk- is a pay-as-you-go key, which doesn't work here.",
             KeyPrefix = "sk-sp-",
@@ -239,7 +239,7 @@ public static partial class SubscriptionPlans
                 new("qwen3.5-plus"), new("kimi-k2.5"), new("glm-5"), new("MiniMax-M2.5"),
             ],
             InteractiveOnly = true,
-            TermsNote = "Alibaba allows the Coding Plan only for interactive use in coding tools — not for automated scripts or unattended work. DSH won't run task lists on it.",
+            TermsNote = "Alibaba allows the Coding Plan only for interactive use in coding tools — not for automated scripts or unattended work. Vision won't run task lists on it.",
         },
         new()
         {
@@ -257,7 +257,7 @@ public static partial class SubscriptionPlans
                 "Sign in to Alibaba Cloud Model Studio (Bailian in China) and activate it.",
                 "Open the API keys page (API-KEY in China) — the button below goes to the console.",
                 "Create a new API key.",
-                "Copy it and paste it into DSH.",
+                "Copy it and paste it into Vision.",
             ],
             KeyHint = "Starts with sk-.",
             Models = [new("qwen3.7-plus")],
@@ -343,7 +343,7 @@ public static partial class SubscriptionPlans
                 return $"The key wasn't accepted — check it's a {plan.Name} key for the {region.Label} region.";
             case 403 when plan.Id == KimiCode:
                 return lower.Contains("coding agent") || lower.Contains("only") || lower.Contains("not allowed") || lower.Contains("client")
-                    ? "Kimi says this plan only works with certain coding agents, and DSH identifies itself honestly rather than pretending to be one of them. Use the Moonshot (Kimi) pay-as-you-go API instead: it works with any app."
+                    ? "Kimi says this plan only works with certain coding agents, and Vision identifies itself honestly rather than pretending to be one of them. Use the Moonshot (Kimi) pay-as-you-go API instead: it works with any app."
                     : "Kimi refused the request (403). Your plan may not include API use from this app — the Moonshot (Kimi) pay-as-you-go API works with any app.";
             case 403:
                 return $"{plan.Provider} refused the request (403): the key's plan doesn't allow this, or the account needs attention. {TextUtil.Prefix(body.Trim(), 160)}".Trim();

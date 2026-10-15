@@ -19,7 +19,7 @@ public sealed record AgentDefinition
     public string Description { get; init; } = "";
     /// <summary>Instructions added to the standard subagent prompt.</summary>
     public string Prompt { get; init; } = "";
-    /// <summary>The only tools it may use (DSH tool names). Null = everything the parent has except the agent tools.</summary>
+    /// <summary>The only tools it may use (Vision tool names). Null = everything the parent has except the agent tools.</summary>
     public IReadOnlyList<string>? Tools { get; init; }
     /// <summary>Tools it may not use even though <see cref="Tools"/> would allow them (a file's <c>disallowedTools</c>).</summary>
     public IReadOnlyList<string>? DisallowedTools { get; init; }
@@ -110,7 +110,7 @@ public sealed record AgentDefinition
         var requested = doc.List("tools");
         var tools = ResolveTools(requested);
         var toolsLine = HasTopLevelKey(text, "tools");
-        // A list that names only tools DSH doesn't have (Task, NotebookRead, mcp__github__…), or is left blank, must not mean
+        // A list that names only tools Vision doesn't have (Task, NotebookRead, mcp__github__…), or is left blank, must not mean
         // "everything": that would hand a restricted agent the shell and every write. It gets the tools that only read.
         // (Only a file with no `tools` line at all takes them all.)
         // (The frontmatter reader can lose a key whose block it cannot make sense of; the line itself is proof it was written.)
@@ -120,7 +120,7 @@ public sealed record AgentDefinition
         if (readOnly && tools is null) tools = ReadOnlyTools;
         int? steps = int.TryParse(doc["max_steps"] ?? doc["maxSteps"] ?? doc["max-steps"], out var n) && n > 0 ? Math.Min(n, 200) : null;
         var server = (doc["server"] ?? doc["model"])?.Trim();
-        // Claude Code's model shortcuts ("sonnet", "inherit") name nothing a DSH server could match.
+        // Claude Code's model shortcuts ("sonnet", "inherit") name nothing a Vision server could match.
         if (server is "inherit" or "sonnet" or "opus" or "haiku" or "fast" or "") server = null;
         return new AgentDefinition
         {
@@ -155,7 +155,7 @@ public sealed record AgentDefinition
         return false;
     }
 
-    /// <summary>Claude-style tool names (Read, Bash, WebFetch) → DSH's; unknown names are dropped. Null when
+    /// <summary>Claude-style tool names (Read, Bash, WebFetch) → Vision's; unknown names are dropped. Null when
     /// none of them mean anything here (the caller decides what that means — for an allow list, only the read tools).</summary>
     internal static IReadOnlyList<string>? ResolveTools(IReadOnlyList<string> requested)
     {

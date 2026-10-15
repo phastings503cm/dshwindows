@@ -130,7 +130,7 @@ public sealed class OpenClawImportWindow : Window
     {
         var panel = new StackPanel { Margin = new Thickness(28, 22, 28, 16) };
         panel.Children.Add(Ui.Title("Bring in from OpenClaw"));
-        var intro = Ui.Secondary("DSH finds your OpenClaw install and brings over what you choose: its skills, its memory, its keys and passwords, " +
+        var intro = Ui.Secondary("Vision finds your OpenClaw install and brings over what you choose: its skills, its memory, its keys and passwords, " +
                                  "and the model servers it uses (a DGX Spark, say). Nothing on the other machine is changed or run.", 13);
         intro.Margin = new Thickness(0, 6, 0, 18);
         panel.Children.Add(intro);
@@ -147,7 +147,7 @@ public sealed class OpenClawImportWindow : Window
         folderLabel.Margin = new Thickness(0, 20, 0, 4);
         panel.Children.Add(folderLabel);
         panel.Children.Add(_folder);
-        var hint = Ui.Text("Only if you know it — for example /home/sam/.openclaw. Otherwise DSH looks in the usual places and searches for openclaw.json.", 11.5,
+        var hint = Ui.Text("Only if you know it — for example /home/sam/.openclaw. Otherwise Vision looks in the usual places and searches for openclaw.json.", 11.5,
             brushKey: "TextFillColorTertiaryBrush");
         hint.Margin = new Thickness(0, 4, 0, 0);
         panel.Children.Add(hint);
@@ -187,7 +187,7 @@ public sealed class OpenClawImportWindow : Window
         _remoteFields.Children.Add(Row("Key file", keyRow));
         _remoteFields.Children.Add(Row("Key passphrase", _passphrase));
         var note = Ui.Text("Leave the password and key blank to try the keys in your ~/.ssh folder. Aliases from ~/.ssh/config work as the address. " +
-                           "The first time, DSH shows the computer's fingerprint and asks you to confirm it.", 11.5, brushKey: "TextFillColorTertiaryBrush");
+                           "The first time, Vision shows the computer's fingerprint and asks you to confirm it.", 11.5, brushKey: "TextFillColorTertiaryBrush");
         note.Margin = new Thickness(0, 6, 0, 0);
         _remoteFields.Children.Add(note);
     }
@@ -291,7 +291,7 @@ public sealed class OpenClawImportWindow : Window
             {
                 Busy(false, "");
                 Dialog.Info("OpenClaw wasn't found",
-                    $"DSH looked in the usual places on {source.Label} and searched for openclaw.json, and didn't find an OpenClaw install." +
+                    $"Vision looked in the usual places on {source.Label} and searched for openclaw.json, and didn't find an OpenClaw install." +
                     "\n\nIf it lives somewhere unusual, type its folder in “A folder to look in” and try again.");
                 return;
             }
@@ -391,8 +391,8 @@ public sealed class OpenClawImportWindow : Window
                 Busy(false, "");
                 // (Cancel is the default answer: trusting a computer is a decision, not a habit.)
                 var picked = Dialog.Ask($"Trust {unknown.Presented.Host}?",
-                    $"DSH hasn't connected to {unknown.Presented.Host} before. Its SSH fingerprint is:\n\n{unknown.Presented.Fingerprint}\n\n" +
-                    "Only continue if this is your own computer. DSH will remember it and warn you if it ever changes.",
+                    $"Vision hasn't connected to {unknown.Presented.Host} before. Its SSH fingerprint is:\n\n{unknown.Presented.Fingerprint}\n\n" +
+                    "Only continue if this is your own computer. Vision will remember it and warn you if it ever changes.",
                     new Dialog.Choice("Trust and continue"), new Dialog.Choice("Cancel", IsDefault: true, IsCancel: true));
                 if (picked != 0) return null;
                 approved = unknown.Presented.Fingerprint;
@@ -405,9 +405,9 @@ public sealed class OpenClawImportWindow : Window
                     (changed.Expected is null
                         ? $"{changed.Presented.Host} showed a different SSH fingerprint just now from the one you confirmed a moment ago.\n\n" +
                           $"Confirmed: {approved}\nNow: {changed.Presented.Fingerprint}\n\n"
-                        : $"{changed.Presented.Host} presented a different SSH fingerprint from the one DSH remembered.\n\n" +
+                        : $"{changed.Presented.Host} presented a different SSH fingerprint from the one Vision remembered.\n\n" +
                           $"Remembered: {changed.Expected}\nNow: {changed.Presented.Fingerprint}\n\n") +
-                    "If you didn't reinstall it, something may be pretending to be it, so DSH won't connect.");
+                    "If you didn't reinstall it, something may be pretending to be it, so Vision won't connect.");
                 return null;
             }
         }
@@ -451,7 +451,7 @@ public sealed class OpenClawImportWindow : Window
         }
         if (bundle.IsEmpty)
         {
-            var nothing = Ui.Text("There is nothing here DSH can bring in.", 13, brushKey: "TextFillColorSecondaryBrush");
+            var nothing = Ui.Text("There is nothing here Vision can bring in.", 13, brushKey: "TextFillColorSecondaryBrush");
             nothing.Margin = new Thickness(0, 16, 0, 0);
             panel.Children.Add(nothing);
         }
@@ -469,7 +469,7 @@ public sealed class OpenClawImportWindow : Window
                 text.Margin = new Thickness(0, 2, 0, 2);
                 left.Children.Add(text);
             }
-            panel.Children.Add(Section("Left behind", "Found, but not something DSH brings over.", left));
+            panel.Children.Add(Section("Left behind", "Found, but not something Vision brings over.", left));
         }
 
         _page.Content = new ScrollViewer { Content = panel, VerticalScrollBarVisibility = ScrollBarVisibility.Auto };
@@ -503,7 +503,7 @@ public sealed class OpenClawImportWindow : Window
         };
         body.Children.Add(_draftSkills);
         var count = bundle.Skills.Count(s => !s.Shadowed);
-        return Section($"Skills ({count})", "Copied into your DSH skills. Bundled scripts come along untouched — importing never runs them.", body, allCheck: _skillChecks.Values);
+        return Section($"Skills ({count})", "Copied into your Vision skills. Bundled scripts come along untouched — importing never runs them.", body, allCheck: _skillChecks.Values);
     }
 
     private UIElement NotesSection(OpenClawBundle bundle)
@@ -728,7 +728,7 @@ public sealed class OpenClawImportWindow : Window
         var panel = new StackPanel { Margin = new Thickness(28, 22, 28, 16) };
         var title = Ui.Title(result.BroughtAnything ? "Brought in" : "Nothing was brought in");
         panel.Children.Add(title);
-        var summary = Ui.Text(result.BroughtAnything ? $"DSH now has {result.Summary}." : "Everything you ticked was already here or couldn't be read.", 13.5);
+        var summary = Ui.Text(result.BroughtAnything ? $"Vision now has {result.Summary}." : "Everything you ticked was already here or couldn't be read.", 13.5);
         summary.Margin = new Thickness(0, 6, 0, 14);
         panel.Children.Add(summary);
 

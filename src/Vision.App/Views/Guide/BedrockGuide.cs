@@ -75,7 +75,7 @@ public sealed partial class BedrockGuide : IWizardGuide
     // MARK: - Header
 
     private static readonly string[] SectionTitles =
-        ["Amazon Bedrock", "The AWS CLI", "Sign in", "Pick a model", "Enable it", "Connect DSH", "Done"];
+        ["Amazon Bedrock", "The AWS CLI", "Sign in", "Pick a model", "Enable it", "Connect Vision", "Done"];
 
     public int SectionCount => SectionTitles.Length;
     public int SectionIndex => (int)Page;
@@ -230,22 +230,22 @@ public sealed partial class BedrockGuide : IWizardGuide
     // MARK: - Welcome
 
     private UIElement WelcomePage() => Ui.Stack(
-        Picture("bedrock-welcome", "DSH on this PC connected to Amazon Bedrock, which offers models such as Claude, Amazon Nova and Llama."),
+        Picture("bedrock-welcome", "Vision on this PC connected to Amazon Bedrock, which offers models such as Claude, Amazon Nova and Llama."),
         Heading("Use models from Amazon Bedrock"),
-        Lead("Amazon Bedrock runs models like Claude, Amazon Nova, Llama and Mistral in your own AWS account. You pay AWS for what you use — there's no subscription to DSH or anyone else."),
+        Lead("Amazon Bedrock runs models like Claude, Amazon Nova, Llama and Mistral in your own AWS account. You pay AWS for what you use — there's no subscription to Vision or anyone else."),
         Subheading("What you need"),
         Bullets(
             (Icons.Cloud, "An **AWS account** you can sign in to on the AWS website. No account yet? Create one at aws.amazon.com — it needs a payment card."),
             (Icons.Stopwatch, "About **5 minutes**. A model sold through AWS Marketplace can take up to 15 more the first time."),
-            (Icons.Laptop, "This PC. DSH installs the one tool it needs, the **AWS CLI**, if it isn't here yet.")),
-        Subheading("What DSH does for you"),
+            (Icons.Laptop, "This PC. Vision installs the one tool it needs, the **AWS CLI**, if it isn't here yet.")),
+        Subheading("What Vision does for you"),
         Steps(
             "Installs Amazon's **AWS CLI** — or updates it — if needed.",
-            "Opens your **browser to sign in** to AWS. DSH never sees your password.",
+            "Opens your **browser to sign in** to AWS. Vision never sees your password.",
             "Shows the **models** in your Region and what each one needs before first use.",
             "Fills in or accepts what's needed — **with you**: Anthropic's one-time form for Claude, or a model's **terms and price**.",
             "Saves the connection and says **hello** through Bedrock."),
-        Aside("DSH talks to Bedrock directly from this PC with short-lived credentials from your sign-in, which the AWS CLI refreshes by itself. Nothing is stored in DSH's settings but the name of the sign-in (an AWS CLI \"profile\") and the Region."),
+        Aside("Vision talks to Bedrock directly from this PC with short-lived credentials from your sign-in, which the AWS CLI refreshes by itself. Nothing is stored in Vision's settings but the name of the sign-in (an AWS CLI \"profile\") and the Region."),
         Stuck("Your company manages AWS for you? You can still use this guide: sign in the way your company told you to (often \"IAM Identity Center\" — the guide handles that too). If a step says you're not allowed, it shows exactly what to ask your administrator for."));
 
     // MARK: - The AWS CLI
@@ -325,7 +325,7 @@ public sealed partial class BedrockGuide : IWizardGuide
         var panel = Ui.Stack(
             Picture("aws-cli-install", "An installer window for the AWS Command Line Interface, with checks: downloaded from Amazon, signature checked, installed."),
             Heading("One tool first: the AWS CLI"),
-            Lead("The AWS CLI is Amazon's official command-line tool. DSH uses it for two things only: signing you in, and setting up your account for Bedrock."));
+            Lead("The AWS CLI is Amazon's official command-line tool. Vision uses it for two things only: signing you in, and setting up your account for Bedrock."));
         if (_checkingCli)
         {
             panel.Children.Add(Busy("Looking for the AWS CLI on this PC…"));
@@ -350,7 +350,7 @@ public sealed partial class BedrockGuide : IWizardGuide
                 case AwsCliStatus.Ready ready:
                     panel.Children.Add(Note(Tone.Success, _installResult?.Succeeded == true ? $"Installed. {ready.Summary}" : ready.Summary));
                     if (_installResult?.Outcome == AwsCliInstallOutcome.InstalledRestartRecommended)
-                        panel.Children.Add(Note(Tone.Info, "Windows suggests restarting at some point. You don't have to for DSH — carry on."));
+                        panel.Children.Add(Note(Tone.Info, "Windows suggests restarting at some point. You don't have to for Vision — carry on."));
                     break;
                 case AwsCliStatus.TooOld old:
                     panel.Children.Add(Note(Tone.Warning, old.Summary));
@@ -361,7 +361,7 @@ public sealed partial class BedrockGuide : IWizardGuide
                     panel.Children.Add(InstallButtons("Reinstall the AWS CLI"));
                     break;
                 default:
-                    panel.Children.Add(Note(Tone.Info, "The AWS CLI isn't installed on this PC yet. DSH can install it now: it downloads Amazon's official installer, checks it's signed by Amazon, and installs it just for you — no administrator needed."));
+                    panel.Children.Add(Note(Tone.Info, "The AWS CLI isn't installed on this PC yet. Vision can install it now: it downloads Amazon's official installer, checks it's signed by Amazon, and installs it just for you — no administrator needed."));
                     panel.Children.Add(InstallButtons("Install the AWS CLI"));
                     break;
             }
@@ -375,8 +375,8 @@ public sealed partial class BedrockGuide : IWizardGuide
                 if (failed.LogPath is { } log) panel.Children.Add(Copyable(log, "Installer log"));
             }
         }
-        panel.Children.Add(Aside("\"CLI\" means command-line interface: a program you'd normally type commands into. You won't have to — DSH runs it for you in the background. It stays installed and is kept up to date by running this guide again (or with Amazon's installer)."));
-        panel.Children.Add(Stuck("Your company's PC won't allow installers? Ask your IT team to install \"AWS CLI version 2\", then press Check again. Already installed it somewhere unusual? DSH looks in the usual places and on your PATH."));
+        panel.Children.Add(Aside("\"CLI\" means command-line interface: a program you'd normally type commands into. You won't have to — Vision runs it for you in the background. It stays installed and is kept up to date by running this guide again (or with Amazon's installer)."));
+        panel.Children.Add(Stuck("Your company's PC won't allow installers? Ask your IT team to install \"AWS CLI version 2\", then press Check again. Already installed it somewhere unusual? Vision looks in the usual places and on your PATH."));
         if (!_installing && !_checkingCli && _cliStatus is not AwsCliStatus.Ready)
             panel.Children.Add(Link("Check again", () => _ = CheckCliAsync()));
         return panel;
@@ -546,7 +546,7 @@ public sealed partial class BedrockGuide : IWizardGuide
         var panel = Ui.Stack(
             Picture("aws-signin", "A browser showing the AWS sign-in page, and the AWS CLI confirming the sign-in."),
             Heading("Sign in to AWS"),
-            Lead("DSH asks the AWS CLI to open your browser at AWS's own sign-in page — the same one as the AWS website. Sign in there and come back; DSH never sees your password."));
+            Lead("Vision asks the AWS CLI to open your browser at AWS's own sign-in page — the same one as the AWS website. Sign in there and come back; Vision never sees your password."));
 
         // Region
         var region = new ComboBox { MinWidth = 320, IsEnabled = !_signingIn };
@@ -662,7 +662,7 @@ public sealed partial class BedrockGuide : IWizardGuide
             var details = new Expander { Header = "What the AWS CLI said", Content = Detach(_signInLog), Margin = new Thickness(0, 8, 0, 0) };
             panel.Children.Add(details);
         }
-        panel.Children.Add(Aside("The AWS CLI signs you in with \"aws login\": after you sign in in the browser, it keeps a session on this PC and swaps it for fresh, short-lived keys whenever DSH needs them. When the session ends (like signing out of the AWS website), DSH asks you to sign in again — one click."));
+        panel.Children.Add(Aside("The AWS CLI signs you in with \"aws login\": after you sign in in the browser, it keeps a session on this PC and swaps it for fresh, short-lived keys whenever Vision needs them. When the session ends (like signing out of the AWS website), Vision asks you to sign in again — one click."));
         panel.Children.Add(Stuck("The browser didn't open? Use the link above. It says you're not allowed? Your AWS administrator needs to give your user the \"SignInLocalDevelopmentAccess\" permission (an AWS managed policy). Using the account's root email works, but AWS recommends an everyday IAM user or IAM Identity Center."));
         return panel;
     }

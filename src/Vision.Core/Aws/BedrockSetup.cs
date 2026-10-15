@@ -79,12 +79,12 @@ public static class BedrockRegions
 
 // MARK: - Models
 
-/// <summary>A Bedrock model DSH can chat with.</summary>
+/// <summary>A Bedrock model Vision can chat with.</summary>
 /// <param name="ModelId">The base model id ("anthropic.claude-sonnet-4-5-20250929-v1:0"); access checks use it.</param>
 /// <param name="InvokeId">What to send as the model when chatting: <paramref name="ModelId"/> for on-demand
 /// models, else an inference profile id ("us.anthropic…"); null when it can't be called in this Region.</param>
 /// <param name="LifecycleStatus">"ACTIVE" (only those are listed).</param>
-/// <param name="Recommended">The newest of a family DSH suggests for coding (Claude Sonnet, Opus, Haiku,
+/// <param name="Recommended">The newest of a family Vision suggests for coding (Claude Sonnet, Opus, Haiku,
 /// Nova Pro, Llama, Mistral, DeepSeek, Qwen, gpt-oss).</param>
 public sealed record BedrockModel(
     string ModelId, string Name, string Provider, IReadOnlyList<string> InputModalities, bool StreamingSupported,
@@ -317,7 +317,7 @@ public sealed record ModelAccess(
     IReadOnlyList<string>? MissingPermissions = null, bool? UseCaseSubmitted = null, BedrockAvailability? Availability = null)
 {
     public bool IsReady => State == ModelAccessState.Ready;
-    /// <summary>DSH can accept the terms itself (there is an offer to accept).</summary>
+    /// <summary>Vision can accept the terms itself (there is an offer to accept).</summary>
     public bool CanAcceptInVision => State == ModelAccessState.NeedsAgreement && Offer is not null;
 }
 
@@ -393,7 +393,7 @@ public sealed record UseCaseForm(string CompanyName, string CompanyWebsite, stri
         return Encoding.UTF8.GetString(buffer.ToArray());
     }
 
-    /// <summary>The form as the CLI takes a blob argument: base64 of the UTF-8 JSON (DSH also passes
+    /// <summary>The form as the CLI takes a blob argument: base64 of the UTF-8 JSON (Vision also passes
     /// --cli-binary-format base64, so a user's raw-in-base64-out setting can't double-encode it).</summary>
     public string ToBase64() => Convert.ToBase64String(Encoding.UTF8.GetBytes(ToJson()));
 
@@ -483,7 +483,7 @@ public sealed partial class BedrockSetup
     }
 
     /// <summary>All system inference profiles. The CLI fetches every page itself; should it ever stop
-    /// early (it prints "NextToken" then), DSH continues from there.</summary>
+    /// early (it prints "NextToken" then), Vision continues from there.</summary>
     private async Task<JsonNode> ListInferenceProfilesAsync(CancellationToken cancellationToken)
     {
         var all = new JsonArray();
@@ -520,7 +520,7 @@ public sealed partial class BedrockSetup
         {
             var permission = ex.Error.Permission ?? "bedrock:GetFoundationModelAvailability";
             return new ModelAccess(ModelAccessState.NotAuthorized, modelId,
-                $"DSH can't check access to {shown}: your AWS permissions don't allow {permission}. Ask whoever manages your AWS account to add the policy DSH shows — or just try the model.",
+                $"Vision can't check access to {shown}: your AWS permissions don't allow {permission}. Ask whoever manages your AWS account to add the policy Vision shows — or just try the model.",
                 MissingPermissions: [permission]);
         }
         catch (AwsCliException ex) when (ex.Kind == AwsCliFailure.NotFound)
@@ -538,7 +538,7 @@ public sealed partial class BedrockSetup
                 $"{shown} isn't offered in {BedrockRegions.NameOf(Region)}. Pick another model or Region.", Availability: availability);
         if (availability.Authorization.Equals("NOT_AUTHORIZED", StringComparison.OrdinalIgnoreCase))
             return new ModelAccess(ModelAccessState.NotAuthorized, modelId,
-                $"Your AWS permissions don't allow using {shown}. Ask whoever manages your AWS account to allow {string.Join(" and ", BedrockPermissions.InvokeActions)} — DSH can show the exact policy to send them.",
+                $"Your AWS permissions don't allow using {shown}. Ask whoever manages your AWS account to allow {string.Join(" and ", BedrockPermissions.InvokeActions)} — Vision can show the exact policy to send them.",
                 MissingPermissions: BedrockPermissions.InvokeActions, Availability: availability);
         if (availability.Agreement.Equals("ERROR", StringComparison.OrdinalIgnoreCase))
             return new ModelAccess(ModelAccessState.Error, modelId,
@@ -550,7 +550,7 @@ public sealed partial class BedrockSetup
             useCase = await UseCaseOnFileAsync(cancellationToken).ConfigureAwait(false);
             if (useCase == false)
                 return new ModelAccess(ModelAccessState.NeedsUseCaseForm, modelId,
-                    "Anthropic asks each AWS account once for a few details about how its models will be used. Fill in the short form and DSH sends it for you.",
+                    "Anthropic asks each AWS account once for a few details about how its models will be used. Fill in the short form and Vision sends it for you.",
                     UseCaseSubmitted: false, Availability: availability);
         }
 
@@ -644,7 +644,7 @@ public sealed partial class BedrockSetup
     private static partial Regex DurationRegex();
 
     /// <summary>Whether Anthropic's use-case form is on file for this account: true, false (AWS says
-    /// there is none), or null when DSH can't tell (for example, no permission to read it).</summary>
+    /// there is none), or null when Vision can't tell (for example, no permission to read it).</summary>
     public async Task<bool?> UseCaseOnFileAsync(CancellationToken cancellationToken = default)
     {
         try
@@ -733,7 +733,7 @@ public sealed partial class BedrockSetup
 
 // MARK: - Permissions
 
-/// <summary>The IAM permissions DSH's Bedrock setup and chat use, as a policy an AWS administrator can
+/// <summary>The IAM permissions Vision's Bedrock setup and chat use, as a policy an AWS administrator can
 /// attach to the person (or their role).</summary>
 public static class BedrockPermissions
 {
@@ -744,7 +744,7 @@ public static class BedrockPermissions
     /// <summary>The AWS managed policy that lets an identity use `aws login`.</summary>
     public const string SignInManagedPolicy = "SignInLocalDevelopmentAccess";
 
-    /// <summary>Least privilege for DSH: call models (directly or through cross-Region inference profiles,
+    /// <summary>Least privilege for Vision: call models (directly or through cross-Region inference profiles,
     /// whose underlying models live in other Regions — and, for global profiles, in no Region, which the
     /// empty-matching "*" covers); list models and check access; accept Marketplace terms and the Anthropic
     /// form; Bedrock API keys; let Bedrock (and only Bedrock, aws:CalledViaLast) subscribe to Marketplace
@@ -818,9 +818,9 @@ public static class BedrockPermissions
 
     /// <summary>What to tell the person who has to add the policy.</summary>
     public const string Explanation =
-        "DSH uses Amazon Bedrock with your own AWS sign-in. If AWS says you aren't allowed to do something, " +
+        "Vision uses Amazon Bedrock with your own AWS sign-in. If AWS says you aren't allowed to do something, " +
         "send this policy to whoever manages your AWS account and ask them to attach it to you (or to the role you sign in with). " +
-        "It lets DSH: call Bedrock models, including through cross-Region inference profiles; list the models in your Region and check " +
+        "It lets Vision: call Bedrock models, including through cross-Region inference profiles; list the models in your Region and check " +
         "whether your account can use them; accept a model's terms and Anthropic's one-time use-case form when you choose to; " +
         "use a Bedrock API key; let Bedrock subscribe to AWS Marketplace models on your behalf (only through Bedrock); and sign in " +
         "from the AWS CLI with \"aws login\" (the same as the AWS managed policy SignInLocalDevelopmentAccess). " +

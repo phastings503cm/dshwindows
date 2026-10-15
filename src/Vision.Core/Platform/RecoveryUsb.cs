@@ -108,7 +108,7 @@ public static class RecoveryUsb
         if (disk.IsReadOnly) return "It is write-protected (check for a lock switch on the stick).";
         if (disk.IsOffline) return "Windows has it switched off (offline in Disk Management).";
         if (disk.Size < MinBytes) return $"It is too small ({disk.SizeText}); use a 16 GB or larger stick.";
-        if (disk.Size > MaxBytes) return $"It is larger than 256 GB ({disk.SizeText}), so it's probably not a USB stick — DSH won't erase it.";
+        if (disk.Size > MaxBytes) return $"It is larger than 256 GB ({disk.SizeText}), so it's probably not a USB stick — Vision won't erase it.";
         return null;
     }
 
@@ -605,7 +605,7 @@ public static class RecoveryUsbWriter
                    && (job.SerialNumber is null || string.Equals(disk.SerialNumber, job.SerialNumber, StringComparison.Ordinal));
         if (!same) throw new IOException("The USB drive changed since you chose it (or was unplugged). Nothing was erased.");
         if (RecoveryUsb.Ineligible(disk!, RecoveryUsb.SystemDriveLetter()) is { } reason)
-            throw new IOException($"DSH won't erase that drive: {reason} Nothing was erased.");
+            throw new IOException($"Vision won't erase that drive: {reason} Nothing was erased.");
         if (cancelled()) throw new OperationCanceledException();
 
         var letter = RecoveryUsb.FreeDriveLetter(DriveInfo.GetDrives().Select(d => d.Name[0]));

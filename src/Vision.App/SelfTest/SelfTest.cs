@@ -623,7 +623,7 @@ public sealed class SelfTest
         var application = Application.Current;
         foreach (var session in App.Model.Host.Sessions) session.Running = false;
         foreach (var terminal in App.Model.Code.Terminals.ToList()) terminal.Dispose();
-        _report.Insert(0, $"DSH {AppInfo.Version} self-test, theme {Theme ?? "light"}: {(_failures == 0 ? "OK" : $"{_failures} failure(s)")}");
+        _report.Insert(0, $"Vision {AppInfo.Version} self-test, theme {Theme ?? "light"}: {(_failures == 0 ? "OK" : $"{_failures} failure(s)")}");
         File.WriteAllText(Path.Combine(Output, $"report-{Theme ?? "light"}.txt"), string.Join(Environment.NewLine, _report), Encoding.UTF8);
         Console.WriteLine(string.Join(Environment.NewLine, _report));
         application.Shutdown(_failures == 0 ? 0 : 1);

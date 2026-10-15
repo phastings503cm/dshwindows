@@ -4,7 +4,7 @@ using System.Text.RegularExpressions;
 namespace Vision.Core;
 
 /// <summary>Finds what Claude Code and Cursor have installed on this PC and works out, for each item,
-/// what DSH would do with it. Read-only: nothing is copied, changed or run. Slow-ish on a big profile
+/// what Vision would do with it. Read-only: nothing is copied, changed or run. Slow-ish on a big profile
 /// (it lists folders), so the app calls it off the UI thread.</summary>
 public static partial class ExternalScanner
 {
@@ -14,7 +14,7 @@ public static partial class ExternalScanner
     public static ExternalInventory Scan(ExternalLocations external, SkillLocations vision, CancellationToken cancellationToken = default) =>
         new Run(external, vision, cancellationToken).Scan();
 
-    /// <summary>Where an item stands against the skills DSH has: already there under its own name or a
+    /// <summary>Where an item stands against the skills Vision has: already there under its own name or a
     /// numbered copy's (-2, -3 … made when an import kept both), waiting in the approval queue, a
     /// different skill of that name, or new. <paramref name="render"/> gives the SKILL.md the item would
     /// write under a folder name — a numbered copy carries its number as its name, so it has to be asked
@@ -113,7 +113,7 @@ public static partial class ExternalScanner
             Guard(ExternalTool.Cursor, "its folder", Cursor);
             MarkDuplicates();
             foreach (var (tool, count) in _pluginsWithExtras)
-                _left.Add(new ExternalNote(tool, $"{count} plugin{(count == 1 ? " also ships" : "s also ship")} hooks or MCP servers — DSH can't use those."));
+                _left.Add(new ExternalNote(tool, $"{count} plugin{(count == 1 ? " also ships" : "s also ship")} hooks or MCP servers — Vision can't use those."));
             foreach (var (tool, count) in _linksLeftOut)
                 _left.Add(new ExternalNote(tool, $"{count} item{(count == 1 ? " in a plugin links" : "s in plugins link")} to somewhere else on this PC, so {(count == 1 ? "it was" : "they were")} left out."));
             return new ExternalInventory(_tools, _items, _left);
@@ -160,11 +160,11 @@ public static partial class ExternalScanner
                     {
                         if (settings.RootElement.TryGetProperty("hooks", out var hooks) && hooks.ValueKind == JsonValueKind.Object
                             && hooks.EnumerateObject().Any())
-                            _left.Add(new ExternalNote(ExternalTool.ClaudeCode, "Claude Code hooks — DSH has no hooks."));
+                            _left.Add(new ExternalNote(ExternalTool.ClaudeCode, "Claude Code hooks — Vision has no hooks."));
                         if (settings.RootElement.TryGetProperty("permissions", out var permissions) && permissions.ValueKind == JsonValueKind.Object
                             && permissions.EnumerateObject().Any())
                             _left.Add(new ExternalNote(ExternalTool.ClaudeCode,
-                                "Claude Code's allow/deny rules for tools — DSH asks with its own permission presets instead."));
+                                "Claude Code's allow/deny rules for tools — Vision asks with its own permission presets instead."));
                     }
                 }
             }
@@ -196,7 +196,7 @@ public static partial class ExternalScanner
                 var reason = project is null ? "The project's folder isn't on this PC, so nothing would use these notes here."
                     : secret ? "Looks like it contains a key or token."
                     : status == ExternalStatus.Different
-                        ? "Claude Code has changed these notes since you brought them in. Importing updates DSH's copy and keeps the old files beside it as .bak."
+                        ? "Claude Code has changed these notes since you brought them in. Importing updates Vision's copy and keeps the old files beside it as .bak."
                         : null;
                 _items.Add(new ExternalItem
                 {
@@ -212,7 +212,7 @@ public static partial class ExternalScanner
                     Warnings = warnings,
                     ContainsSecret = secret,
                     Status = status,
-                    // Only new notes are ticked: an update could replace a note edited in DSH, so it is the user's call.
+                    // Only new notes are ticked: an update could replace a note edited in Vision, so it is the user's call.
                     SelectedByDefault = reason is null && status == ExternalStatus.New,
                     Reason = reason,
                     ProjectPath = project,
@@ -354,7 +354,7 @@ public static partial class ExternalScanner
             var servers = McpServerNames(Path.Combine(home, "mcp.json"));
             if (servers.Count > 0) _left.Add(new ExternalNote(ExternalTool.Cursor, McpNote(servers)));
             _left.Add(new ExternalNote(ExternalTool.Cursor,
-                "Cursor's User Rules and saved Memories live inside the app, not in a folder DSH can read. Copy the text from Cursor's settings if you want it here."));
+                "Cursor's User Rules and saved Memories live inside the app, not in a folder Vision can read. Copy the text from Cursor's settings if you want it here."));
         }
 
         // MARK: Shared shapes
@@ -530,7 +530,7 @@ public static partial class ExternalScanner
             var secret = SkillLint.ContainsSecret(text);
             if (secret) warnings.Add(SecretWarning);
             if (IncludesFiles().IsMatch(text))
-                warnings.Add("Pulls in other files with @path lines. DSH doesn't follow those, so the copy has the @path lines but not the files.");
+                warnings.Add("Pulls in other files with @path lines. Vision doesn't follow those, so the copy has the @path lines but not the files.");
             _texts[id] = text;
             var lines = text.Replace("\r\n", "\n").TrimEnd().Split('\n').Length;
             Add(new ExternalItem
@@ -557,7 +557,7 @@ public static partial class ExternalScanner
                 : SkillStatus(vision, item.Target, render ?? (_ => null), _drafts);
             var reason = optionalReason ?? (item.ContainsSecret ? "Looks like it contains a key or token." : null);
             if (reason is null && status == ExternalStatus.Different)
-                reason = "DSH already has a different one with this name. Importing keeps both.";
+                reason = "Vision already has a different one with this name. Importing keeps both.";
             _items.Add(item with { Status = status, SelectedByDefault = reason is null && status == ExternalStatus.New, Reason = reason });
         }
 
@@ -767,7 +767,7 @@ public static partial class ExternalScanner
         private static string McpNote(List<string> names)
         {
             var shown = string.Join(", ", names.Take(5)) + (names.Count > 5 ? $" and {names.Count - 5} more" : "");
-            return $"{names.Count} MCP server{(names.Count == 1 ? "" : "s")} ({shown}) — DSH can't run MCP servers yet.";
+            return $"{names.Count} MCP server{(names.Count == 1 ? "" : "s")} ({shown}) — Vision can't run MCP servers yet.";
         }
     }
 

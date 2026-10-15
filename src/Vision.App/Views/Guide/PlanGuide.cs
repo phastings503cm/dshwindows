@@ -13,7 +13,7 @@ public enum PlanPage { Choose, Key, Paste, Check, Model, Role, Done }
 
 /// <summary>"Connect a subscription plan": GLM (Z.ai), Kimi (Kimi Code, Moonshot), OpenAI or Qwen (Alibaba Cloud) — which
 /// plan and region, where to get a key and how, pasting it (kept in Windows Credential Manager), checking it, picking the
-/// model, how DSH should use it, and a first hello through it.</summary>
+/// model, how Vision should use it, and a first hello through it.</summary>
 public sealed class PlanGuide : IWizardGuide
 {
     private readonly AppModel _model;
@@ -39,7 +39,7 @@ public sealed class PlanGuide : IWizardGuide
 
     // MARK: - Header
 
-    private static readonly string[] SectionTitles = ["Which plan?", "Get your key", "Paste your key", "Check it", "Pick the model", "How DSH uses it", "Done"];
+    private static readonly string[] SectionTitles = ["Which plan?", "Get your key", "Paste your key", "Check it", "Pick the model", "How Vision uses it", "Done"];
 
     public int SectionCount => SectionTitles.Length;
     public int SectionIndex => (int)Page;
@@ -147,7 +147,7 @@ public sealed class PlanGuide : IWizardGuide
     {
         var panel = Ui.Stack(
             Heading("Which plan do you have?"),
-            Lead("Pick the plan or API you pay for. DSH shows where to get its key next — and it never needs your account password."));
+            Lead("Pick the plan or API you pay for. Vision shows where to get its key next — and it never needs your account password."));
         foreach (var plan in SubscriptionPlans.All)
         {
             var chosen = plan;
@@ -183,7 +183,7 @@ public sealed class PlanGuide : IWizardGuide
             panel.Children.Add(regions);
             panel.Children.Add(Paragraph("Keys only work in the region where you made them.", 12.5, "TextFillColorSecondaryBrush"));
         }
-        panel.Children.Add(Aside("Every plan here is an online service: your messages go to the provider's servers. DSH masks sensitive details — keys, emails, phone numbers, card numbers, your own custom terms — before anything is sent to a model that isn't private (Settings › AI Models › Sensitive data)."));
+        panel.Children.Add(Aside("Every plan here is an online service: your messages go to the provider's servers. Vision masks sensitive details — keys, emails, phone numbers, card numbers, your own custom terms — before anything is sent to a model that isn't private (Settings › AI Models › Sensitive data)."));
         return panel;
     }
 
@@ -242,7 +242,7 @@ public sealed class PlanGuide : IWizardGuide
         }
         var panel = Ui.Stack(
             Heading("Paste your key"),
-            Lead($"Your {plan.Name} key. DSH keeps it in Windows Credential Manager and sends it only to {new Uri(Region.BaseUrl).Host}."),
+            Lead($"Your {plan.Name} key. Vision keeps it in Windows Credential Manager and sends it only to {new Uri(Region.BaseUrl).Host}."),
             Field("API key", Detach(_keyBox), plan.KeyHint));
         panel.Children.Add(Detach(_keyNote)); // reused from one rendering of the page to the next
         UpdateKeyNote();
@@ -333,7 +333,7 @@ public sealed class PlanGuide : IWizardGuide
         var plan = _plan!;
         var panel = Ui.Stack(
             Heading("Checking your key"),
-            Lead(plan.ListsModels ? "DSH asks the plan which models your key can use." : "DSH sends a one-word request to check the key works."));
+            Lead(plan.ListsModels ? "Vision asks the plan which models your key can use." : "Vision sends a one-word request to check the key works."));
         if (_checking) panel.Children.Add(Busy($"Asking {new Uri(Region.BaseUrl).Host}…"));
         else if (_checkError is { } error)
             panel.Children.Add(Note(Tone.Error, error, "The key didn't work", Ui.Buttons(Ui.Button("Try again", () => _ = CheckAsync(), accent: true))));
@@ -395,7 +395,7 @@ public sealed class PlanGuide : IWizardGuide
         return panel;
     }
 
-    // MARK: - How DSH uses it
+    // MARK: - How Vision uses it
 
     private RouteUse _use;
     private bool _private;
@@ -404,7 +404,7 @@ public sealed class PlanGuide : IWizardGuide
     {
         var plan = _plan!;
         var panel = Ui.Stack(
-            Heading("How should DSH use it?"),
+            Heading("How should Vision use it?"),
             Lead("You can change this any time in Settings › AI Models."));
         void Use(RouteUse use, string glyph, string title, string detail) =>
             panel.Children.Add(Choice(glyph, title, detail, _use == use, () =>
@@ -417,12 +417,12 @@ public sealed class PlanGuide : IWizardGuide
         Use(RouteUse.Backup, Icons.Sync, "Backup", "It takes over when the primary stops answering.");
         Use(RouteUse.JustAdd, Icons.Add, "Just add it", "It's there in the model menu when you want it.");
         if (plan.InteractiveOnly)
-            panel.Children.Add(Note(Tone.Info, "Under this plan's terms DSH uses it only while you're there: as the primary, task lists won't run on it, and a /goal goes one round at a time.", "Interactive use only"));
+            panel.Children.Add(Note(Tone.Info, "Under this plan's terms Vision uses it only while you're there: as the primary, task lists won't run on it, and a /goal goes one round at a time.", "Interactive use only"));
         var isPrivate = Ui.Check("Private", _private, on => _private = on);
         isPrivate.Margin = new Thickness(0, 12, 0, 0);
         isPrivate.FontWeight = FontWeights.SemiBold;
         panel.Children.Add(isPrivate);
-        panel.Children.Add(Paragraph("Not private — this is an online service. DSH masks sensitive details before sending (see Settings › AI Models › Sensitive data).", 12.5, "TextFillColorSecondaryBrush"));
+        panel.Children.Add(Paragraph("Not private — this is an online service. Vision masks sensitive details before sending (see Settings › AI Models › Sensitive data).", 12.5, "TextFillColorSecondaryBrush"));
         return panel;
     }
 
@@ -466,7 +466,7 @@ public sealed class PlanGuide : IWizardGuide
 
             using var timeout = new CancellationTokenSource(TimeSpan.FromMinutes(2));
             _hello = await SparkSetup.SayHelloAsync(ProviderClients.Create(Probe(model)), model,
-                $"Say hello to someone who just connected DSH to their {plan.Name}, in one short, friendly sentence.", timeout.Token);
+                $"Say hello to someone who just connected Vision to their {plan.Name}, in one short, friendly sentence.", timeout.Token);
         }
         catch (LlmException error) when (error.Kind == LlmErrorKind.Http)
         {
@@ -508,7 +508,7 @@ public sealed class PlanGuide : IWizardGuide
         if (_saveError is { } error)
             panel.Children.Add(Note(Tone.Warning, error, _saved ? "Saved, but the hello didn't go through" : "It didn't save",
                 Ui.Buttons(Ui.Button("Try again", () => _ = SaveAsync()))));
-        panel.Children.Add(Aside($"DSH saved a model route named \"{_route?.Name ?? plan.Name}\" at {Region.BaseUrl}, with your key in Windows Credential Manager. It isn't private, so DSH masks sensitive details before sending — change what is masked in Settings › AI Models › Sensitive data."));
+        panel.Children.Add(Aside($"Vision saved a model route named \"{_route?.Name ?? plan.Name}\" at {Region.BaseUrl}, with your key in Windows Credential Manager. It isn't private, so Vision masks sensitive details before sending — change what is masked in Settings › AI Models › Sensitive data."));
         return panel;
     }
 

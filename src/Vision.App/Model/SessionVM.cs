@@ -181,7 +181,7 @@ public sealed partial class SessionVM : ObservableObject
     /// <summary>A regular chat: no project folder.</summary>
     public bool IsPlain => WorkspacePath is null;
     /// <summary>Where the agent works — in this chat's turns and its task list alike: the project folder, or (a regular chat)
-    /// the chat's own scratch folder (one recorded under DSH's old data folder is where it lives now).</summary>
+    /// the chat's own scratch folder (legacy: one recorded under the data folder of DSH, the app's former name, is where it lives now).</summary>
     public string WorkingFolder => WorkspacePath ?? (PlainChat.IsScratch(Cwd) ? PlainChat.InCurrentRoot(Cwd!) : PlainChat.Folder(Id));
     public string? ProjectName => WorkspacePath is { } p ? System.IO.Path.GetFileName(p.TrimEnd('\\', '/')) : null;
     public string UpdatedLabel => Formatting.Relative(UpdatedAt);

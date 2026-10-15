@@ -261,7 +261,7 @@ public sealed class MouseTool : IToolExecutor
     public ToolSpec Spec { get; } = new(ToolName,
         "Click at screen coordinates (pixels, top-left origin of the main display; monitors to its left or above are negative): " +
         "button=left/right/middle, clicks=1 or 2 (double), or drag with to_x/to_y (press at x,y, move, release). " +
-        "Coordinates come from screenshot/list_windows geometry. Apps running as administrator ignore it unless DSH is elevated too. " +
+        "Coordinates come from screenshot/list_windows geometry. Apps running as administrator ignore it unless Vision is elevated too. " +
         "Screenshot after clicking to verify.",
         """{"type":"object","properties":{"x":{"type":"integer","description":"Screen x (pixels)"},"y":{"type":"integer","description":"Screen y (pixels)"},"button":{"type":"string","enum":["left","right","middle"],"description":"Default left"},"clicks":{"type":"integer","description":"1 default, 2 for double-click"},"to_x":{"type":"integer","description":"Drag release x"},"to_y":{"type":"integer","description":"Drag release y"}},"required":["x","y"]}""");
 
@@ -338,7 +338,7 @@ public sealed class KeyboardTool : IToolExecutor
         "Type into the frontmost app: text=literal string, and/or keys like " +
         "[\"ctrl+s\"] [\"enter\"] [\"ctrl+c\"] [\"esc\"] [\"up\",\"down\"] [\"f5\"] with modifiers ctrl/alt/shift/win. " +
         "`app` focuses that app first (the reliable pattern: keyboard(app:\"Godot\", keys:[\"F5\"])). " +
-        "Refused into terminals (Windows Terminal, PowerShell, cmd, …), the Run box and Start search, and DSH itself — " +
+        "Refused into terminals (Windows Terminal, PowerShell, cmd, …), the Run box and Start search, and Vision itself — " +
         "that route would bypass the shell permission gate.",
         """{"type":"object","properties":{"text":{"type":"string","description":"Literal text to type"},"keys":{"type":"array","items":{"type":"string"},"description":"Key combos, e.g. ['ctrl+s','enter']"},"app":{"type":"string","description":"Focus this app first (process name or window title)"}},"required":[]}""");
 
@@ -358,7 +358,7 @@ public sealed class KeyboardTool : IToolExecutor
         }
         if (text.Length == 0 && combos.Count == 0) return "Error: give text and/or keys.";
 
-        // Terminal guard: resolve the *destination* window and refuse TTYs, launchers and DSH.
+        // Terminal guard: resolve the *destination* window and refuse TTYs, launchers and Vision.
         var targetName = "frontmost app";
         var app = JsonArgs.String(args, "app");
         if (!string.IsNullOrWhiteSpace(app))

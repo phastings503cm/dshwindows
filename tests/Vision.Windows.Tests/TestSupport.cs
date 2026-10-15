@@ -129,7 +129,7 @@ internal sealed class TestWindow : IDisposable
 
     public TestWindow(bool withControls = true, bool animate = false)
     {
-        Title = $"DSH machine test {Guid.NewGuid().ToString("N")[..10]}";
+        Title = $"Vision machine test {Guid.NewGuid().ToString("N")[..10]}";
         using var ready = new ManualResetEventSlim();
         Exception? failure = null;
         _thread = new Thread(() =>

@@ -106,7 +106,7 @@ public sealed partial class BedrockGuide
         var callable = models.Where(m => m.CanInvoke).ToList();
         if (callable.Count == 0)
         {
-            panel.Children.Add(Note(Tone.Warning, $"AWS lists no chat models DSH can use in {BedrockRegions.NameOf(_region)}. Go back and pick another Region — US East (N. Virginia) or US West (Oregon) have the most."));
+            panel.Children.Add(Note(Tone.Warning, $"AWS lists no chat models Vision can use in {BedrockRegions.NameOf(_region)}. Go back and pick another Region — US East (N. Virginia) or US West (Oregon) have the most."));
             return panel;
         }
         var recommended = callable.Where(m => m.Recommended).ToList();
@@ -129,7 +129,7 @@ public sealed partial class BedrockGuide
             panel.Children.Add(all);
         }
         if (_selected is not null) panel.Children.Add(AccessSummary());
-        panel.Children.Add(Aside("Each model is billed by AWS per use (per thousand words or so, in and out). Claude models are made by Anthropic; Amazon Nova by Amazon; Llama by Meta. Some models are only reachable through a \"cross-Region inference profile\" — AWS runs them in several nearby Regions for capacity; DSH picks the right one for you."));
+        panel.Children.Add(Aside("Each model is billed by AWS per use (per thousand words or so, in and out). Claude models are made by Anthropic; Amazon Nova by Amazon; Llama by Meta. Some models are only reachable through a \"cross-Region inference profile\" — AWS runs them in several nearby Regions for capacity; Vision picks the right one for you."));
         panel.Children.Add(Stuck("The model you want isn't listed? It may not be offered in this Region: go back and try another one (the model list changes with the Region)."));
         return panel;
     }
@@ -317,7 +317,7 @@ public sealed partial class BedrockGuide
                 Picture("bedrock-terms", "A model's terms, accepted, and the model enabled."),
                 Heading($"{model.Name} is ready"),
                 Note(Tone.Success, $"Your AWS account can use {model.Name} now."),
-                Lead("Next, DSH saves the connection and sends a first message."));
+                Lead("Next, Vision saves the connection and sends a first message."));
         }
         return access.State switch
         {
@@ -333,7 +333,7 @@ public sealed partial class BedrockGuide
         _website ??= Ui.Field(placeholder: "https://example.com");
         _useCases ??= new TextBox
         {
-            Text = "Coding help: an AI coding agent (DSH) that reads, writes and tests code in my projects on my own PC.",
+            Text = "Coding help: an AI coding agent (Vision) that reads, writes and tests code in my projects on my own PC.",
             AcceptsReturn = true,
             TextWrapping = TextWrapping.Wrap,
             MinHeight = 64,
@@ -488,7 +488,7 @@ public sealed partial class BedrockGuide
         return result.Length == 0 ? "(The model answered with an empty reply.)" : result;
     }
 
-    /// <summary>Make the Bedrock model DSH's route, replacing an older Bedrock route with the same profile
+    /// <summary>Make the Bedrock model Vision's route, replacing an older Bedrock route with the same profile
     /// and Region (so switching models doesn't pile up routes).</summary>
     private void SaveProvider(ProviderProfile profile)
     {
@@ -503,9 +503,9 @@ public sealed partial class BedrockGuide
     private UIElement ConnectPage()
     {
         var panel = Ui.Stack(
-            Picture("bedrock-connected", "DSH's chat window answering through Amazon Bedrock.", 240),
-            Heading("Connect DSH to Bedrock"),
-            Lead($"DSH saves the connection — {_selected?.Name ?? "your model"} in {BedrockRegions.NameOf(_region)} — and sends a first message to check everything works."));
+            Picture("bedrock-connected", "Vision's chat window answering through Amazon Bedrock.", 240),
+            Heading("Connect Vision to Bedrock"),
+            Lead($"Vision saves the connection — {_selected?.Name ?? "your model"} in {BedrockRegions.NameOf(_region)} — and sends a first message to check everything works."));
         if (_connecting) panel.Children.Add(Busy("Sending a first message through Bedrock…"));
         else if (_connected && _hello is { } hello)
             panel.Children.Add(Note(Tone.Success, hello, $"{_selected?.Name} answered"));
@@ -569,15 +569,15 @@ public sealed partial class BedrockGuide
     private UIElement DonePage()
     {
         var panel = Ui.Stack(
-            Picture("bedrock-connected", "DSH connected to Amazon Bedrock.", 240),
+            Picture("bedrock-connected", "Vision connected to Amazon Bedrock.", 240),
             Heading("You're all set"),
             Lead($"Chats now run on {_selected?.Name ?? "Bedrock"} in your AWS account."),
             Bullets(
                 (Icons.Chat, "**Start chatting** — press the button below."),
                 (Icons.Robot, "**Switch models** any time: run this guide again from Settings › AI Models › Add › Amazon Bedrock, or the setup wizard."),
-                (Icons.Refresh, "**Sign-in**: when your AWS session ends, DSH says so and signs you in again with one click (the browser opens)."),
+                (Icons.Refresh, "**Sign-in**: when your AWS session ends, Vision says so and signs you in again with one click (the browser opens)."),
                 (Icons.Info, "**Costs** show up on your AWS bill, under Amazon Bedrock (and AWS Marketplace for Marketplace models). AWS Budgets can email you before you spend more than you planned.")));
-        var keys = Ui.Stack(Paragraph("Some tools (like Claude Code with Bedrock) take a Bedrock API key instead of an AWS sign-in. DSH can make one from your sign-in. It works for 12 hours (or until your sign-in ends).", 12.5));
+        var keys = Ui.Stack(Paragraph("Some tools (like Claude Code with Bedrock) take a Bedrock API key instead of an AWS sign-in. Vision can make one from your sign-in. It works for 12 hours (or until your sign-in ends).", 12.5));
         if (_mintingKey) keys.Children.Add(Busy("Creating a key…"));
         else if (_apiKey is { } key)
         {

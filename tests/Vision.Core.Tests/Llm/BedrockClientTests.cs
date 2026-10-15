@@ -22,7 +22,7 @@ public sealed class BedrockClientTests
         new(profile ?? Profile(), source ?? new StaticAwsCredentialSource(SigV4Tests.WithToken), handler, new ManualClock(SigV4Tests.Now));
 
     private static LlmRequest Request(params LlmMessage[] messages) =>
-        new("You are DSH.", messages.Length == 0 ? [LlmMessage.User("hi")] : messages, [], "");
+        new("You are Vision.", messages.Length == 0 ? [LlmMessage.User("hi")] : messages, [], "");
 
     private sealed record Collected(string Text, string Reasoning, LlmStreamEvent.Done Done);
 
@@ -455,7 +455,7 @@ public sealed class BedrockClientTests
 
     // MARK: Reasoning replay
 
-    private static LlmRequest ToolTurnRequest(string state) => new("You are DSH.",
+    private static LlmRequest ToolTurnRequest(string state) => new("You are Vision.",
     [
         LlmMessage.User("go"),
         LlmMessage.Assistant("", [new ToolCall("tooluse_1", "echo", "{}")]) with { ProviderState = state },

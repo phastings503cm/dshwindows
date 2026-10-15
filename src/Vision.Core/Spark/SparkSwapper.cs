@@ -596,7 +596,7 @@ public sealed class SparkSwapperClient : IDisposable
         }
     }
 
-    /// <summary>GET /api/credentials: the model API key (what DSH needs to talk to the model) and
+    /// <summary>GET /api/credentials: the model API key (what Vision needs to talk to the model) and
     /// the OpenClaw gateway token.</summary>
     public async Task<SwapperCredentials> CredentialsAsync(CancellationToken cancellationToken = default)
     {

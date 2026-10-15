@@ -19,7 +19,7 @@ public sealed partial class SwapperBox : ObservableObject, IDisposable
     /// <summary>A certificate the user hasn't approved (a login connection whose box was reinstalled).</summary>
     [ObservableProperty] private string? _untrustedFingerprint;
     [ObservableProperty] private bool _refreshing;
-    /// <summary>The model an install started from DSH is for, and how it is going.</summary>
+    /// <summary>The model an install started from Vision is for, and how it is going.</summary>
     [ObservableProperty] private string? _installingKey;
     [ObservableProperty] private SwapperJob? _installJob;
     [ObservableProperty] private string? _installError;

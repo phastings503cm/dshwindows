@@ -513,7 +513,7 @@ public static class SkillImporter
                         // Unreadable: nothing to report.
                     }
                     if (count > 0)
-                        notes.Add($"{count} Claude subagent definition{(count == 1 ? "" : "s")} in {name}/ can't be imported (DSH has no subagent files).");
+                        notes.Add($"{count} Claude subagent definition{(count == 1 ? "" : "s")} in {name}/ can't be imported (Vision has no subagent files).");
                     continue;
                 }
                 Walk(entry.FullName, depth + 1);
@@ -710,7 +710,7 @@ public static class SkillImporter
     // MARK: Importing
 
     /// <summary>Import the chosen candidates. As drafts, they wait in the approval queue; otherwise they
-    /// go straight to the DSH store (the user's selection in the import sheet is the approval).</summary>
+    /// go straight to the Vision store (the user's selection in the import sheet is the approval).</summary>
     public static ImportResult Perform(ImportPlan plan, IEnumerable<string> selecting, SkillScope scope, string? projectRoot,
                                        bool asDraft, ConflictPolicy conflict = ConflictPolicy.Rename,
                                        SkillLocations? locations = null)
@@ -872,7 +872,7 @@ public static class SkillExporter
             if (format != ExportFormat.Portable)
             {
                 var readme = $"""
-                    Skills exported from DSH ({format.Label()}).
+                    Skills exported from Vision ({format.Label()}).
 
                     Unzip this into a project folder (or your home folder for user-wide skills); the tool picks them up from there.
                     Each skill is plain Markdown — read SKILL.md before trusting a skill you didn't write: skills can tell an agent to run commands.

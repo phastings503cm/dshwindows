@@ -21,7 +21,7 @@ public sealed class PlainChatTests : IDisposable
     {
         var scratch = Path.Combine("C:", "Users", "pat", "AppData", "Roaming", "Vision", "Chats", "abc");
         var prompt = PlainChat.BasePrompt(null, scratch, Coding);
-        Assert.StartsWith("You are DSH, a helpful assistant in a native Windows app. This is a regular conversation: no project folder is open and none is needed — never ask the user to open one.", prompt);
+        Assert.StartsWith("You are Vision, a helpful assistant in a native Windows app. This is a regular conversation: no project folder is open and none is needed — never ask the user to open one.", prompt);
         Assert.Contains($"work in this chat's own scratch folder, {scratch}; it belongs to this chat and starts empty.", prompt);
         Assert.Contains("use one of the user's skills when it fits the request", prompt);
         Assert.EndsWith("Tell the user where a file you made is when it matters.", prompt);

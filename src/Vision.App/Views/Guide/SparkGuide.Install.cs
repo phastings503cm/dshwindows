@@ -18,15 +18,15 @@ public sealed partial class SparkGuide
     private UIElement FindPage()
     {
         var panel = Ui.Stack(
-            Picture("scanner", "DSH scanning the network and finding the DGX Spark.", 200),
+            Picture("scanner", "Vision scanning the network and finding the DGX Spark.", 200),
             Heading("Find your Spark"),
-            Lead("DSH is looking around your network for it. When it appears, press **This is my Spark**."));
+            Lead("Vision is looking around your network for it. When it appears, press **This is my Spark**."));
         if (_state.Host is not null && _scanner.Selected is null)
         {
             panel.Children.Add(Note(Tone.Success, $"Last time you chose {SparkLabel}. Continue with it, or pick another below.", "Your Spark"));
         }
         panel.Children.Add(Detach(_scanner));
-        panel.Children.Add(Aside("DSH knocks on a few doors (network ports) of every device in your network's address range — 22 for remote login, 8999 for Spark Swapper, 11443 for the Spark's secure model address, and the usual ports of model servers — then asks each answer what it is. It only looks: nothing is signed into or changed. Names like spark-3f2a come from the devices themselves (mDNS) or your router."));
+        panel.Children.Add(Aside("Vision knocks on a few doors (network ports) of every device in your network's address range — 22 for remote login, 8999 for Spark Swapper, 11443 for the Spark's secure model address, and the usual ports of model servers — then asks each answer what it is. It only looks: nothing is signed into or changed. Names like spark-3f2a come from the devices themselves (mDNS) or your router."));
         panel.Children.Add(Stuck("Not found? Check this PC is on your home network (not the Spark's own Wi-Fi, a guest network or a VPN), and give a Spark that just restarted a couple of minutes. You can also find its address in your router's list of connected devices and type it in above."));
         return panel;
     }
@@ -72,9 +72,9 @@ public sealed partial class SparkGuide
         _sshPassword.PasswordChanged += OnLoginTyped;
 
         var panel = Ui.Stack(
-            Picture("terminal", "DSH's install log, and the Spark's remembered ID card.", 230),
+            Picture("terminal", "Vision's install log, and the Spark's remembered ID card.", 230),
             Heading("Install Spark Swapper"),
-            Lead($"DSH signs in to your Spark at {SparkLabel} and installs **Spark Swapper**, the Spark's web control panel. Use the **username and password you created on the Spark's setup page**."));
+            Lead($"Vision signs in to your Spark at {SparkLabel} and installs **Spark Swapper**, the Spark's web control panel. Use the **username and password you created on the Spark's setup page**."));
 
         if (_installPhase == InstallPhase.AskKey && _hostKeyQuestion is { } question)
         {
@@ -83,7 +83,7 @@ public sealed partial class SparkGuide
         else if (!_installOk)
         {
             panel.Children.Add(Field("Spark username", Detach(_sshUser)));
-            panel.Children.Add(Field("Spark password", Detach(_sshPassword), "Only used for this install — DSH doesn't save it."));
+            panel.Children.Add(Field("Spark password", Detach(_sshPassword), "Only used for this install — Vision doesn't save it."));
             _installGo = Ui.Button(_foundInstalled ? "Sign in and check" : "Sign in and install", () => _ = InstallAsync(null), accent: true);
             UpdateInstallButton();
             panel.Children.Add(Ui.Buttons(_installGo));
@@ -129,10 +129,10 @@ public sealed partial class SparkGuide
         }
         if (!_installLog.IsEmpty || InstallBusy) panel.Children.Add(Detach(_installLog));
 
-        panel.Children.Add(Aside("DSH signs in the way a terminal's \"ssh\" command would, then runs Spark Swapper's official one-line installer:\n" +
+        panel.Children.Add(Aside("Vision signs in the way a terminal's \"ssh\" command would, then runs Spark Swapper's official one-line installer:\n" +
                                  SparkInstaller.SwapperInstallCommand + "\n" +
-                                 "When the installer asks for your password to install software (sudo), DSH types it for you — it's never shown or saved. " +
-                                 "It also puts a secure (HTTPS) address in front of the model on port 11443, which is how DSH talks to your model. Running it again is safe: it updates Spark Swapper and keeps its settings."));
+                                 "When the installer asks for your password to install software (sudo), Vision types it for you — it's never shown or saved. " +
+                                 "It also puts a secure (HTTPS) address in front of the model on port 11443, which is how Vision talks to your model. Running it again is safe: it updates Spark Swapper and keeps its settings."));
         panel.Children.Add(Stuck("\"Didn't accept that username and password\": use the account from the Spark's setup page (not your Wi-Fi password). \"Couldn't reach … port 22\": the Spark may still be restarting — wait a minute. \"Isn't allowed to install software\": sign in with the first account created on the Spark."));
         return panel;
     }
@@ -184,7 +184,7 @@ public sealed partial class SparkGuide
         ((FrameworkElement)lines.Children[^1]).Margin = new Thickness(0, 10, 0, 0);
         lines.Children.Insert(0, Paragraph(
             "Every Spark has its own secret ID. The first time you connect, your PC is shown a short code made from it — its **fingerprint** — and asked whether to trust it, like saving a new contact. " +
-            "If you set this Spark up yourself, on your own network, it's safe to say yes. DSH remembers it and will warn you if a different device ever claims to be your Spark.", 12.5, "TextFillColorSecondaryBrush"));
+            "If you set this Spark up yourself, on your own network, it's safe to say yes. Vision remembers it and will warn you if a different device ever claims to be your Spark.", 12.5, "TextFillColorSecondaryBrush"));
         lines.Children.Add(Ui.Secondary("Want to double-check? On the Spark's own screen, run: ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub — the SHA256 code should match."));
         return Note(Tone.Info, "", "Your PC hasn't met this Spark before", lines);
     }

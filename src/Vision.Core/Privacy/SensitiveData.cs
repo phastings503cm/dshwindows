@@ -7,7 +7,7 @@ namespace Vision.Core;
 //
 // What the privacy shield masks before a request goes to a model that isn't private: secrets and keys, email
 // addresses, phone numbers, ID and card numbers, IP addresses (off unless asked for), the user's own custom terms
-// (client names, code names), and every value in the Credentials Vault. The patterns are the same in DSH for
+// (client names, code names), and every value in the Credentials Vault. The patterns are the same in Vision for
 // macOS, with the same test cases, so both apps mask the same things.
 //
 // (Memory/SecretGuard answers a different question — "may this text be stored?" — and is stricter about it. The
@@ -208,7 +208,7 @@ public sealed partial class SensitiveDetector
     [GeneratedRegex(@"^[A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)+$", RegexOptions.CultureInvariant, SensitiveKinds.MatchTimeoutMs)]
     private static partial Regex DottedPath();
 
-    // Identifiers, in letters only (as in DSH for macOS): with digits allowed, a password such as Tr0ub4dorX9 would
+    // Identifiers, in letters only (as in Vision for macOS): with digits allowed, a password such as Tr0ub4dorX9 would
     // read as PascalCase.
     [GeneratedRegex(@"^[A-Z][a-z]+(?:[A-Z][a-z]*)+$", RegexOptions.CultureInvariant, SensitiveKinds.MatchTimeoutMs)]
     private static partial Regex PascalCase();

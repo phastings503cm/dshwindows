@@ -57,7 +57,7 @@ public partial class App : Application
             Environment.SetEnvironmentVariable(AppPaths.HomeVariable, selfTest.Home);
             selfTest.Prepare();
         }
-        else if (!BringDshDataOver(_instance!.IsFirst))
+        else if (!BringLegacyDataOver(_instance!.IsFirst))
         {
             Shutdown();
             return;
@@ -110,7 +110,7 @@ public partial class App : Application
     /// <summary>Vision was called DSH before 0.9: bring DSH's data folder over, once, before anything opens a file
     /// (see <see cref="DataFolderMigration"/>). False when the app must not start (the user chose to quit, or a move
     /// stopped half-way and the data must not be split across two folders).</summary>
-    private bool BringDshDataOver(bool firstInstance)
+    private bool BringLegacyDataOver(bool firstInstance)
     {
         // VISION_HOME (or DSH_HOME) set: the user chose the folder, and it isn't moved.
         if (AppPaths.Overridden is not null) return true;
@@ -242,7 +242,7 @@ public partial class App : Application
         try
         {
             Dialog.Info("Something went wrong",
-                $"DSH hit an unexpected error and recovered. Details were saved to:\n{path}\n\n{e.Exception.GetBaseException().Message}");
+                $"Vision hit an unexpected error and recovered. Details were saved to:\n{path}\n\n{e.Exception.GetBaseException().Message}");
         }
         catch (Exception)
         {
@@ -259,7 +259,7 @@ public partial class App : Application
             var directory = AppPaths.Ensure(AppPaths.Logs);
             var path = Path.Combine(directory, $"crash-{DateTime.Now:yyyyMMdd-HHmmss}-{source}.txt");
             var text = new StringBuilder()
-                .AppendLine($"DSH for Windows {AppInfo.Version}")
+                .AppendLine($"Vision for Windows {AppInfo.Version}")
                 .AppendLine($"{Environment.OSVersion} · .NET {Environment.Version} · {(Environment.Is64BitProcess ? "64" : "32")}-bit")
                 .AppendLine($"{DateTimeOffset.Now:O} ({source})")
                 .AppendLine()

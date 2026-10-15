@@ -144,7 +144,7 @@ public sealed partial class RemoteTranscript
             Flag(TranscriptProblem.TooManyPrompts, events);
             return;
         }
-        var shown = $"{text.Trim()} (answered by DSH)";
+        var shown = $"{text.Trim()} (answered by Vision)";
         Lines.Add(shown);
         events.Add(new TranscriptEvent.Line(shown));
         events.Add(new TranscriptEvent.PasswordPrompt());
@@ -215,7 +215,7 @@ public sealed class SparkInstaller(ISparkConnection connection, string password)
 
     /// <summary>Put an HTTPS front on :11443 for the model API (nginx, with the Swapper's own
     /// certificate), unless one is already there. The model servers only listen on the Spark itself
-    /// (127.0.0.1:8888); this is how DSH on your PC reaches them.</summary>
+    /// (127.0.0.1:8888); this is how Vision on your PC reaches them.</summary>
     public async Task<InstallOutcome> SetUpModelFrontAsync(CancellationToken cancellationToken = default)
     {
         Say($"Setting up the secure model address (HTTPS on port {ModelFrontPort})…");
@@ -324,7 +324,7 @@ public sealed class SparkInstaller(ISparkConnection connection, string password)
     {
         TranscriptProblem.WrongPassword => "The Spark didn't accept the password when installing needed administrator rights (sudo). Check the password and try again.",
         TranscriptProblem.NotAllowed => "This account isn't allowed to install software on the Spark (it isn't an administrator). Sign in with the account you created when you first set up the Spark.",
-        _ => "The installer kept asking for the password, so DSH stopped it.",
+        _ => "The installer kept asking for the password, so Vision stopped it.",
     };
 
     /// <summary>Installs nginx if needed and serves https://&lt;spark&gt;:11443 — /v1/ goes to the model

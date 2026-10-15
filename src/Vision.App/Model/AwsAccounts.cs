@@ -66,6 +66,6 @@ public static class AwsAccounts
     {
         public Task<AwsCredentials> GetAsync(bool forceRefresh = false, CancellationToken cancellationToken = default) =>
             throw new AwsSignInRequiredException(profile,
-                "The AWS CLI isn't installed on this PC any more, so DSH can't sign in to AWS. Run the Amazon Bedrock setup again (Settings › AI Models) — it reinstalls it.");
+                "The AWS CLI isn't installed on this PC any more, so Vision can't sign in to AWS. Run the Amazon Bedrock setup again (Settings › AI Models) — it reinstalls it.");
     }
 }

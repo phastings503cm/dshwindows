@@ -626,7 +626,7 @@ public static class SkillManager
         }
     }
 
-    /// <summary>Copy a Claude/Cursor/Agents skill, rule or command into DSH's own store so it can be
+    /// <summary>Copy a Claude/Cursor/Agents skill, rule or command into Vision's own store so it can be
     /// edited and shared without touching the other tool's files. Returns the new SKILL.md.</summary>
     public static string Adopt(Skill skill, SkillScope scope, string? projectRoot,
                                ConflictPolicy conflict = ConflictPolicy.Rename, SkillLocations? locations = null)
@@ -654,7 +654,7 @@ public static class SkillManager
     public static void Write(Skill skill, string text)
     {
         if (!skill.IsOwned)
-            throw SkillException.Unsupported($"This skill belongs to {skill.Origin.Label()}. Copy it to DSH first to edit it.");
+            throw SkillException.Unsupported($"This skill belongs to {skill.Origin.Label()}. Copy it to Vision first to edit it.");
         SkillFiles.WriteText(skill.Path, text);
     }
 

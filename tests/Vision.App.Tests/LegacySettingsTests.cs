@@ -28,7 +28,7 @@ public sealed class LegacySettingsTests : IDisposable
     }
 
     /// <summary>Settings as DSH wrote them: this version's file without the flag DSH never wrote.</summary>
-    private static void WriteAsDsh(AppConfig config, string path)
+    private static void WriteAsLegacy(AppConfig config, string path)
     {
         config.SaveNow();
         var json = JsonNode.Parse(File.ReadAllText(path))!.AsObject();
@@ -48,7 +48,7 @@ public sealed class LegacySettingsTests : IDisposable
         old.SetSkillEnabled(Path.Combine(legacy, "skills", "off", "SKILL.md"), false);
         old.SetSkillEnabled(@"C:\code\app\.claude\skills\x\SKILL.md", false);
         old.SetSkillsFor("chat-1", new SessionSkillSelection([Path.Combine(legacy, "skills", "pinned", "SKILL.md")], Auto: false));
-        WriteAsDsh(old, Path.Combine(legacy, "settings.json"));
+        WriteAsLegacy(old, Path.Combine(legacy, "settings.json"));
 
         Assert.Equal(DataMigrationResult.Moved, new DataFolderMigration(legacy, root).Run().Result);
         var config = new AppConfig(Path.Combine(root, "settings.json"));

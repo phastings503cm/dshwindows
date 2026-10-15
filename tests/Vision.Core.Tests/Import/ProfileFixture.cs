@@ -4,7 +4,7 @@ namespace Vision.Core.Tests;
 
 /// <summary>A pretend PC: a home folder laid out the way Claude Code and Cursor lay theirs out (the
 /// plugin cache with its version folder, the encoded per-project folders, installed_plugins.json),
-/// beside a scratch DSH data folder and a "work" folder for projects. Nothing here touches the real
+/// beside a scratch Vision data folder and a "work" folder for projects. Nothing here touches the real
 /// ~/.claude, ~/.cursor or %APPDATA%.</summary>
 internal sealed class ProfileFixture : IDisposable
 {

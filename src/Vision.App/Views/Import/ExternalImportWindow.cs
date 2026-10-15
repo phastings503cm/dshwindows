@@ -11,7 +11,7 @@ using Vision.Core;
 namespace Vision.App.Views.Import;
 
 /// <summary>"Bring in Claude Code &amp; Cursor": looks in the folders those tools keep on this PC, lists
-/// what DSH can use with the sensible boxes ticked, and copies what you choose into DSH's own data
+/// what Vision can use with the sensible boxes ticked, and copies what you choose into Vision's own data
 /// folder. Three steps on screen — looking, choosing, done — and the middle one is a single button when
 /// the suggestions are right. Nothing in the other tools' folders is changed, and nothing is run.</summary>
 public sealed class ExternalImportWindow : Window
@@ -73,7 +73,7 @@ public sealed class ExternalImportWindow : Window
         var header = new StackPanel { Margin = new Thickness(24, 20, 24, 8) };
         header.Children.Add(Ui.Title("Bring in Claude Code & Cursor"));
         var intro = Ui.Secondary(
-            "DSH looks in the folders those tools keep on this PC and lists what it can use: skills, commands, rules, subagents, your instructions and the notes Claude Code saved for each project. " +
+            "Vision looks in the folders those tools keep on this PC and lists what it can use: skills, commands, rules, subagents, your instructions and the notes Claude Code saved for each project. " +
             "You choose what to copy. Nothing in their folders is changed, and nothing is run.");
         intro.Margin = new Thickness(0, 6, 0, 0);
         header.Children.Add(intro);
@@ -280,7 +280,7 @@ public sealed class ExternalImportWindow : Window
             box.Children.Add(Ui.Subtitle("Claude Code and Cursor weren't found"));
             var claude = _locations.ClaudeHome.Replace(_locations.Home, "~");
             var cursor = _locations.CursorHome.Replace(_locations.Home, "~");
-            var text = Ui.Secondary($"DSH looked in {claude} and {cursor}. If you keep them somewhere else, or have skills in a project, choose the folder yourself.");
+            var text = Ui.Secondary($"Vision looked in {claude} and {cursor}. If you keep them somewhere else, or have skills in a project, choose the folder yourself.");
             text.Margin = new Thickness(0, 4, 0, 10);
             box.Children.Add(text);
             box.Children.Add(Ui.Button("Choose a Folder…", ChooseFolder, accent: true));
@@ -288,7 +288,7 @@ public sealed class ExternalImportWindow : Window
         else
         {
             box.Children.Add(Ui.Subtitle("Nothing to bring in"));
-            var text = Ui.Secondary("Both tools are here, but they have no skills, commands, rules, subagents, instructions or project notes that DSH can use. " +
+            var text = Ui.Secondary("Both tools are here, but they have no skills, commands, rules, subagents, instructions or project notes that Vision can use. " +
                                     "Skills and instruction files inside a project folder are read in place whenever you open that folder.");
             text.Margin = new Thickness(0, 4, 0, 10);
             box.Children.Add(text);
@@ -378,7 +378,7 @@ public sealed class ExternalImportWindow : Window
         return row;
     }
 
-    /// <summary>Not already in DSH and not already waiting for approval.</summary>
+    /// <summary>Not already in Vision and not already waiting for approval.</summary>
     private static bool Selectable(ExternalItem item) => item.Status is ExternalStatus.New or ExternalStatus.Different;
 
     private UIElement ItemRow(ExternalItem item)
@@ -407,7 +407,7 @@ public sealed class ExternalImportWindow : Window
         switch (item.Status)
         {
             case ExternalStatus.Imported:
-                title.Children.Add(SkillVisuals.Badge("Already in DSH", Color.FromRgb(0x10, 0x7C, 0x10)));
+                title.Children.Add(SkillVisuals.Badge("Already in Vision", Color.FromRgb(0x10, 0x7C, 0x10)));
                 break;
             case ExternalStatus.Waiting:
                 title.Children.Add(SkillVisuals.Badge("Waiting for your approval", Color.FromRgb(0xCA, 0x50, 0x10)));
@@ -416,7 +416,7 @@ public sealed class ExternalImportWindow : Window
                 title.Children.Add(SkillVisuals.Badge("Updated since", Color.FromRgb(0x00, 0x78, 0xD4)));
                 break;
             case ExternalStatus.Different:
-                title.Children.Add(SkillVisuals.Badge("Different one in DSH", Color.FromRgb(0xCA, 0x50, 0x10)));
+                title.Children.Add(SkillVisuals.Badge("Different one in Vision", Color.FromRgb(0xCA, 0x50, 0x10)));
                 break;
         }
         if (item.HasScripts) title.Children.Add(SkillVisuals.Badge("Has scripts", Color.FromRgb(0xCA, 0x50, 0x10)));
@@ -576,7 +576,7 @@ public sealed class ExternalImportWindow : Window
 
         if (already > 0)
         {
-            var note = Ui.Secondary($"{Formatting.Plural(already, "item")} {(already == 1 ? "was" : "were")} already in DSH, or already waiting for your approval, and left alone.");
+            var note = Ui.Secondary($"{Formatting.Plural(already, "item")} {(already == 1 ? "was" : "were")} already in Vision, or already waiting for your approval, and left alone.");
             note.Margin = new Thickness(2, 6, 0, 0);
             page.Children.Add(note);
         }

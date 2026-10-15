@@ -16,7 +16,7 @@ public enum RouteUse { Primary, Subagent, Backup, JustAdd }
 
 /// <summary>"Connect my Spark Swapper": paste the connection code from the Swapper's Connect tab (or sign in with an address
 /// and login, for a Swapper older than 2.0), check the box answers with the certificate the code names, pick the model,
-/// say how DSH should use it, and save — the model route with the certificate pinned and the key in Credential Manager,
+/// say how Vision should use it, and save — the model route with the certificate pinned and the key in Credential Manager,
 /// plus the box itself for switching models — then say hello through it.</summary>
 public sealed class SwapperConnectGuide : IWizardGuide
 {
@@ -42,7 +42,7 @@ public sealed class SwapperConnectGuide : IWizardGuide
 
     // MARK: - Header
 
-    private static readonly string[] SectionTitles = ["Paste the code", "Check it", "Pick the model", "How DSH uses it", "Say hello"];
+    private static readonly string[] SectionTitles = ["Paste the code", "Check it", "Pick the model", "How Vision uses it", "Say hello"];
 
     public int SectionCount => SectionTitles.Length;
     public int SectionIndex => (int)Page;
@@ -197,7 +197,7 @@ public sealed class SwapperConnectGuide : IWizardGuide
             Heading("Connect your Spark Swapper"),
             Lead("Paste the connection code from the Swapper's Connect tab. It sets up the model, switching, and the security certificate in one go."),
             Field("Connection code", Detach(_codeBox)),
-            Paragraph($"Where do I find it? Open your Swapper's web page (https://<box>:{SparkSetup.SwapperPort}), choose **Connect**, then **Connect DSH**, and copy the code.", 12.5, "TextFillColorSecondaryBrush"));
+            Paragraph($"Where do I find it? Open your Swapper's web page (https://<box>:{SparkSetup.SwapperPort}), choose **Connect**, then **Connect Vision**, and copy the code.", 12.5, "TextFillColorSecondaryBrush"));
         panel.Children.Add(Detach(_codeNote));
         UpdateCodeNote();
         var login = Link("Use an address and login instead", () =>
@@ -207,7 +207,7 @@ public sealed class SwapperConnectGuide : IWizardGuide
         });
         login.HorizontalAlignment = HorizontalAlignment.Left;
         panel.Children.Add(login);
-        panel.Children.Add(Aside("The code holds the Swapper's address, the address of its model API and that API's key, the fingerprint of the box's security certificate, and an app token: a key for DSH alone, which the Swapper's Connect tab lists and can revoke. DSH keeps the token and the key in Windows Credential Manager, never in its settings."));
+        panel.Children.Add(Aside("The code holds the Swapper's address, the address of its model API and that API's key, the fingerprint of the box's security certificate, and an app token: a key for Vision alone, which the Swapper's Connect tab lists and can revoke. Vision keeps the token and the key in Windows Credential Manager, never in its settings."));
         panel.Children.Add(Stuck("No Connect tab? Your Swapper is older than 2.0: update it (on the box: git -C ~/spark-swapper pull && sudo bash ~/spark-swapper/deploy/install.sh), or use an address and login instead (the link above)."));
         return panel;
     }
@@ -237,7 +237,7 @@ public sealed class SwapperConnectGuide : IWizardGuide
     {
         var panel = Ui.Stack(
             Heading("Sign in to your Spark Swapper"),
-            Lead("For a Swapper older than 2.0, or if you'd rather sign in. DSH asks a Swapper 2.0 for an app token, so your password isn't kept; an older Swapper keeps working with the password, stored in Windows Credential Manager."),
+            Lead("For a Swapper older than 2.0, or if you'd rather sign in. Vision asks a Swapper 2.0 for an app token, so your password isn't kept; an older Swapper keeps working with the password, stored in Windows Credential Manager."),
             Field("Address", Detach(_address)),
             Field("Username", Detach(_user)),
             Field("Password", Detach(_password)));
@@ -245,7 +245,7 @@ public sealed class SwapperConnectGuide : IWizardGuide
         if (_login is { } done)
         {
             panel.Children.Add(Note(Tone.Success,
-                done.UsesToken ? "Signed in. The Swapper gave DSH an app token, so your password isn't kept." : "Signed in. This Swapper has no app tokens, so DSH keeps the password in Windows Credential Manager.",
+                done.UsesToken ? "Signed in. The Swapper gave Vision an app token, so your password isn't kept." : "Signed in. This Swapper has no app tokens, so Vision keeps the password in Windows Credential Manager.",
                 $"Connected to {done.Connection.Name}"));
         }
         else if (_seenFingerprint is { } fingerprint)
@@ -389,7 +389,7 @@ public sealed class SwapperConnectGuide : IWizardGuide
     {
         var panel = Ui.Stack(
             Heading($"Checking {BoxName}"),
-            Lead("DSH connects with the security certificate the code names — and only that one — then asks the Swapper what it is serving."));
+            Lead("Vision connects with the security certificate the code names — and only that one — then asks the Swapper what it is serving."));
         if (_checking) panel.Children.Add(Busy($"Connecting to {Box?.SwapperUrl.Authority ?? "the Swapper"}…"));
         else if (_checkError is { } error)
             panel.Children.Add(Note(Tone.Error, error, "Couldn't connect", Ui.Buttons(Ui.Button("Try again", () => _ = CheckAsync(), accent: true))));
@@ -401,7 +401,7 @@ public sealed class SwapperConnectGuide : IWizardGuide
             panel.Children.Add(Note(Tone.Success, $"Connected to {BoxName} — {KindLabel} — {serving}.", "It answers"));
             if (status.Version is { } version) panel.Children.Add(Paragraph($"Spark Swapper {version}.", 12.5, "TextFillColorSecondaryBrush"));
         }
-        panel.Children.Add(Aside("A self-signed certificate is how your box proves who it is on your own network. The code carries its fingerprint, so DSH can tell your box from anything pretending to be it — without the browser-style warning."));
+        panel.Children.Add(Aside("A self-signed certificate is how your box proves who it is on your own network. The code carries its fingerprint, so Vision can tell your box from anything pretending to be it — without the browser-style warning."));
         return panel;
     }
 
@@ -418,7 +418,7 @@ public sealed class SwapperConnectGuide : IWizardGuide
     {
         var panel = Ui.Stack(
             Heading("Pick the model"),
-            Lead($"What {BoxName} can serve. The one serving now is chosen; pick another and DSH can switch the box to it."));
+            Lead($"What {BoxName} can serve. The one serving now is chosen; pick another and Vision can switch the box to it."));
         if (_status is not { } status) return panel;
         foreach (var m in status.Ordered)
         {
@@ -549,7 +549,7 @@ public sealed class SwapperConnectGuide : IWizardGuide
         }
     }
 
-    // MARK: - How DSH uses it
+    // MARK: - How Vision uses it
 
     private RouteUse _use;
     /// <summary>The user picked a role (the default no longer applies).</summary>
@@ -577,7 +577,7 @@ public sealed class SwapperConnectGuide : IWizardGuide
     private UIElement RolePage()
     {
         var panel = Ui.Stack(
-            Heading("How should DSH use it?"),
+            Heading("How should Vision use it?"),
             Lead("You can change this any time in Settings › AI Models."));
         void Use(RouteUse use, string glyph, string title, string detail) =>
             panel.Children.Add(Choice(glyph, title, detail, _use == use, () =>
@@ -595,7 +595,7 @@ public sealed class SwapperConnectGuide : IWizardGuide
         isPrivate.Margin = new Thickness(0, 10, 0, 0);
         isPrivate.FontWeight = FontWeights.SemiBold;
         panel.Children.Add(isPrivate);
-        panel.Children.Add(Paragraph("It runs on your own box, so DSH sends it everything as it is — nothing is masked.", 12.5, "TextFillColorSecondaryBrush"));
+        panel.Children.Add(Paragraph("It runs on your own box, so Vision sends it everything as it is — nothing is masked.", 12.5, "TextFillColorSecondaryBrush"));
         return panel;
     }
 
@@ -661,7 +661,7 @@ public sealed class SwapperConnectGuide : IWizardGuide
             using var timeout = new CancellationTokenSource(TimeSpan.FromMinutes(3));
             _hello = status.ActiveModel is null
                 ? null
-                : await SparkSetup.SayHelloAsync(ProviderClients.Create(hello), model, $"Say hello to someone who just connected DSH to their {KindLabel}, in one short, friendly sentence.", timeout.Token);
+                : await SparkSetup.SayHelloAsync(ProviderClients.Create(hello), model, $"Say hello to someone who just connected Vision to their {KindLabel}, in one short, friendly sentence.", timeout.Token);
         }
         catch (OperationCanceledException)
         {
@@ -681,7 +681,7 @@ public sealed class SwapperConnectGuide : IWizardGuide
     private UIElement DonePage()
     {
         var panel = Ui.Stack(
-            Picture("vision-connected", "DSH's chat window connected to a model on your own box.", 220),
+            Picture("vision-connected", "Vision's chat window connected to a model on your own box.", 220),
             Heading(_saved ? "You're connected" : "Saving the connection"));
         if (_saving && !_saved) panel.Children.Add(Busy("Saving…"));
         if (_saved)
@@ -703,7 +703,7 @@ public sealed class SwapperConnectGuide : IWizardGuide
         if (_saveError is { } error)
             panel.Children.Add(Note(Tone.Warning, error, _saved ? "Saved, but no hello yet" : "It didn't save",
                 Ui.Buttons(Ui.Button("Try again", () => _ = SaveAsync()))));
-        panel.Children.Add(Aside($"DSH saved a model route named \"{_route?.Name ?? BoxName}\" at {Box?.ApiBase ?? "the box's model address"}, with the box's certificate pinned and the model's key in Windows Credential Manager — and the box itself, for switching models, with its app token in Credential Manager too. Everything is editable in Settings."));
+        panel.Children.Add(Aside($"Vision saved a model route named \"{_route?.Name ?? BoxName}\" at {Box?.ApiBase ?? "the box's model address"}, with the box's certificate pinned and the model's key in Windows Credential Manager — and the box itself, for switching models, with its app token in Credential Manager too. Everything is editable in Settings."));
         return panel;
     }
 

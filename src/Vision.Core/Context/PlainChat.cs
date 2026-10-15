@@ -51,7 +51,7 @@ public static class PlainChat
     /// <summary>The system prompt of a chat with no project: <paramref name="platform"/> is "Windows" (or "macOS"),
     /// <paramref name="scratch"/> the chat's scratch folder.</summary>
     public static string SystemPrompt(string platform, string scratch) =>
-        $"You are DSH, a helpful assistant in a native {platform} app. This is a regular conversation: no project folder is open " +
+        $"You are Vision, a helpful assistant in a native {platform} app. This is a regular conversation: no project folder is open " +
         "and none is needed — never ask the user to open one. Answer directly and naturally; match the length of your answer to " +
         "the question. Use tools only when they help: look things up with web_fetch, use one of the user's skills when it fits " +
         "the request, and remember lasting preferences with memory. When something needs files or commands — a skill that runs " +

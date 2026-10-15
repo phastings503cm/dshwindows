@@ -13,7 +13,7 @@ namespace Vision.Core;
 // the user created at first boot — the same thing a person would do with `ssh` in a terminal, minus
 // the terminal. Host keys are trusted on first use: the first time, the user is shown the key's
 // SHA-256 fingerprint (what `ssh` asks "Are you sure you want to continue connecting?" about) and
-// says yes; DSH remembers it in known_hosts.json and refuses to connect if it ever changes.
+// says yes; Vision remembers it in known_hosts.json and refuses to connect if it ever changes.
 
 /// <summary>A server's SSH host key, as `ssh` shows it: algorithm and "SHA256:…" fingerprint.</summary>
 public sealed record SshHostKey(string Host, int Port, string Algorithm, string Fingerprint);
@@ -21,7 +21,7 @@ public sealed record SshHostKey(string Host, int Port, string Algorithm, string 
 /// <summary>The server's host key isn't one we know: new (ask the user) or changed (warn them).</summary>
 public sealed class SshHostKeyException(SshHostKey presented, string? expected)
     : Exception(expected is null
-        ? $"DSH hasn't connected to {presented.Host} before. Its SSH fingerprint is {presented.Fingerprint}."
+        ? $"Vision hasn't connected to {presented.Host} before. Its SSH fingerprint is {presented.Fingerprint}."
         : $"The SSH fingerprint of {presented.Host} changed (was {expected}, now {presented.Fingerprint}). If you didn't reinstall the Spark, something may be pretending to be it.")
 {
     public SshHostKey Presented { get; } = presented;
@@ -37,7 +37,7 @@ public sealed class SparkRemoteException(string message, bool badLogin = false, 
 }
 
 /// <summary>SSH host keys the user has accepted, in <c>known_hosts.json</c> under the app's data
-/// folder (not ~/.ssh/known_hosts: DSH doesn't touch other tools' files).</summary>
+/// folder (not ~/.ssh/known_hosts: Vision doesn't touch other tools' files).</summary>
 public sealed class KnownHosts
 {
     public sealed record Entry(string Algorithm, string Fingerprint, DateTimeOffset Added);

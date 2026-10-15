@@ -27,7 +27,7 @@ public static class MemoryInstructions
         || file.Label.StartsWith("memory/", StringComparison.OrdinalIgnoreCase);
 
     /// <summary>The files this applies to: a memory file inside the project folder. (Your own instruction files, kept in
-    /// DSH's data folder, and notes imported from elsewhere are not the project's and are left as they are.)</summary>
+    /// Vision's data folder, and notes imported from elsewhere are not the project's and are left as they are.)</summary>
     private static bool IsProjectMemoryFile(InstructionFile file, string root) =>
         IsMemoryFile(file) && !string.IsNullOrEmpty(root) && InsideFolder(file.Path, root);
 

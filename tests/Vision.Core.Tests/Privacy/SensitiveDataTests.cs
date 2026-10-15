@@ -1,6 +1,6 @@
 namespace Vision.Core.Tests;
 
-/// <summary>The detectors behind the privacy shield. DSH for macOS runs the same cases.</summary>
+/// <summary>The detectors behind the privacy shield. Vision for macOS runs the same cases.</summary>
 public sealed class SensitiveDataTests
 {
     private static readonly SensitiveDetector All = new(SensitiveCategories.All);
@@ -73,7 +73,7 @@ public sealed class SensitiveDataTests
     [Fact]
     public void EmailsAreFound()
     {
-        Masks("Write to pat.hastings+dsh@example.co.uk today", "pat.hastings+dsh@example.co.uk", SensitiveKind.Email);
+        Masks("Write to pat.hastings+vision@example.co.uk today", "pat.hastings+vision@example.co.uk", SensitiveKind.Email);
         Assert.Empty(Found("not an email: user@localhost or @handle"));
     }
 

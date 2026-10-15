@@ -2,12 +2,12 @@ namespace Vision.Core;
 
 // MARK: - AWS credentials: the contract between the Bedrock client and where credentials come from
 //
-// DSH signs Bedrock requests itself (SigV4) with short-lived credentials. In the app they come from
+// Vision signs Bedrock requests itself (SigV4) with short-lived credentials. In the app they come from
 // the AWS CLI (`aws configure export-credentials`) after `aws login` / `aws sso login`, so the CLI owns
 // sign-in and refresh; tests hand in fixed ones.
 
 /// <summary>A set of AWS credentials. <see cref="SessionToken"/> is set for temporary credentials
-/// (every sign-in DSH does produces those).</summary>
+/// (every sign-in Vision does produces those).</summary>
 public sealed record AwsCredentials(string AccessKeyId, string SecretAccessKey, string? SessionToken = null,
                                     DateTimeOffset? Expiration = null)
 {

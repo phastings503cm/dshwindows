@@ -207,7 +207,7 @@ public partial class MainWindow : Window
         var parts = new List<string>();
         if (Model.Host.Selected is { } session && Model.IsChatMode) parts.Add(session.Title);
         if (Model.ProjectName is { } project) parts.Add(project);
-        parts.Add("DSH");
+        parts.Add("Vision");
         Title = string.Join(" — ", parts);
     }
 
@@ -418,7 +418,7 @@ public partial class MainWindow : Window
         if (Model.Update is { } update)
         {
             UpdateCard.Visibility = Visibility.Visible;
-            UpdateText.Text = $"DSH {update.Version} is available (you have {AppInfo.Version}).";
+            UpdateText.Text = $"Vision {update.Version} is available (you have {AppInfo.Version}).";
         }
         else
         {
@@ -784,7 +784,7 @@ public partial class MainWindow : Window
         Model.Config.ExternalImportOffered = true;
     }
 
-    /// <summary>A quiet, one-time offer: when Claude Code or Cursor is on this PC and has something DSH
+    /// <summary>A quiet, one-time offer: when Claude Code or Cursor is on this PC and has something Vision
     /// doesn't, say so once, with a button. Dismissing it or opening the import ends the offer for good.</summary>
     public async Task OfferExternalImportAsync()
     {
@@ -800,7 +800,7 @@ public partial class MainWindow : Window
             return;
         }
         if (Model.Config.ExternalImportOffered || inventory.Suggested == 0) return;
-        ImportText.Text = $"Claude Code and Cursor are on this PC. Bring {ExternalLabels.Summarize(inventory.Items.Where(i => i.SelectedByDefault))} into DSH?";
+        ImportText.Text = $"Claude Code and Cursor are on this PC. Bring {ExternalLabels.Summarize(inventory.Items.Where(i => i.SelectedByDefault))} into Vision?";
         ImportCard.Visibility = Visibility.Visible;
     }
 
@@ -919,14 +919,14 @@ public partial class MainWindow : Window
         var release = await UpdateChecker.CheckAsync();
         if (release is null)
         {
-            Dialog.Info("You're up to date", $"DSH {AppInfo.Version} is the latest release (or the release feed could not be reached).");
+            Dialog.Info("You're up to date", $"Vision {AppInfo.Version} is the latest release (or the release feed could not be reached).");
             return;
         }
         Model.Update = new AppModel.UpdateInfo(release.Tag, release.Url);
     }
 
-    private void About_Click(object sender, RoutedEventArgs e) => Dialog.Info("About DSH",
-        $"DSH for Windows {AppInfo.Version}\n\nA native AI assistant and coding agent: chat with any OpenAI-compatible model server, " +
+    private void About_Click(object sender, RoutedEventArgs e) => Dialog.Info("About Vision",
+        $"Vision for Windows {AppInfo.Version}\n\nA native AI assistant and coding agent: chat with any OpenAI-compatible model server, " +
         "or open a project folder and it works there with file, search, and shell tools, asking before anything risky.\n\n" +
         $"Data folder: {AppPaths.Root}\n{UpdateChecker.ReleasesPage.Replace("/latest", "")}");
 

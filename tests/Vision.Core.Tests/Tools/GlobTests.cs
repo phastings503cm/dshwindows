@@ -27,8 +27,8 @@ public sealed class GlobTests
     [Fact]
     public void PrefixedPattern()
     {
-        Assert.True(Glob.Matches("Sources/**/*.swift", "Sources/DSHCore/Engine.swift"));
-        Assert.False(Glob.Matches("Sources/**/*.swift", "Tests/DSHCoreTests/X.swift"));
+        Assert.True(Glob.Matches("Sources/**/*.swift", "Sources/VisionHarnessCore/Engine.swift"));
+        Assert.False(Glob.Matches("Sources/**/*.swift", "Tests/VisionHarnessCoreTests/X.swift"));
     }
 }
 

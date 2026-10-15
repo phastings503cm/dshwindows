@@ -97,7 +97,7 @@ public sealed record OpenClawModelServer
     public IReadOnlyList<string> Models { get; init; } = [];
     public int? ContextWindow { get; init; }
     public SecretText? ApiKey { get; init; }
-    /// <summary>DSH can talk to it (an OpenAI-style chat completions endpoint).</summary>
+    /// <summary>Vision can talk to it (an OpenAI-style chat completions endpoint).</summary>
     public bool Compatible { get; init; } = true;
     public string? Note { get; init; }
     /// <summary>The model OpenClaw's agents use by default, when it belongs to this server.</summary>
@@ -115,7 +115,7 @@ public sealed record OpenClawBundle
     public IReadOnlyList<OpenClawNoteFile> NoteFiles { get; init; } = [];
     public IReadOnlyList<OpenClawCredential> Credentials { get; init; } = [];
     public IReadOnlyList<OpenClawModelServer> ModelServers { get; init; } = [];
-    /// <summary>Found but not something DSH imports (channels, cron jobs, sessions…), said plainly.</summary>
+    /// <summary>Found but not something Vision imports (channels, cron jobs, sessions…), said plainly.</summary>
     public IReadOnlyList<string> Left { get; init; } = [];
     /// <summary>Things that couldn't be read.</summary>
     public IReadOnlyList<string> Problems { get; init; } = [];

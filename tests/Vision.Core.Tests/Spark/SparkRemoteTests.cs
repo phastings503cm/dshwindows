@@ -95,7 +95,7 @@ public sealed partial class SparkRemoteTests
         transcript.Feed($"{Begin}\r\n");
         var prompt = transcript.Feed("[sudo] password for alice: ");
         Assert.Contains(prompt, e => e is TranscriptEvent.PasswordPrompt);
-        Assert.Contains(new TranscriptEvent.Line("[sudo] password for alice: (answered by DSH)"), prompt);
+        Assert.Contains(new TranscriptEvent.Line("[sudo] password for alice: (answered by Vision)"), prompt);
         // More output on the same (still unfinished) line must not trigger a second answer.
         Assert.DoesNotContain(transcript.Feed(" "), e => e is TranscriptEvent.PasswordPrompt);
         transcript.Feed("\r\n==> installing app to /opt/spark-swapper\r\n");
@@ -309,7 +309,7 @@ public sealed partial class SparkRemoteTests
         Assert.Single(typed, t => t == "hunter22\n");
         Assert.Equal("exit\n", typed[^1]);
         Assert.Contains("==> git 2.43.0 present.", lines);
-        Assert.Contains("[sudo] password for alice: (answered by DSH)", lines);
+        Assert.Contains("[sudo] password for alice: (answered by Vision)", lines);
         Assert.Contains(lines, l => l.Contains("Spark Swapper is up"));
         Assert.DoesNotContain(lines, l => l.Contains("hunter22"));
         Assert.DoesNotContain(lines, l => l.Contains("__VISION_"));

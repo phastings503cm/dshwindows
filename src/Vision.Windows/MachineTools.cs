@@ -13,7 +13,7 @@ namespace Vision.Windows;
 // screen, PrintWindow for one window), read as text through UI Automation, and driven with
 // SendInput, so there is no dependency on a helper binary or a scripting bridge. Nothing needs a
 // permission from Windows; the one wall is UIPI: an app running as administrator ignores input
-// from a DSH that isn't, and hides its UI Automation tree from it.
+// from Vision when Vision isn't elevated too, and hides its UI Automation tree from it.
 //
 // Images come back through ToolResult.Images, so the engine ships them to the model on an
 // attached user message (and prunes old ones so a long debug session doesn't burn the window on

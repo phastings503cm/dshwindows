@@ -77,7 +77,7 @@ public sealed class ExternalImportTests : IDisposable
     }
 
     [Fact]
-    public void ThingsDSHCantUseAreListedNotDropped()
+    public void ThingsVisionCantUseAreListedNotDropped()
     {
         _fx.Populate();
         var left = _fx.Scan().Left;
@@ -91,8 +91,8 @@ public sealed class ExternalImportTests : IDisposable
         Assert.Contains("Claude Code hooks", Text(ExternalTool.ClaudeCode, "Claude Code hooks"));
         Assert.Contains("allow/deny", Text(ExternalTool.ClaudeCode, "allow/deny"));
         Assert.Contains("1 Claude Code conversation —", Text(ExternalTool.ClaudeCode, "conversation"));
-        Assert.Equal("1 plugin also ships hooks or MCP servers — DSH can't use those.", Text(ExternalTool.ClaudeCode, "1 plugin"));
-        Assert.Equal("1 plugin also ships hooks or MCP servers — DSH can't use those.", Text(ExternalTool.Cursor, "1 plugin"));
+        Assert.Equal("1 plugin also ships hooks or MCP servers — Vision can't use those.", Text(ExternalTool.ClaudeCode, "1 plugin"));
+        Assert.Equal("1 plugin also ships hooks or MCP servers — Vision can't use those.", Text(ExternalTool.Cursor, "1 plugin"));
         Assert.Contains("User Rules", Text(ExternalTool.Cursor, "User Rules"));
     }
 
@@ -198,7 +198,7 @@ public sealed class ExternalImportTests : IDisposable
     // MARK: - Bringing them in
 
     [Fact]
-    public void ImportingTheSuggestionsCopiesEachThingToWhereDSHUsesIt()
+    public void ImportingTheSuggestionsCopiesEachThingToWhereVisionUsesIt()
     {
         var app = _fx.Populate();
         var inventory = _fx.Scan();
@@ -266,7 +266,7 @@ public sealed class ExternalImportTests : IDisposable
         var second = ExternalImporter.Import(again, again.Items.Select(i => i.Id), _fx.Vision);
         Assert.Equal(["create-rule", "old-app"], second.Imported.Select(i => i.Item.Name).OrderBy(n => n, StringComparer.Ordinal).ToArray());
         Assert.Equal(16, second.Skipped.Count);
-        Assert.All(second.Skipped, s => Assert.Equal("Already in DSH.", s.Reason));
+        Assert.All(second.Skipped, s => Assert.Equal("Already in Vision.", s.Reason));
         Assert.False(Directory.Exists(Path.Combine(_fx.Vision.UserSkills, "review-2")), "no duplicate copies");
     }
 
@@ -302,7 +302,7 @@ public sealed class ExternalImportTests : IDisposable
 
         var item = _fx.Scan().Items.Single(i => i.Kind == ExternalKind.Instructions);
         Assert.Equal(ExternalStatus.Different, item.Status);
-        Assert.False(item.SelectedByDefault); // it may be the copy in DSH that was edited
+        Assert.False(item.SelectedByDefault); // it may be the copy in Vision that was edited
 
         ExternalImporter.Import(_fx.Scan(), [item.Id], _fx.Vision);
         var folder = _fx.Vision.UserInstructions;
@@ -321,7 +321,7 @@ public sealed class ExternalImportTests : IDisposable
 
         var item = _fx.Scan().Items.Single(i => i.Kind == ExternalKind.ProjectNotes && i.ProjectPath is not null);
         Assert.Equal(ExternalStatus.Different, item.Status);
-        Assert.False(item.SelectedByDefault); // an update is the user's call: it could replace a note edited in DSH
+        Assert.False(item.SelectedByDefault); // an update is the user's call: it could replace a note edited in Vision
 
         ExternalImporter.Import(_fx.Scan(), [item.Id], _fx.Vision);
         var notes = ProjectContext.ProjectNotesFolder(app, _fx.Vision);
@@ -379,12 +379,12 @@ public sealed class ExternalImportTests : IDisposable
 
         var result = ExternalImporter.Import(inventory, [claude.Id, cursor.Id], _fx.Vision);
         Assert.Single(result.Imported);
-        Assert.Equal("Already in DSH.", Assert.Single(result.Skipped).Reason);
+        Assert.Equal("Already in Vision.", Assert.Single(result.Skipped).Reason);
         Assert.False(Directory.Exists(Path.Combine(_fx.Vision.UserSkills, "shared-2")));
     }
 
     [Fact]
-    public void ImportedSkillsShadowTheOnesDSHWasReadingInPlace()
+    public void ImportedSkillsShadowTheOnesVisionWasReadingInPlace()
     {
         _fx.Populate();
         _fx.ImportSuggested(_fx.Scan());

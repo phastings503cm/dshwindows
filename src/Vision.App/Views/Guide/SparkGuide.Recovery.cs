@@ -42,7 +42,7 @@ public sealed partial class SparkGuide
             Steps(
                 "Open NVIDIA's DGX Spark **System Recovery** page and follow its link to the recovery media. You may need to sign in with a free NVIDIA account.",
                 "Download the recovery file. It's several gigabytes — let it finish.",
-                "Tell DSH where it is: choose the downloaded file (it usually ends in .tar.gz), or the folder you unpacked it to."),
+                "Tell Vision where it is: choose the downloaded file (it usually ends in .tar.gz), or the folder you unpacked it to."),
             Ui.Buttons(
                 Ui.Button("Open NVIDIA's recovery page", () => ShellIntegration.Open(RecoveryDocs)),
                 Ui.Button("Choose the file…", ChooseSource, accent: _source is null),
@@ -78,7 +78,7 @@ public sealed partial class SparkGuide
                     "This might not be the recovery file", accept));
             }
         }
-        panel.Children.Add(Aside("The recovery file holds a complete copy of DGX OS plus NVIDIA's installer. Before anything is erased, DSH reads it through once to check that every file fits on a FAT32 stick (none may be over 4 GB) and to find the folder that belongs at the top of the stick."));
+        panel.Children.Add(Aside("The recovery file holds a complete copy of DGX OS plus NVIDIA's installer. Before anything is erased, Vision reads it through once to check that every file fits on a FAT32 stick (none may be over 4 GB) and to find the folder that belongs at the top of the stick."));
         panel.Children.Add(Stuck("Can't find the file? Look in your Downloads folder — the name usually mentions \"recovery\". Don't use the file before it has finished downloading."));
         return panel;
     }
@@ -119,7 +119,7 @@ public sealed partial class SparkGuide
         }
         catch (Exception error)
         {
-            _sourceProblem = $"DSH couldn't read it: {error.Message}";
+            _sourceProblem = $"Vision couldn't read it: {error.Message}";
         }
         finally
         {
@@ -156,7 +156,7 @@ public sealed partial class SparkGuide
     private UIElement WriteUsbPage()
     {
         var panel = Ui.Stack(
-            Picture("usb-writer", "DSH writing the recovery stick, with a warning that everything on it is erased."),
+            Picture("usb-writer", "Vision writing the recovery stick, with a warning that everything on it is erased."),
             Heading("Make the recovery stick"),
             Lead("Plug a USB stick of 16 GB or more into this PC. **Everything on it will be erased**, so copy off anything you want to keep first."));
 
@@ -228,7 +228,7 @@ public sealed partial class SparkGuide
                 panel.Children.Add(Note(Tone.Error, failed.Error ?? failed.Message, "The stick wasn't finished"));
         }
 
-        panel.Children.Add(Aside("Windows asks for permission first (\"Do you want to allow this app to make changes?\") because erasing a drive needs administrator rights — only a small helper gets them, never the DSH window. Then it checks it's still the same stick, erases it, creates one FAT32 partition named BOOTME (at most 31 GB, the largest Windows formats as FAT32), marks it bootable, copies NVIDIA's files and adds EFI\\BOOT\\recovery.txt, the note that tells the Spark to start its installer."));
+        panel.Children.Add(Aside("Windows asks for permission first (\"Do you want to allow this app to make changes?\") because erasing a drive needs administrator rights — only a small helper gets them, never the Vision window. Then it checks it's still the same stick, erases it, creates one FAT32 partition named BOOTME (at most 31 GB, the largest Windows formats as FAT32), marks it bootable, copies NVIDIA's files and adds EFI\\BOOT\\recovery.txt, the note that tells the Spark to start its installer."));
         panel.Children.Add(Stuck("If Windows pops up \"You need to format the disk\" when you plug the stick in, press Cancel. NVIDIA's own Windows script (CreateUSBKey) often fails with \"Set-Disk: Not Supported\" — this makes the same stick without it. Already have a working recovery stick? Press \"I already have a stick\"."));
         return panel;
     }

@@ -12,7 +12,7 @@ namespace Vision.App.Views.Guide;
 /// <summary>"Find servers on my network": runs <see cref="NetworkScanner"/> and shows what it finds
 /// as friendly cards ("DGX Spark at 192.168.1.42 — spark-3f2a"), updating live, with a box to check
 /// an address by hand. In <see cref="Purpose.Spark"/> mode a card is picked as "my Spark"; in
-/// <see cref="Purpose.ModelServer"/> mode each model API on a card can be used for DSH.</summary>
+/// <see cref="Purpose.ModelServer"/> mode each model API on a card can be used for Vision.</summary>
 public sealed class ScannerPanel : UserControl
 {
     public enum Purpose { Spark, ModelServer }

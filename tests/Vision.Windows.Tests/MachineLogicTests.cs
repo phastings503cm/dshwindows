@@ -247,7 +247,7 @@ public sealed class TerminalGuardTests
     [InlineData(@"C:\Program Files\WezTerm\wezterm-gui.exe")]
     [InlineData(@"C:\Program Files\Alacritty\alacritty.exe")]
     [InlineData(@"C:\Program Files\Git\usr\bin\mintty.exe")]
-    [InlineData(@"C:\Users\me\AppData\Local\Programs\DSH\Vision.exe")]
+    [InlineData(@"C:\Users\me\AppData\Local\Programs\Vision\Vision.exe")]
     [InlineData(@"C:\Users\me\Downloads\Vision\vision.EXE")]
     [InlineData(@"C:\Users\me\AppData\Local\Programs\DSH\DSH.exe")]           // legacy: an older copy from before the rename
     [InlineData(@"C:\Windows\explorer.exe")]                                        // Run box, address bar
@@ -290,7 +290,7 @@ public sealed class TerminalGuardTests
         Assert.True(TerminalGuard.IsTerminal(null, "ConsoleWindowClass"));
         Assert.False(TerminalGuard.IsTerminal(@"C:\Windows\explorer.exe", "CabinetWClass"));
         Assert.False(TerminalGuard.IsTerminal(@"C:\x\Vision.exe", "HwndWrapper"));
-        Assert.False(TerminalGuard.IsTerminal(@"C:\x\DSH.exe", "HwndWrapper"));
+        Assert.False(TerminalGuard.IsTerminal(@"C:\x\DSH.exe", "HwndWrapper")); // legacy: the app's former name
     }
 
     [Fact]

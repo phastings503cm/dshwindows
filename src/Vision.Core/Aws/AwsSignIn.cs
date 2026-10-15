@@ -22,7 +22,7 @@ namespace Vision.Core;
 // different login session it asks "... Do you want to overwrite it to use <session> instead? (y/n): ".
 // It prompts for a Region unless --region is given, refuses profiles configured with SSO, keys, a role,
 // a web identity or credential_process, and — only when it asked for the Region — saves it to the
-// profile. DSH always passes --region and then saves the Region itself (`aws configure set`), because the
+// profile. Vision always passes --region and then saves the Region itself (`aws configure set`), because the
 // CLI refreshes the session later through that Region's sign-in endpoint.
 
 /// <summary>Who AWS says is signed in (sts get-caller-identity).</summary>
@@ -85,7 +85,7 @@ public sealed record AwsSignInResult(AwsSignInOutcome Outcome, string Message, A
 /// <summary>Options for <see cref="AwsSignIn.LoginAsync"/> and <see cref="AwsSignIn.SsoLoginAsync"/>.</summary>
 public sealed record AwsSignInOptions
 {
-    /// <summary>For a machine without a browser: the CLI prints the link and DSH asks the user for the
+    /// <summary>For a machine without a browser: the CLI prints the link and Vision asks the user for the
     /// code the browser shows afterwards (<see cref="RequestAuthorizationCode"/>).</summary>
     public bool Remote { get; init; }
 
@@ -172,10 +172,10 @@ public sealed partial class AwsSignIn(AwsCli cli, Func<AwsProfiles>? loadProfile
         var existing = SafeLoad()?.Find(profile);
         if (existing is { Kind: AwsProfileKind.Sso })
             return new(AwsSignInOutcome.UseSsoLogin,
-                $"The AWS profile \"{profile}\" signs in through IAM Identity Center (SSO), so DSH will use the SSO sign-in for it.");
+                $"The AWS profile \"{profile}\" signs in through IAM Identity Center (SSO), so Vision will use the SSO sign-in for it.");
         if (existing is { CanUseAwsLogin: false })
             return new(AwsSignInOutcome.ProfileHasOtherCredentials,
-                $"The AWS profile \"{profile}\" already uses {existing.KindDescription}, which the browser sign-in won't replace. Use it as it is, or let DSH sign in with its own profile (\"{DefaultProfile}\").");
+                $"The AWS profile \"{profile}\" already uses {existing.KindDescription}, which the browser sign-in won't replace. Use it as it is, or let Vision sign in with its own profile (\"{DefaultProfile}\").");
 
         var result = await RunSignInAsync(LoginArguments(profile, region, options.Remote, options.RedirectPort), options, cancellationToken)
             .ConfigureAwait(false);
@@ -187,7 +187,7 @@ public sealed partial class AwsSignIn(AwsCli cli, Func<AwsProfiles>? loadProfile
             var set = await cli.RunAsync(["configure", "set", "region", region, "--profile", profile],
                 new AwsCliRunOptions { Timeout = TimeSpan.FromSeconds(60) }, cancellationToken).ConfigureAwait(false);
             if (!set.Succeeded)
-                return result with { Message = $"Signed in, but DSH couldn't save the Region in the profile: {AwsCliErrors.CleanMessage(set.Stderr + set.Stdout)}" };
+                return result with { Message = $"Signed in, but Vision couldn't save the Region in the profile: {AwsCliErrors.CleanMessage(set.Stderr + set.Stdout)}" };
         }
         return result with { Message = "Signed in to AWS." };
     }
@@ -289,7 +289,7 @@ public sealed partial class AwsSignIn(AwsCli cli, Func<AwsProfiles>? loadProfile
         }
         catch (IOException ex)
         {
-            return new(AwsSignInOutcome.Failed, $"DSH couldn't start the AWS CLI: {ex.Message}", link);
+            return new(AwsSignInOutcome.Failed, $"Vision couldn't start the AWS CLI: {ex.Message}", link);
         }
         // Answering "n" ends `aws login` successfully without touching the profile.
         if (result.Succeeded && keptOldSession)
@@ -310,10 +310,10 @@ public sealed partial class AwsSignIn(AwsCli cli, Func<AwsProfiles>? loadProfile
             return new(AwsSignInOutcome.Cancelled, "Sign-in stopped.", link, details);
         if (Has("is already configured with"))
             return new(AwsSignInOutcome.ProfileHasOtherCredentials,
-                $"That AWS profile already has other credentials, which the browser sign-in won't replace. Let DSH sign in with its own profile (\"{DefaultProfile}\") instead.", link, details);
+                $"That AWS profile already has other credentials, which the browser sign-in won't replace. Let Vision sign in with its own profile (\"{DefaultProfile}\") instead.", link, details);
         if (Has("Found invalid choice") || Has("Invalid choice") || Has("Unknown options"))
             return new(AwsSignInOutcome.CliTooOld,
-                $"This AWS CLI can't sign in this way yet (it needs version {AwsCli.MinimumVersion.ToString(3)} or newer). Update the AWS CLI — DSH can do it for you.", link, details);
+                $"This AWS CLI can't sign in this way yet (it needs version {AwsCli.MinimumVersion.ToString(3)} or newer). Update the AWS CLI — Vision can do it for you.", link, details);
         if (Has("Failed to retrieve an auth_code or state") || Has("Failed to decode the verification code") || Has("does not match expected value"))
             return new(AwsSignInOutcome.Failed, "That authorization code wasn't accepted. Copy the whole code the browser shows and try again.", link, details);
         if (Has("expired authorization code"))

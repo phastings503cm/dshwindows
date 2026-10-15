@@ -36,7 +36,7 @@ public sealed partial class AgentHost
         {
             vault = [];
         }
-        // The vault's secrets are masked even with the switch off (as in DSH for macOS); with it off and an empty
+        // The vault's secrets are masked even with the switch off (as in Vision for macOS); with it off and an empty
         // vault there is nothing to do.
         if (!privacy.Mask && vault.Count == 0) return null;
         return new ShieldOptions

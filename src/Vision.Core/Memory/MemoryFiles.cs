@@ -4,7 +4,7 @@ using System.Text.RegularExpressions;
 
 namespace Vision.Core;
 
-/// <summary>Cuts markdown notes (a MEMORY.md, a folder of daily logs — DSH's, or another agent's) into
+/// <summary>Cuts markdown notes (a MEMORY.md, a folder of daily logs — Vision's, or another agent's) into
 /// note-sized pieces for the store: a heading and what follows it, or a run of bullets, each a few hundred
 /// characters, so a search returns the one paragraph that matters instead of a whole file.</summary>
 public static partial class MemoryFiles

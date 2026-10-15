@@ -4,7 +4,7 @@ namespace Vision.Core;
 //
 // What is already set up in %USERPROFILE%\.aws\config and \credentials, read the way botocore reads it
 // (configloader.build_profile_map): "[default]" and "[profile NAME]" sections in config, bare "[NAME]"
-// sections in credentials, credentials values layered over config values. DSH only ever reads these
+// sections in credentials, credentials values layered over config values. Vision only ever reads these
 // files; anything it changes goes through the CLI (`aws login`, `aws configure set`), which knows how to
 // rewrite them safely.
 
@@ -201,7 +201,7 @@ public sealed class AwsProfiles
 
     /// <summary>INI as Python's RawConfigParser reads it: "#" and ";" start comment lines, "=" or ":"
     /// separates key and value, keys are lower-cased, and indented lines continue the previous value
-    /// (botocore uses those for nested settings such as "s3 =", which DSH doesn't need, so they are
+    /// (botocore uses those for nested settings such as "s3 =", which Vision doesn't need, so they are
     /// kept as text).</summary>
     public static IEnumerable<(string Section, Dictionary<string, string> Values)> ParseIni(string? text)
     {

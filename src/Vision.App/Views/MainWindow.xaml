@@ -3,7 +3,7 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:views="clr-namespace:Vision.App.Views"
         xmlns:infra="clr-namespace:Vision.App.Infrastructure"
-        Title="DSH" Width="1280" Height="820" MinWidth="900" MinHeight="560"
+        Title="Vision" Width="1280" Height="820" MinWidth="900" MinHeight="560"
         Icon="pack://application:,,,/Assets/vision.ico"
         WindowStartupLocation="CenterScreen"
         Background="{DynamicResource SolidBackgroundFillColorBaseBrush}">
@@ -76,7 +76,7 @@
                         <MenuItem Header="Check for _Updates" Click="CheckUpdates_Click" />
                         <MenuItem Header="_Releases Page" Click="Releases_Click" />
                         <Separator />
-                        <MenuItem Header="_About DSH" Click="About_Click" />
+                        <MenuItem Header="_About Vision" Click="About_Click" />
                     </MenuItem>
                 </Menu>
 

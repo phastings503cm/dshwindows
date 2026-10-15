@@ -1,6 +1,6 @@
 namespace Vision.Core;
 
-/// <summary>Copies the items a user chose from an <see cref="ExternalInventory"/> into DSH's own data
+/// <summary>Copies the items a user chose from an <see cref="ExternalInventory"/> into Vision's own data
 /// folder. Everything written lands under %APPDATA%\Vision (skills, instructions, memory); the other tool's
 /// files are only read, and nothing is run. The same limits as every other import apply — links are
 /// never followed, sizes are capped — and one item failing never stops the rest.</summary>
@@ -51,7 +51,7 @@ public static class ExternalImporter
     /// <summary>What happened to one item: written (or drafted), or left alone with a reason.</summary>
     private readonly record struct Outcome(string? Destination = null, bool Renamed = false, string? SkipReason = null, bool IsDraft = false)
     {
-        public static Outcome AlreadyThere { get; } = new(SkipReason: "Already in DSH.");
+        public static Outcome AlreadyThere { get; } = new(SkipReason: "Already in Vision.");
         public static Outcome AlreadyWaiting { get; } = new(SkipReason: "Already waiting for your approval.");
     }
 

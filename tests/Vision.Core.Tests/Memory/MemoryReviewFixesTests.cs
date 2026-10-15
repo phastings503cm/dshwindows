@@ -728,7 +728,7 @@ public sealed class MemoryReviewFixesTests : IDisposable
     [Fact]
     public void YourOwnInstructionFilesNamedMemoryAreNotMirroredAsTheProjects()
     {
-        // A MEMORY.md in DSH's own data folder is not in the project: leave it exactly as it is.
+        // A MEMORY.md in Vision's own data folder is not in the project: leave it exactly as it is.
         var elsewhere = Path.Combine(_dir.Path, "instructions", "MEMORY.md");
         Directory.CreateDirectory(Path.GetDirectoryName(elsewhere)!);
         var text = Big("frobnicator");

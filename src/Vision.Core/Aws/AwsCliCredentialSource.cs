@@ -11,7 +11,7 @@ namespace Vision.Core;
 // result as the credential_process JSON (awscli/customizations/configure/exportcreds.py):
 //   {"Version": 1, "AccessKeyId": "...", "SecretAccessKey": "...", "SessionToken": "...",
 //    "Expiration": "2026-09-29T19:55:23.728587+00:00"}
-// SessionToken and Expiration are absent for long-term access keys. DSH keeps the answer until five
+// SessionToken and Expiration are absent for long-term access keys. Vision keeps the answer until five
 // minutes before it expires, so a chat turn usually costs no CLI run at all.
 
 /// <summary>AWS credentials for one CLI profile, fetched with `aws configure export-credentials` and
@@ -51,7 +51,7 @@ public sealed class AwsCliCredentialSource : IAwsCredentialSource
     /// <summary>How long one export may take (a refresh is a network call to AWS).</summary>
     public TimeSpan Timeout { get; init; } = TimeSpan.FromMinutes(2);
 
-    /// <summary>The arguments DSH runs.</summary>
+    /// <summary>The arguments Vision runs.</summary>
     public IReadOnlyList<string> ExportArguments =>
         AwsCli.Arguments(["configure", "export-credentials", "--format", "process"], Profile, Region, json: false);
 
@@ -132,7 +132,7 @@ public sealed class AwsCliCredentialSource : IAwsCredentialSource
         if (JsonArgs.String(obj!, "Expiration") is { Length: > 0 } text)
         {
             if (!DateTimeOffset.TryParse(text, CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal | DateTimeStyles.AdjustToUniversal, out var parsed))
-                throw new AwsCliException(new AwsCliError(AwsCliFailure.Other, $"The AWS CLI returned an expiry time DSH couldn't read ({text}).", Details: text));
+                throw new AwsCliException(new AwsCliError(AwsCliFailure.Other, $"The AWS CLI returned an expiry time Vision couldn't read ({text}).", Details: text));
             expiration = parsed;
         }
         return new AwsCredentials(accessKey, secret, string.IsNullOrEmpty(token) ? null : token, expiration);

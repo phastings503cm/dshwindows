@@ -9,7 +9,7 @@ using Vision.Core;
 
 namespace Vision.App.Views.Skills;
 
-/// <summary>Settings › Skills: every skill DSH can see (its own and those read from Claude Code,
+/// <summary>Settings › Skills: every skill Vision can see (its own and those read from Claude Code,
 /// Cursor and Agent Skills), drafts waiting for approval, and the ways to add more.</summary>
 public sealed class SkillsManagerPage : UserControl
 {
@@ -96,7 +96,7 @@ public sealed class SkillsManagerPage : UserControl
         if (action is { } requested) Dispatcher.BeginInvoke(() => Run(requested));
     }
 
-    /// <summary>Look for Claude Code and Cursor in the background and, if they have something DSH
+    /// <summary>Look for Claude Code and Cursor in the background and, if they have something Vision
     /// doesn't yet, put one button at the top of the page.</summary>
     private async Task OfferBringInAsync()
     {
@@ -117,7 +117,7 @@ public sealed class SkillsManagerPage : UserControl
         var ready = ExternalLabels.Summarize(inventory.Items.Where(i => i.SelectedByDefault));
         var text = Ui.Stack(
             Ui.Text("Claude Code and Cursor are on this PC", 13.5, FontWeights.SemiBold),
-            Ui.Secondary($"DSH can bring in {ready}. It takes one click, and their files stay as they are."));
+            Ui.Secondary($"Vision can bring in {ready}. It takes one click, and their files stay as they are."));
         var button = Ui.Button("Bring Them In…", ImportExternal, accent: true);
         button.VerticalAlignment = VerticalAlignment.Center;
         button.Margin = new Thickness(16, 0, 0, 0);
@@ -225,7 +225,7 @@ public sealed class SkillsManagerPage : UserControl
 
     private static string GroupTitle(Skill s)
     {
-        if (s.Origin == SkillOrigin.Builtin) return "Built in to DSH";
+        if (s.Origin == SkillOrigin.Builtin) return "Built in to Vision";
         if (s.Origin == SkillOrigin.Vision) return s.Scope == SkillScope.Project ? "This project — your skills" : "All projects — your skills";
         return $"{s.Origin.Label()} — read from {(s.Scope == SkillScope.Project ? "this project" : "your user folder")}";
     }
@@ -360,7 +360,7 @@ public sealed class SkillsManagerPage : UserControl
             SkillManager.Adopt(skill, scope, _model.Project, ConflictPolicy.Rename, _model.Host.SkillLocations);
             _model.Host.RefreshDrafts();
             _model.Host.RefreshProjectContext();
-            Dialog.Info("Copied", $"“{skill.Name}” is now one of your DSH skills. It overrides the original, and you can edit it.");
+            Dialog.Info("Copied", $"“{skill.Name}” is now one of your Vision skills. It overrides the original, and you can edit it.");
         }
         catch (Exception error) when (error is SkillException or System.IO.IOException or UnauthorizedAccessException)
         {

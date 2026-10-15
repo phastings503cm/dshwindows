@@ -6,15 +6,15 @@ namespace Vision.Core.Tests;
 public sealed class OpenClawReviewFixesTests : IDisposable
 {
     private readonly OpenClawFixture _fx = new();
-    private readonly TempDirectory _dsh = new("vision-target");
+    private readonly TempDirectory _target = new("vision-target");
 
     public void Dispose()
     {
         _fx.Dispose();
-        _dsh.Dispose();
+        _target.Dispose();
     }
 
-    private SkillLocations Skills() => new(Path.Combine(_dsh.Path, "home"), Path.Combine(_dsh.Path, "appdata"));
+    private SkillLocations Skills() => new(Path.Combine(_target.Path, "home"), Path.Combine(_target.Path, "appdata"));
 
     private async Task<OpenClawBundle> Bundle(IFileSource? source = null)
     {
@@ -177,7 +177,7 @@ public sealed class OpenClawReviewFixesTests : IDisposable
     [Fact]
     public void APasswordCutOffFromItsNameBetweenTwoPiecesOfAFileIsLeftOut()
     {
-        var store = new MemoryStore(Path.Combine(_dsh.Path, "memory-split"));
+        var store = new MemoryStore(Path.Combine(_target.Path, "memory-split"));
         var pieces = new[]
         {
             new MemoryDraft { Title = "Database", Body = "Notes about the production database. The database password is", Source = "import:openclaw/MEMORY.md" },
@@ -209,7 +209,7 @@ public sealed class OpenClawReviewFixesTests : IDisposable
 
         Assert.Equal(2, first.Skills.Count);
         Assert.Empty(second.Skills);
-        Assert.All(second.SkillsSkipped.Values, reason => Assert.Contains("Already in DSH", reason));
+        Assert.All(second.SkillsSkipped.Values, reason => Assert.Contains("Already in Vision", reason));
         Assert.Equal(folders, Directory.GetDirectories(locations.UserSkills).Select(Path.GetFileName).OrderBy(n => n).ToList()); // no "-2"
     }
 
@@ -250,7 +250,7 @@ public sealed class OpenClawReviewFixesTests : IDisposable
         OpenClawFixture.Write(Path.Combine(_fx.Workspace, "memory", "2026-03-02.md"),
             "Log for 2026-03-02.\n\nprod DB login DB_PASSWORD=hunter2hunter2 keep it safe\n\nAlso: the standup moved to 10:00.\n");
         var bundle = await Bundle();
-        var memory = new MemoryStore(Path.Combine(_dsh.Path, "memory"));
+        var memory = new MemoryStore(Path.Combine(_target.Path, "memory"));
         var selection = new OpenClawSelection { NoteFiles = bundle.NoteFiles.Where(f => f.Name.Contains("2026-03-02")).Select(f => f.Path).ToHashSet(StringComparer.Ordinal) };
 
         var result = await OpenClawImporter.ApplyAsync(_fx.Local(), bundle, selection, new OpenClawTargets(memory, null, null));

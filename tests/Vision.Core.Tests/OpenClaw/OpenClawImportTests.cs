@@ -3,17 +3,17 @@ namespace Vision.Core.Tests;
 public sealed class OpenClawImportTests : IDisposable
 {
     private readonly OpenClawFixture _fx = new();
-    private readonly TempDirectory _dsh = new("vision-target");
+    private readonly TempDirectory _target = new("vision-target");
 
     public void Dispose()
     {
         _fx.Dispose();
-        _dsh.Dispose();
+        _target.Dispose();
     }
 
-    private MemoryStore Memory() => new(Path.Combine(_dsh.Path, "memory"));
-    private CredentialVault Vault() => new(Path.Combine(_dsh.Path, "vault"), new MemoryBlobStore());
-    private SkillLocations Skills() => new(Path.Combine(_dsh.Path, "home"), Path.Combine(_dsh.Path, "appdata"));
+    private MemoryStore Memory() => new(Path.Combine(_target.Path, "memory"));
+    private CredentialVault Vault() => new(Path.Combine(_target.Path, "vault"), new MemoryBlobStore());
+    private SkillLocations Skills() => new(Path.Combine(_target.Path, "home"), Path.Combine(_target.Path, "appdata"));
 
     private async Task<OpenClawBundle> Bundle(IFileSource? source = null)
     {
@@ -55,7 +55,7 @@ public sealed class OpenClawImportTests : IDisposable
         Assert.Equal(OpenClawFixture.AnthropicKey, vault.Value(vault.Entry("ANTHROPIC_API_KEY")!.Id));
         Assert.Equal(OpenClawFixture.TelegramToken, vault.Value(vault.Entry("OPENCLAW_CHANNELS_TELEGRAM_BOTTOKEN")!.Id));
 
-        // Model servers come back for the app to add: the two DSH can talk to.
+        // Model servers come back for the app to add: the two Vision can talk to.
         Assert.Equal(["ollama", "spark"], result.ModelServers.Select(s => s.Id).Order());
         Assert.True(result.BroughtAnything);
         Assert.Contains("5 skills", result.Summary);
@@ -168,7 +168,7 @@ public sealed class OpenClawImportTests : IDisposable
 
         Assert.Equal(["weather"], result.Skills);
         Assert.False(File.Exists(Path.Combine(_fx.Root.Path, "escape.txt")));
-        Assert.False(File.Exists(Path.Combine(_dsh.Path, "escape.txt")));
+        Assert.False(File.Exists(Path.Combine(_target.Path, "escape.txt")));
         Assert.Equal(["SKILL.md"], Directory.GetFiles(Path.Combine(skills.UserSkills, "weather"), "*", SearchOption.AllDirectories).Select(Path.GetFileName));
     }
 

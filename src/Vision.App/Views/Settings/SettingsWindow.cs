@@ -61,7 +61,7 @@ public sealed class SettingsWindow : Window
         heading.Margin = new Thickness(18, 18, 12, 14);
         DockPanel.SetDock(heading, Dock.Top);
         navHost.Children.Add(heading);
-        var footer = Ui.Secondary($"DSH {Vision.Core.AppInfo.Version}", 11);
+        var footer = Ui.Secondary($"Vision {Vision.Core.AppInfo.Version}", 11);
         footer.Margin = new Thickness(18, 8, 12, 14);
         DockPanel.SetDock(footer, Dock.Bottom);
         navHost.Children.Add(footer);

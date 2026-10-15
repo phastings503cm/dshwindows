@@ -385,7 +385,7 @@ public sealed class SkillPromptTests : IDisposable
         Assert.Equal("use_skill", tool.Spec.Name);
         var ctx = _fx.Context();
         var ok = await tool.ExecuteAsync("""{"name":"beta","arguments":"the widget"}""", ctx, CancellationToken.None);
-        Assert.Contains("# Skill: beta (DSH skill, project)", ok.Output);
+        Assert.Contains("# Skill: beta (Vision skill, project)", ok.Output);
         Assert.Contains("BETA the widget", ok.Output);
         Assert.Contains("- scripts/run.sh", ok.Output);
         Assert.Contains("Base directory:", ok.Output);
@@ -544,7 +544,7 @@ public sealed class SkillDraftTests : IDisposable
     [Fact]
     public void ManagerCreateAdoptAndReadOnlyForForeignFiles()
     {
-        // Adopt a Cursor rule: it becomes a DSH skill and keeps its globs / alwaysApply.
+        // Adopt a Cursor rule: it becomes a Vision skill and keeps its globs / alwaysApply.
         _fx.Write(".cursor/rules/style.mdc", "---\ndescription: Style guide\nglobs: [\"src/**\"]\nalwaysApply: true\n---\nUse tabs.");
         _fx.Write(".claude/commands/ship.md", "---\ndescription: Ship\nargument-hint: <env>\n---\nShip $ARGUMENTS");
         var all = SkillCatalog.Load(_fx.Project, _fx.Locations);
@@ -562,7 +562,7 @@ public sealed class SkillDraftTests : IDisposable
         Assert.True(cmdDoc.Bool("disable-model-invocation")); // a command stays user-only
         Assert.Equal("<env>", cmdDoc["argument-hint"]);
 
-        // The adopted DSH copy now shadows the Cursor original and is editable.
+        // The adopted Vision copy now shadows the Cursor original and is editable.
         var after = SkillCatalog.LoadAll(_fx.Project, _fx.Locations).Where(s => s.Name == "style").ToList();
         var active = after.First(s => !s.Shadowed);
         Assert.Equal(SkillOrigin.Vision, active.Origin);

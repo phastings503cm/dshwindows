@@ -113,7 +113,7 @@ public sealed class MemoryWindow : Window
         {
             list.Children.Add(Ui.Card(Ui.Stack(
                 Ui.Text("No instructions of your own yet", 14, FontWeights.SemiBold),
-                Ui.Secondary("Your own instruction files (any .md in DSH's instructions folder) are loaded into every chat — with a project or without. Write down how you like things done, or bring your instructions over from Claude Code and Cursor."),
+                Ui.Secondary("Your own instruction files (any .md in Vision's instructions folder) are loaded into every chat — with a project or without. Write down how you like things done, or bring your instructions over from Claude Code and Cursor."),
                 new Border { Height = 10 },
                 Ui.Buttons(Ui.Button("Write My Instructions", NewUserInstructions, accent: true), Ui.Button("From Claude Code & Cursor…", BringIn)))));
         }

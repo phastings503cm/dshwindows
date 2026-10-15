@@ -8,7 +8,7 @@ using Vision.Core;
 
 namespace Vision.App.Views.Settings;
 
-/// <summary>Settings › Model servers: the Spark Swapper boxes DSH knows — a DGX Spark, a Strix Halo — what each is
+/// <summary>Settings › Model servers: the Spark Swapper boxes Vision knows — a DGX Spark, a Strix Halo — what each is
 /// serving, switching it, installing models on it, and adding, renaming or removing a box.</summary>
 public sealed class ModelServersPage : UserControl
 {
@@ -23,13 +23,13 @@ public sealed class ModelServersPage : UserControl
 
         var page = new StackPanel { MaxWidth = 760 };
         page.Children.Add(Ui.Title("Model servers"));
-        var intro = Ui.Secondary("Your Spark Swapper boxes — a DGX Spark or a Strix Halo running Spark Swapper. DSH switches what each one serves " +
+        var intro = Ui.Secondary("Your Spark Swapper boxes — a DGX Spark or a Strix Halo running Spark Swapper. Vision switches what each one serves " +
                                  "(from the model menu under the composer, or with /swap), installs models on it, and every chat follows a switch.");
         intro.Margin = new Thickness(0, 6, 0, 10);
         page.Children.Add(intro);
         page.Children.Add(Ui.Buttons(
             Ui.Button("Add with a connection code…", () => model.ShowSwapperGuide(), accent: true,
-                tooltip: "On the Swapper's page choose Connect, then Connect DSH, and copy the code"),
+                tooltip: "On the Swapper's page choose Connect, then Connect Vision, and copy the code"),
             Ui.Button("Refresh", () => _ = spark.RefreshAsync())));
         var login = Ui.LinkButton("Connect with an address and login instead", () => model.ShowSwapperGuide(login: true));
         login.HorizontalAlignment = HorizontalAlignment.Left;
@@ -66,7 +66,7 @@ public sealed class ModelServersPage : UserControl
         {
             var empty = Ui.Card(Ui.Stack(
                 Ui.Text("No model servers yet", 14, FontWeights.SemiBold),
-                Ui.Secondary("Add a box with its connection code: open the Swapper's page in a browser (https://<box>:8999), choose Connect, then Connect DSH, and copy the code.")));
+                Ui.Secondary("Add a box with its connection code: open the Swapper's page in a browser (https://<box>:8999), choose Connect, then Connect Vision, and copy the code.")));
             empty.Margin = new Thickness(0, 16, 0, 0);
             _boxes.Children.Add(empty);
             return;
@@ -103,7 +103,7 @@ public sealed class ModelServersPage : UserControl
             IconButton(Icons.Delete, "Remove", () =>
             {
                 if (!Dialog.Confirm($"Remove {box.Name}?",
-                        "DSH forgets this box and its connection. Its models stay where they are, and its routes in AI Models stay too. " +
+                        "Vision forgets this box and its connection. Its models stay where they are, and its routes in AI Models stay too. " +
                         "The box still lists this app's connection: revoke it on the Swapper's Connect tab if you won't use it again.",
                         "Remove", destructive: true)) return;
                 spark.Remove(box);
@@ -131,8 +131,8 @@ public sealed class ModelServersPage : UserControl
             print.Margin = new Thickness(0, 6, 0, 6);
             card.Children.Add(Spaced(Ui.Stack(
                 Ui.Secondary(box.Connection.Auth == SwapperAuth.Token
-                    ? "This box showed a different security certificate than the one DSH trusts. If you reinstalled the Swapper, paste a fresh connection code. Otherwise don't continue — something may be intercepting the connection."
-                    : "The box's self-signed certificate isn't the one DSH trusts. Trust it only if this fingerprint matches the Swapper's (sudo openssl x509 -in /etc/spark-swapper/tls.crt -noout -fingerprint -sha256):"),
+                    ? "This box showed a different security certificate than the one Vision trusts. If you reinstalled the Swapper, paste a fresh connection code. Otherwise don't continue — something may be intercepting the connection."
+                    : "The box's self-signed certificate isn't the one Vision trusts. Trust it only if this fingerprint matches the Swapper's (sudo openssl x509 -in /etc/spark-swapper/tls.crt -noout -fingerprint -sha256):"),
                 print,
                 box.Connection.Auth == SwapperAuth.Token
                     ? Ui.Button("Paste a New Code…", () => _model.ShowSwapperGuide(), accent: true)
@@ -176,7 +176,7 @@ public sealed class ModelServersPage : UserControl
             {
                 if (!Dialog.Confirm($"Install {m.Title} on {box.Name}?",
                         (m.InstallSummary is { } summary ? $"It takes {summary}. " : "") +
-                        "It downloads and prepares the model on the box; DSH follows it here, and you can switch to it when it's done.", "Install"))
+                        "It downloads and prepares the model on the box; Vision follows it here, and you can switch to it when it's done.", "Install"))
                     return;
                 if (await spark.InstallAsync(box, m.Key) is { } error) Dialog.Info($"Couldn't install {m.Title}", error);
             });

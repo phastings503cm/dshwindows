@@ -45,7 +45,7 @@ public sealed class AwsSignInTests
     }
 
     [Fact]
-    public void DshRoutesThatReliedOnItsDefaultProfileNameItSoTheNewDefaultChangesNothing()
+    public void LegacyRoutesThatReliedOnTheOldDefaultProfileNameItSoTheNewDefaultChangesNothing()
     {
         static ProviderProfile Bedrock(string name, string? profile) =>
             new(ProviderKind.Bedrock, name, "https://bedrock-runtime.us-east-1.amazonaws.com", "m") { AwsProfile = profile };

@@ -62,7 +62,7 @@ public sealed partial class AppConfig : ObservableObject
 
     public ObservableCollection<ProviderProfile> Providers { get; } = [];
     public ObservableCollection<string> RecentProjects { get; } = [];
-    /// <summary>The Spark Swapper boxes DSH knows (a DGX Spark, a Strix Halo…). Their tokens and passwords live in
+    /// <summary>The Spark Swapper boxes Vision knows (a DGX Spark, a Strix Halo…). Their tokens and passwords live in
     /// Credential Manager.</summary>
     public ObservableCollection<SwapperConnection> SwapperConnections { get; } = [];
 
@@ -540,7 +540,7 @@ public sealed partial class AppConfig : ObservableObject
             MemoryEnabled = stored?.MemoryEnabled ?? true;
             SubagentsUsePrimary = stored?.SubagentsUsePrimary ?? true;
             Privacy = ReadPrivacy(stored?.Privacy, out migratePrivacy);
-            // Settings DSH wrote (new settings have nothing to pin, and must not be pinned later).
+            // Legacy: settings DSH (the app's former name) wrote. New settings have nothing to pin, and must not be pinned later.
             pinAwsProfile = stored is not null && stored.LegacyAwsProfilePinned != true;
             if (stored?.SwapperConnections is { } connections)
                 foreach (var connection in connections) SwapperConnections.Add(connection);

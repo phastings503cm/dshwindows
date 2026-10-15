@@ -43,9 +43,9 @@ public interface IWizardGuide : IDisposable
 }
 
 /// <summary>The DGX Spark guide: a step-by-step, picture-per-page walk from a Spark in its box (or
-/// one to reinstall) to DSH chatting with a model on it, for someone who has never used a terminal.
+/// one to reinstall) to Vision chatting with a model on it, for someone who has never used a terminal.
 /// It finds the Spark on the network, installs Spark Swapper over SSH, explains and pins the
-/// self-signed certificate, creates the Swapper's admin login, starts a model, and saves DSH's
+/// self-signed certificate, creates the Swapper's admin login, starts a model, and saves Vision's
 /// connection. Progress is saved after every step, so it can be left and resumed.
 ///
 /// Pages are rebuilt from state whenever something changes (like the rest of the wizard); live
@@ -91,7 +91,7 @@ public sealed partial class SparkGuide : IWizardGuide
     private static readonly string[] SectionTitles =
     [
         "What you need", "Get the Spark ready", "Find your Spark", "Install Spark Swapper", "The padlock warning",
-        "Your Swapper login", "Get a model running", "Connect DSH", "Done",
+        "Your Swapper login", "Get a model running", "Connect Vision", "Done",
     ];
 
     public int SectionCount => SectionTitles.Length;

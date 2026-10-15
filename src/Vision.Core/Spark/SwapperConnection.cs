@@ -8,12 +8,12 @@ namespace Vision.Core;
 
 // MARK: - Swapper connections
 //
-// A Spark Swapper box DSH knows about: a DGX Spark or a Strix Halo running Spark Swapper. There can be
+// A Spark Swapper box Vision knows about: a DGX Spark or a Strix Halo running Spark Swapper. There can be
 // several. Each is reached either with an app token (from the connection code the Swapper's Connect tab
 // shows, Swapper 2.0) or, for an older Swapper, with a username and password. The secret — token or
 // password — lives in Windows Credential Manager under the connection's id, never in the settings file.
 
-/// <summary>How DSH signs in to a Swapper.</summary>
+/// <summary>How Vision signs in to a Swapper.</summary>
 [JsonConverter(typeof(JsonStringEnumConverter<SwapperAuth>))]
 public enum SwapperAuth
 {
@@ -37,7 +37,7 @@ public sealed record SwapperConnection
     public SwapperAuth Auth { get; set; } = SwapperAuth.Token;
     /// <summary>The login's username (password auth), or the user a token was made for.</summary>
     public string? Username { get; set; }
-    /// <summary>The certificate fingerprint ("AB:CD:…") DSH accepts from the Swapper and its model API.</summary>
+    /// <summary>The certificate fingerprint ("AB:CD:…") Vision accepts from the Swapper and its model API.</summary>
     public string? PinnedFingerprint { get; set; }
     /// <summary>The box's model API (https://&lt;box&gt;:11443/v1), when known: routes with this base URL are this box's.</summary>
     public string? ApiBase { get; set; }
@@ -108,7 +108,7 @@ public static class SwapperConnections
 
 // MARK: - Connection codes
 
-/// <summary>A connection code from the Swapper's Connect tab ("Connect DSH"): <c>SSC1:</c> and base64url of a JSON
+/// <summary>A connection code from the Swapper's Connect tab ("Connect Vision"): <c>SSC1:</c> and base64url of a JSON
 /// object that says where the box is, how to reach its model API, which certificate to expect, and an app token.</summary>
 public sealed record SwapperConnectionCode
 {

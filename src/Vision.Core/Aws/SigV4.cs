@@ -7,7 +7,7 @@ namespace Vision.Core;
 
 // MARK: - AWS Signature Version 4
 //
-// DSH signs its own Bedrock requests instead of carrying the AWS SDK: SigV4 is a few hashes over a
+// Vision signs its own Bedrock requests instead of carrying the AWS SDK: SigV4 is a few hashes over a
 // canonical form of the request, and the AWS SDK for .NET would add megabytes for two endpoints.
 // The canonical form follows botocore exactly (the reference implementation the tests were checked
 // against): every header named x-amz-* is signed along with host and content-type; the path is

@@ -11,7 +11,7 @@ namespace Vision.Core;
 // The Spark's web pages use a self-signed certificate: one the Spark made for itself instead of one
 // a public authority vouched for. Browsers warn about that, which is right for a bank's website and
 // expected for your own box on your own network. This looks at the certificate a server presents so
-// the setup guide can show its fingerprint (the thing to compare), and then pin it in DSH
+// the setup guide can show its fingerprint (the thing to compare), and then pin it in Vision
 // (ProviderProfile.PinnedCertificate, SparkSwapperClient's pin) or, if the user asks, add it to
 // Windows' trusted roots for their account.
 

@@ -21,11 +21,11 @@ public sealed class BedrockConverseTests
     private static readonly ToolSpec Echo = new("echo", "Echo text back", """{"type":"object","properties":{"text":{"type":"string"}}}""");
 
     private static ProviderProfile Profile(string model) =>
-        new(ProviderKind.Bedrock, "Bedrock", "https://bedrock-runtime.us-east-1.amazonaws.com", model) { AwsRegion = "us-east-1", AwsProfile = "dsh" };
+        new(ProviderKind.Bedrock, "Bedrock", "https://bedrock-runtime.us-east-1.amazonaws.com", model) { AwsRegion = "us-east-1", AwsProfile = "vision" };
 
     private static JsonObject Body(IReadOnlyList<LlmMessage> messages, string model = Llama, IReadOnlyList<ToolSpec>? tools = null,
                                    ThinkingLevel? thinking = null, int? maxTokens = null, double? temperature = null,
-                                   bool replay = true, ProviderProfile? profile = null, string system = "You are DSH.") =>
+                                   bool replay = true, ProviderProfile? profile = null, string system = "You are Vision.") =>
         BedrockConverse.Request(new LlmRequest(system, messages, tools ?? [], model, temperature, maxTokens, thinking),
                                 profile ?? Profile(model), replay);
 
@@ -49,7 +49,7 @@ public sealed class BedrockConverseTests
             LlmMessage.SystemText("note in the middle"),
             LlmMessage.User("again"),
         ]);
-        Assert.Equal("""[{"text":"You are DSH."},{"text":"[Earlier conversation, compacted] summary"},{"text":"note in the middle"}]""",
+        Assert.Equal("""[{"text":"You are Vision."},{"text":"[Earlier conversation, compacted] summary"},{"text":"note in the middle"}]""",
             Json(body["system"]));
         Assert.Equal(3, Turns(body).Count);
         Assert.Equal(["user", "assistant", "user"], Turns(body).Select(t => t!["role"]!.GetValue<string>()));

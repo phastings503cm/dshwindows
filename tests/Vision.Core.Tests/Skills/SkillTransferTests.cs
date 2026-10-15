@@ -204,7 +204,7 @@ public sealed class SkillTransferTests : IDisposable
         using (var archive = ZipFile.OpenRead(zip))
         using (var reader = new StreamReader(archive.GetEntry("README.txt")!.Open()))
         {
-            Assert.StartsWith("Skills exported from DSH (Claude Code (.claude/skills)).\n\nUnzip this into a project folder", reader.ReadToEnd());
+            Assert.StartsWith("Skills exported from Vision (Claude Code (.claude/skills)).\n\nUnzip this into a project folder", reader.ReadToEnd());
         }
 
         // A folder given as the zip path is an error, never something to delete.
@@ -446,7 +446,7 @@ public sealed class SkillTransferTests : IDisposable
         _fx.Write(".claude/commands/ship.md", "---\ndescription: Ship\n---\nShip it");
         var skills = SkillCatalog.Load(_fx.Project, _fx.Locations);
 
-        // Claude: lands where Claude Code looks, and DSH reads it back.
+        // Claude: lands where Claude Code looks, and Vision reads it back.
         var claudeRoot = Path.Combine(_fx.Base, "out-claude");
         SkillExporter.Write(skills, ExportFormat.Claude, claudeRoot);
         var back = SkillCatalog.Load(claudeRoot, new SkillLocations(Path.Combine(_fx.Base, "nohome"), Path.Combine(_fx.Base, "nosupport")));

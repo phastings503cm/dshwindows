@@ -8,7 +8,7 @@ using static Vision.App.Views.Guide.GuideVisuals;
 
 namespace Vision.App.Views.Guide;
 
-// MARK: - The padlock, the Swapper's login, a model, and DSH's connection
+// MARK: - The padlock, the Swapper's login, a model, and Vision's connection
 
 public sealed partial class SparkGuide
 {
@@ -80,7 +80,7 @@ public sealed partial class SparkGuide
         }
     }
 
-    /// <summary>Pin the Swapper's certificate for DSH: its swapper client and, later, the model route.</summary>
+    /// <summary>Pin the Swapper's certificate for Vision: its swapper client and, later, the model route.</summary>
     private void TrustInVision()
     {
         if (_cert is not { } cert) return;
@@ -173,8 +173,8 @@ public sealed partial class SparkGuide
             panel.Children.Add(card);
 
             panel.Children.Add(CertificatePinned
-                ? Note(Tone.Success, "DSH trusts this certificate — only this one — for your Spark.", "Trusted in DSH")
-                : Note(Tone.Info, "Press \"Trust it and continue\" (below) and DSH will accept exactly this certificate from your Spark, and nothing else that claims to be it.", "Trust it in DSH"));
+                ? Note(Tone.Success, "Vision trusts this certificate — only this one — for your Spark.", "Trusted in Vision")
+                : Note(Tone.Info, "Press \"Trust it and continue\" (below) and Vision will accept exactly this certificate from your Spark, and nothing else that claims to be it.", "Trust it in Vision"));
 
             if (OperatingSystem.IsWindows())
             {
@@ -195,7 +195,7 @@ public sealed partial class SparkGuide
             "On the warning, press **Advanced** (Edge and Chrome) or **Show details** (Safari).",
             $"Press **Continue to {SparkHost} (unsafe)** — or \"Proceed\", \"visit this website\". The browser remembers your choice."));
         panel.Children.Add(Ui.Buttons(Ui.Button("Open Spark Swapper in the browser", () => ShellIntegration.Open(SwapperUrl.ToString()))));
-        panel.Children.Add(Aside("\"Unsafe\" is the browser being careful: it means \"nobody I know vouched for this ID\", not \"this is dangerous\". The traffic is still encrypted with TLS. What would be dangerous is trusting a certificate you didn't expect — which is why DSH shows the fingerprint and, when it can, checks it against the file on the Spark."));
+        panel.Children.Add(Aside("\"Unsafe\" is the browser being careful: it means \"nobody I know vouched for this ID\", not \"this is dangerous\". The traffic is still encrypted with TLS. What would be dangerous is trusting a certificate you didn't expect — which is why Vision shows the fingerprint and, when it can, checks it against the file on the Spark."));
         panel.Children.Add(Stuck("The warning came back after it worked before? If the Spark's address changed (your router gave it a new one), browsers warn again — the certificate names the old address. Continuing is still fine if the fingerprint matches."));
         return panel;
     }
@@ -299,7 +299,7 @@ public sealed partial class SparkGuide
         if (_state.AdminReady)
         {
             panel.Children.Add(Note(Tone.Success,
-                $"Signed in to Spark Swapper as {GuideConnection?.Username ?? "you"}. DSH keeps this login in Windows Credential Manager for now; on the last step it swaps it for an app token, so your password isn't kept.",
+                $"Signed in to Spark Swapper as {GuideConnection?.Username ?? "you"}. Vision keeps this login in Windows Credential Manager for now; on the last step it swaps it for an app token, so your password isn't kept.",
                 "Your Swapper login is ready"));
             panel.Children.Add(Paragraph($"Use the same username and password in the browser at https://{SparkSetup.UrlHost(SparkHost)}:{SparkSetup.SwapperPort}. As the admin you can add logins for other people from its Users tab."));
         }
@@ -334,7 +334,7 @@ public sealed partial class SparkGuide
         if (_adminBusy && _session is not null) panel.Children.Add(Busy("Talking to Spark Swapper…"));
         if (_adminError is { } problem) panel.Children.Add(Note(Tone.Error, problem));
 
-        panel.Children.Add(Aside("DSH creates the login through Spark Swapper's own web API (the same thing its page does), over the certificate you just trusted. Passwords are stored on the Spark scrambled (hashed), and DSH keeps its copy in Windows Credential Manager, never in its settings file."));
+        panel.Children.Add(Aside("Vision creates the login through Spark Swapper's own web API (the same thing its page does), over the certificate you just trusted. Passwords are stored on the Spark scrambled (hashed), and Vision keeps its copy in Windows Credential Manager, never in its settings file."));
         panel.Children.Add(Stuck("\"The admin login already exists\" but you never made one? Someone opened the page first. Reset it (link above, or sudo spark-swapper-reset-login on the Spark) and create yours straight away."));
         return panel;
     }
@@ -490,7 +490,7 @@ public sealed partial class SparkGuide
 
         if (RunningModel is { } active)
         {
-            panel.Children.Add(Note(Tone.Success, $"{active.Title} is running ({active.ServedId}, {(active.ServedContext ?? active.Context):N0}-token context). You're ready to connect DSH.", "A model is running"));
+            panel.Children.Add(Note(Tone.Success, $"{active.Title} is running ({active.ServedId}, {(active.ServedContext ?? active.Context):N0}-token context). You're ready to connect Vision.", "A model is running"));
         }
 
         if (_status is { } status)
@@ -572,7 +572,7 @@ public sealed partial class SparkGuide
         }
 
         panel.Children.Add(Aside("Starting a model loads it into the Spark's memory with Docker. The very first start also downloads it — tens of gigabytes — so expect 20–40 minutes; after that a switch takes a few minutes. It keeps going on the Spark even if you close this window. Spark Swapper also installs what's missing (Docker with GPU support, the model recipes) from its Provisioning tab."));
-        panel.Children.Add(Stuck("It failed? Read the last lines of the log: \"not enough memory\" means another program is using the GPU; \"checkpoint not found\" means that model's files aren't downloaded. You can skip this step and start a model later from Spark Swapper's page or with /swap in DSH."));
+        panel.Children.Add(Stuck("It failed? Read the last lines of the log: \"not enough memory\" means another program is using the GPU; \"checkpoint not found\" means that model's files aren't downloaded. You can skip this step and start a model later from Spark Swapper's page or with /swap in Vision."));
         return panel;
     }
 
@@ -718,7 +718,7 @@ public sealed partial class SparkGuide
         }
     }
 
-    // MARK: - Connect DSH
+    // MARK: - Connect Vision
 
     private enum StepState { Waiting, Running, Done, Warning, Failed }
 
@@ -733,7 +733,7 @@ public sealed partial class SparkGuide
     [
         "Getting the model's key from Spark Swapper",
         "Checking the Spark's secure model address",
-        "Saving the connection in DSH",
+        "Saving the connection in Vision",
         "Saying hello to the model",
     ];
 
@@ -781,8 +781,8 @@ public sealed partial class SparkGuide
             var token = await RegisterBoxAsync(profile, cts.Token);
             _state.Connected = true;
             _state.Save();
-            Set(StepState.Done, $"DSH now talks to {profile.BaseUrl} · {model}" +
-                                (token ? ". Spark Swapper gave DSH an app token, so your Swapper password isn't kept." : "."));
+            Set(StepState.Done, $"Vision now talks to {profile.BaseUrl} · {model}" +
+                                (token ? ". Spark Swapper gave Vision an app token, so your Swapper password isn't kept." : "."));
 
             step = 3;
             if (_status.ActiveModel is null)
@@ -857,7 +857,7 @@ public sealed partial class SparkGuide
         return updated.Auth == SwapperAuth.Token;
     }
 
-    /// <summary>Make the Spark DSH's model route (replacing an older route to the same address), with
+    /// <summary>Make the Spark Vision's model route (replacing an older route to the same address), with
     /// its key in Credential Manager.</summary>
     private void SaveProvider(ProviderProfile profile)
     {
@@ -875,13 +875,13 @@ public sealed partial class SparkGuide
     private UIElement ConnectPage()
     {
         var panel = Ui.Stack(
-            Picture("vision-connected", "DSH's chat window connected to the DGX Spark.", 240),
-            Heading("Connect DSH to your Spark"),
-            Lead("Last step: DSH picks up the model's key and address from Spark Swapper, saves the connection, and sends a first message."));
+            Picture("vision-connected", "Vision's chat window connected to the DGX Spark.", 240),
+            Heading("Connect Vision to your Spark"),
+            Lead("Last step: Vision picks up the model's key and address from Spark Swapper, saves the connection, and sends a first message."));
         if (_state.Connected && !_connectBusy && _connect.All(s => s.State == StepState.Waiting))
         {
             // Resumed: connected in an earlier session.
-            panel.Children.Add(Note(Tone.Success, $"DSH is connected to your Spark ({SparkSetup.ModelBaseUrl(SparkHost)}).", "Connected",
+            panel.Children.Add(Note(Tone.Success, $"Vision is connected to your Spark ({SparkSetup.ModelBaseUrl(SparkHost)}).", "Connected",
                 Ui.Buttons(Ui.Button("Check again", () => _ = ConnectAsync()))));
             return panel;
         }
@@ -943,7 +943,7 @@ public sealed partial class SparkGuide
         again.IsEnabled = !_connectBusy;
         if (!_connectBusy && _connect.Any(s => s.State is StepState.Failed or StepState.Warning)) panel.Children.Add(Ui.Buttons(again));
 
-        panel.Children.Add(Aside($"DSH saved a model route named \"{SparkSetup.ProviderName}\" pointing at https://{SparkSetup.UrlHost(SparkHost)}:{SparkSetup.ModelFrontPort}/v1, with the Spark's certificate pinned (DSH accepts exactly that certificate there) and the model key in Windows Credential Manager. It also added the Spark to Settings › Model servers — with an app token from Spark Swapper when it hands one out, otherwise its login — so /swap and the model menu can switch models. Everything is editable in Settings."));
+        panel.Children.Add(Aside($"Vision saved a model route named \"{SparkSetup.ProviderName}\" pointing at https://{SparkSetup.UrlHost(SparkHost)}:{SparkSetup.ModelFrontPort}/v1, with the Spark's certificate pinned (Vision accepts exactly that certificate there) and the model key in Windows Credential Manager. It also added the Spark to Settings › Model servers — with an app token from Spark Swapper when it hands one out, otherwise its login — so /swap and the model menu can switch models. Everything is editable in Settings."));
         panel.Children.Add(Stuck("\"Couldn't reach the model server\": a model may still be loading — wait for it on the previous page. \"Replied 401\": the key changed on the Spark; press Try again to fetch it anew."));
         return panel;
     }
@@ -956,18 +956,18 @@ public sealed partial class SparkGuide
         return Ui.Stack(
             Picture("done", "A PC and a Spark connected, with a big green check."),
             Heading("You're all set"),
-            Lead($"Your Spark{(SparkHost.Length > 0 ? $" at {SparkLabel}" : "")}, Spark Swapper and DSH are working together. Here's how to use them:"),
+            Lead($"Your Spark{(SparkHost.Length > 0 ? $" at {SparkLabel}" : "")}, Spark Swapper and Vision are working together. Here's how to use them:"),
             Bullets(
                 (Icons.Chat, "**Chat.** Start a new chat — it runs on your Spark, privately, on your own network."),
                 (Icons.Sync, "**Switch models.** Type /swap in a chat (or /swap flash), or use the model menu under the message box. Every chat follows the switch."),
-                (Icons.Globe, $"**Manage the Spark** in Spark Swapper: {swapper} — bookmark it. In DSH: Settings › Model servers."),
+                (Icons.Globe, $"**Manage the Spark** in Spark Swapper: {swapper} — bookmark it. In Vision: Settings › Model servers."),
                 (Icons.Up, "**Update Spark Swapper** later: run this guide again, choose \"It's already set up\", and on its install step press \"Reinstall or update Spark Swapper\" — or on the Spark: git -C ~/spark-swapper pull && sudo bash ~/spark-swapper/deploy/install.sh"),
                 (Icons.Lock, "**Forgot the Swapper login?** On the Spark run sudo spark-swapper-reset-login, then open its page and create a new one."),
-                (Icons.Document, $"**Logs.** Spark Swapper: journalctl -u spark-swapper -f on the Spark. DSH: {AppPaths.Logs}")),
+                (Icons.Document, $"**Logs.** Spark Swapper: journalctl -u spark-swapper -f on the Spark. Vision: {AppPaths.Logs}")),
             Ui.Buttons(
                 Ui.Button("Open Spark Swapper", () => ShellIntegration.Open(swapper)),
-                Ui.Button("Open DSH's logs folder", () => ShellIntegration.OpenFolder(AppPaths.Logs))),
-            Aside("Spark Swapper is open source (github.com/gnubyte/DGX-Spark-Swapper) and runs on the Spark as a small service. DSH is the app on this PC: it runs the agent and its tools here, and asks the model on the Spark to think."),
+                Ui.Button("Open Vision's logs folder", () => ShellIntegration.OpenFolder(AppPaths.Logs))),
+            Aside("Spark Swapper is open source (github.com/gnubyte/DGX-Spark-Swapper) and runs on the Spark as a small service. Vision is the app on this PC: it runs the agent and its tools here, and asks the model on the Spark to think."),
             Stuck("Something stopped working later? Run the setup wizard again (Help › Run Setup Wizard) — it picks up what's already done and checks the rest."));
     }
 }

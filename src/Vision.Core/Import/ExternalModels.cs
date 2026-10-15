@@ -3,9 +3,9 @@ namespace Vision.Core;
 // MARK: - Bringing in what other tools left on this PC
 //
 // Claude Code and Cursor keep skills, commands, rules, subagents, plugins and saved notes under the
-// user's profile. DSH already reads their skill folders in place; this layer finds *everything* they
-// have installed, shows it, and copies the chosen items into DSH's own data folder — converted where
-// the shapes differ — so DSH keeps working without them and the copies can be edited. Nothing in the
+// user's profile. Vision already reads their skill folders in place; this layer finds *everything* they
+// have installed, shows it, and copies the chosen items into Vision's own data folder — converted where
+// the shapes differ — so Vision keeps working without them and the copies can be edited. Nothing in the
 // other tool's folders is ever changed, and nothing is run.
 //
 //   Claude Code   ~\.claude\CLAUDE.md                  → your instructions (every project)
@@ -35,14 +35,14 @@ public enum ExternalKind
     ProjectNotes,
 }
 
-/// <summary>How an item compares with what DSH already has.</summary>
+/// <summary>How an item compares with what Vision already has.</summary>
 public enum ExternalStatus
 {
-    /// <summary>Not in DSH yet.</summary>
+    /// <summary>Not in Vision yet.</summary>
     New,
-    /// <summary>Already in DSH, identical.</summary>
+    /// <summary>Already in Vision, identical.</summary>
     Imported,
-    /// <summary>DSH has something of that name that isn't the same.</summary>
+    /// <summary>Vision has something of that name that isn't the same.</summary>
     Different,
     /// <summary>Already in the approval queue in Settings › Skills, waiting to be switched on.</summary>
     Waiting,
@@ -66,9 +66,9 @@ public static class ExternalLabels
     /// <summary>One line on what importing does with the kind.</summary>
     public static string Effect(this ExternalKind kind) => kind switch
     {
-        ExternalKind.Skill => "Copied to your DSH skills; the agent loads one when a task matches.",
+        ExternalKind.Skill => "Copied to your Vision skills; the agent loads one when a task matches.",
         ExternalKind.Command => "Become skills you run yourself by typing /name in a chat.",
-        ExternalKind.Rule => "Become DSH rules — always on, or applied to the files they name.",
+        ExternalKind.Rule => "Become Vision rules — always on, or applied to the files they name.",
         ExternalKind.Instructions => "Loaded into every prompt, in every project. Edit them in Memory & Skills.",
         ExternalKind.Subagent => "Become skills that tell the agent to hand the work to a subagent with these instructions.",
         _ => "Saved notes, shown to the agent only in the project they belong to.",
@@ -112,7 +112,7 @@ public static class ExternalLabels
     }
 }
 
-/// <summary>Something another tool has installed that DSH can use.</summary>
+/// <summary>Something another tool has installed that Vision can use.</summary>
 public sealed record ExternalItem
 {
     /// <summary>Stable across scans: the tool, the kind and where it is read from.</summary>
@@ -140,7 +140,7 @@ public sealed record ExternalItem
     /// <summary>Project notes: the project's folder, when it exists on this PC.</summary>
     public string? ProjectPath { get; init; }
 
-    /// <summary>What it becomes in DSH: the folder name under the skills folder, or the instruction
+    /// <summary>What it becomes in Vision: the folder name under the skills folder, or the instruction
     /// file's name without ".md", or the notes folder's name.</summary>
     public string Target { get; init; } = "";
     /// <summary>The parsed skill, command or rule (null for the other kinds).</summary>
@@ -165,7 +165,7 @@ public sealed record ExternalInventory(IReadOnlyList<ExternalToolInfo> Tools, IR
 }
 
 /// <param name="Destination">Where it was written (for a draft, the draft's folder).</param>
-/// <param name="Renamed">It landed under a numbered name because DSH already had a different one.</param>
+/// <param name="Renamed">It landed under a numbered name because Vision already had a different one.</param>
 /// <param name="IsDraft">Held for approval in Settings › Skills instead of switched on.</param>
 public sealed record ExternalImported(ExternalItem Item, string Destination, bool Renamed, bool IsDraft = false);
 
@@ -173,7 +173,7 @@ public sealed record ExternalSkipped(ExternalItem Item, string Reason);
 
 public sealed record ExternalImportResult
 {
-    /// <summary>Everything written to DSH's data folder, drafts included (see <see cref="ExternalImported.IsDraft"/>).</summary>
+    /// <summary>Everything written to Vision's data folder, drafts included (see <see cref="ExternalImported.IsDraft"/>).</summary>
     public IReadOnlyList<ExternalImported> Imported { get; init; } = [];
     /// <summary>The skills among them held back for approval (asked for with "review first").</summary>
     public IReadOnlyList<SkillDraft> Drafts { get; init; } = [];

@@ -231,7 +231,7 @@ public sealed class ModelsPage : UserControl
         isPrivate.ToolTip = (provider.IsPrivate is null
                                 ? $"Decided by its address: {(RoutePrivacy.IsPrivateAddress(provider.BaseUrl) ? "your own network, so private" : "an online service, so not private")}. "
                                 : "Set by you. ") +
-                            "Private models may see sensitive data; for the others, DSH masks it before sending (see Sensitive data below).";
+                            "Private models may see sensitive data; for the others, Vision masks it before sending (see Sensitive data below).";
         isPrivate.Click += (_, _) =>
         {
             provider.IsPrivate = isPrivate.IsChecked == true;
@@ -320,7 +320,7 @@ public sealed class ModelsPage : UserControl
 
         var master = Ui.Check("Mask sensitive data before sending it to models that aren't private", privacy.Mask, on => Set(p => p with { Mask = on }));
         master.FontWeight = FontWeights.SemiBold;
-        var explain = Ui.Secondary("Private models get the conversation as it is. For the others, DSH replaces sensitive values with placeholders such as ⟦EMAIL_1⟧ before anything leaves this PC, and puts the real values back in what comes back — the model can still work with them. Values in the Credentials Vault are always masked.");
+        var explain = Ui.Secondary("Private models get the conversation as it is. For the others, Vision replaces sensitive values with placeholders such as ⟦EMAIL_1⟧ before anything leaves this PC, and puts the real values back in what comes back — the model can still work with them. Values in the Credentials Vault are always masked.");
         explain.Margin = new Thickness(0, 4, 0, 10);
         var categories = new WrapPanel();
         void Category(string label, bool value, Func<PrivacySettings, bool, PrivacySettings> change)

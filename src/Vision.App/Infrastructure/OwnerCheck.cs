@@ -15,12 +15,12 @@ public static class OwnerCheck
 {
     public enum Outcome { Verified, Declined, Unavailable }
 
-    /// <summary>Ask. <paramref name="reason"/> finishes "DSH wants to …".</summary>
+    /// <summary>Ask. <paramref name="reason"/> finishes "Vision wants to …".</summary>
     public static async Task<(bool Ok, string? Error)> ConfirmAsync(Window owner, string reason)
     {
         if (SelfTest.Current is not null) return (true, null);
         var hwnd = new WindowInteropHelper(owner).Handle;
-        switch (await HelloAsync(hwnd, $"DSH wants to {reason}."))
+        switch (await HelloAsync(hwnd, $"Vision wants to {reason}."))
         {
             case Outcome.Verified: return (true, null);
             case Outcome.Declined: return (false, null);
@@ -143,7 +143,7 @@ public static class OwnerCheck
             {
                 Size = Marshal.SizeOf<CredUiInfo>(),
                 Parent = hwnd,
-                Caption = "DSH Credentials Vault",
+                Caption = "Vision Credentials Vault",
                 Message = $"Enter your Windows password to {reason}.",
             };
             var error = 0;

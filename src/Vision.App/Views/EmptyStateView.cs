@@ -22,7 +22,7 @@ public sealed class EmptyStateView : UserControl
         });
         stack.Children.Add(new TextBlock
         {
-            Text = "DSH",
+            Text = "Vision",
             FontSize = 26,
             FontWeight = FontWeights.SemiBold,
             HorizontalAlignment = HorizontalAlignment.Center,

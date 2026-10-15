@@ -7,7 +7,7 @@ public enum InstructionScope
 {
     /// <summary>A file in the project folder (AGENTS.md, CLAUDE.md, MEMORY.md, …).</summary>
     Project,
-    /// <summary>One of your own instruction files in DSH's data folder: it applies in every project.</summary>
+    /// <summary>One of your own instruction files in Vision's data folder: it applies in every project.</summary>
     User,
     /// <summary>The index of notes saved for this project outside its folder (imported from Claude Code).</summary>
     Notes,

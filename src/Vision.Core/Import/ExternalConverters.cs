@@ -9,7 +9,7 @@ internal static class ExternalConverters
     // MARK: - Subagents
 
     /// <summary>A subagent definition (~\.claude\agents\name.md, ~\.cursor\agents\name.md) as a skill.
-    /// DSH's agent tool starts a generic subagent from a prompt; the skill tells the model to do that
+    /// Vision's agent tool starts a generic subagent from a prompt; the skill tells the model to do that
     /// with the definition's instructions, so the specialist still exists — as a recipe, not a
     /// separate kind of object.</summary>
     /// <returns>The skill's folder name and its SKILL.md text; null when the definition has no usable
@@ -27,7 +27,7 @@ internal static class ExternalConverters
         var notes = new List<string>();
         var tools = source.List("tools");
         if (tools.Count > 0)
-            notes.Add($"In {tool.Label()} it was limited to: {string.Join(", ", tools)}. DSH's subagents get DSH's own tools — ask for the same kind of work.");
+            notes.Add($"In {tool.Label()} it was limited to: {string.Join(", ", tools)}. Vision's subagents get Vision's own tools — ask for the same kind of work.");
         if (source.Bool("readonly") == true) notes.Add("It was read-only in Cursor: tell it not to change any files.");
 
         var text = new List<string>
@@ -111,7 +111,7 @@ internal static class ExternalConverters
         {
             var target = Path.Combine([destination, .. note.Relative.Split('/')]);
             Directory.CreateDirectory(Path.GetDirectoryName(target)!);
-            // A copy that differs may have been edited in DSH: keep it beside the new one.
+            // A copy that differs may have been edited in Vision: keep it beside the new one.
             if (File.Exists(target) && !SameText(SkillFiles.ReadText(target), SkillFiles.ReadText(note.FullPath))) Backup(target);
             File.Copy(note.FullPath, target, overwrite: true);
         }

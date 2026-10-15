@@ -427,7 +427,7 @@ public sealed class VaultTests : IDisposable
     }
 }
 
-/// <summary>New: the vault lives in DSH's own folder (VISION_HOME redirects it, so serial).</summary>
+/// <summary>New: the vault lives in Vision's own folder (VISION_HOME redirects it, so serial).</summary>
 [Collection(SerialStaticState.Name)]
 public sealed class VaultLocationTests : IDisposable
 {

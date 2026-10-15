@@ -121,7 +121,7 @@ public sealed class SecretStoreLegacyTests : IDisposable
     }
 
     [Fact]
-    public void DshsEntryIsCopiedCheckedThenRemoved()
+    public void TheLegacyEntryIsCopiedCheckedThenRemoved()
     {
         _store.Entries[Legacy] = new CredentialEntry("sk-legacy", "swapper-user");
 

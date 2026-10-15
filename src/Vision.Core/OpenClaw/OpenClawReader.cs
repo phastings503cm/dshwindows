@@ -77,11 +77,11 @@ public static partial class OpenClawReader
 
         // What isn't imported.
         if (oauth.Count > 0)
-            left.Add($"{oauth.Count} OAuth sign-in{(oauth.Count == 1 ? "" : "s")} ({string.Join(", ", oauth.Distinct().Take(5))}) — they belong to OpenClaw's own session, so DSH can't reuse them.");
+            left.Add($"{oauth.Count} OAuth sign-in{(oauth.Count == 1 ? "" : "s")} ({string.Join(", ", oauth.Distinct().Take(5))}) — they belong to OpenClaw's own session, so Vision can't reuse them.");
         if (At(config, "channels") is JsonObject channels && channels.Count > 0)
             left.Add($"Chat channels ({string.Join(", ", channels.Select(c => c.Key).Take(8))}) — they belong to OpenClaw's gateway.");
         var cron = await CountCronJobsAsync(source, state, cancellationToken).ConfigureAwait(false);
-        if (cron > 0) left.Add($"{cron} scheduled job{(cron == 1 ? "" : "s")} (cron) — DSH has the task queue instead; recreate any you still want.");
+        if (cron > 0) left.Add($"{cron} scheduled job{(cron == 1 ? "" : "s")} (cron) — Vision has the task queue instead; recreate any you still want.");
         var sessions = await CountSessionsAsync(source, state, cancellationToken).ConfigureAwait(false);
         if (sessions > 0) left.Add($"{sessions} saved conversation{(sessions == 1 ? "" : "s")} — chat history isn't brought over.");
         foreach (var unresolved in collector.Unresolved.Distinct().Take(6))
@@ -651,7 +651,7 @@ public static partial class OpenClawReader
             var compatible = api is null || api.Equals("openai-completions", StringComparison.OrdinalIgnoreCase) || api.Equals("openai", StringComparison.OrdinalIgnoreCase);
 
             // "localhost" on the machine OpenClaw runs on means that machine, not this one.
-            string? note = compatible ? null : $"speaks the “{api}” protocol, which DSH doesn't";
+            string? note = compatible ? null : $"speaks the “{api}” protocol, which Vision doesn't";
             if (Uri.TryCreate(baseUrl, UriKind.Absolute, out var written) && (written.UserInfo.Length > 0 || written.Query.Length > 1))
                 note = (note is null ? "" : note + "; ") + "its address carries a sign-in or token — check it before bringing it in";
             if (source.NetworkHost is { Length: > 0 } host && Uri.TryCreate(baseUrl, UriKind.Absolute, out var uri)

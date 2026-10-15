@@ -134,7 +134,7 @@ public sealed class ExternalReviewFindingsTests : IDisposable
         var app = _fx.Populate();
         _fx.ImportSuggested(_fx.Scan());
         var notes = ProjectContext.ProjectNotesFolder(app, _fx.Vision);
-        File.WriteAllText(Path.Combine(notes, "user_role.md"), "I edited this in DSH.");
+        File.WriteAllText(Path.Combine(notes, "user_role.md"), "I edited this in Vision.");
         var key = ClaudeProjectNames.Encode(app);
         _fx.Write($".claude/projects/{key}/memory/user_role.md", "---\nname: role\ndescription: who the user is\ntype: user\n---\nA data scientist and a manager.");
 
@@ -147,7 +147,7 @@ public sealed class ExternalReviewFindingsTests : IDisposable
         Assert.Contains("manager", File.ReadAllText(Path.Combine(notes, "user_role.md")));
         var backups = Directory.GetFiles(notes, "user_role.md*.bak");
         Assert.Single(backups);
-        Assert.Equal("I edited this in DSH.", File.ReadAllText(backups[0]));
+        Assert.Equal("I edited this in Vision.", File.ReadAllText(backups[0]));
     }
 
     [Fact]

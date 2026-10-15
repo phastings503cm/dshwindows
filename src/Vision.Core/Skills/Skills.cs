@@ -38,7 +38,7 @@ public static class SkillEnums
 {
     public static string Label(this SkillOrigin origin) => origin switch
     {
-        SkillOrigin.Vision => "DSH",
+        SkillOrigin.Vision => "Vision",
         SkillOrigin.Agents => "Agents",
         SkillOrigin.Qwen => "Qwen",
         SkillOrigin.Claude => "Claude",
@@ -61,7 +61,7 @@ public static class SkillEnums
     public static string RawValue(this SkillScope scope) => scope == SkillScope.Project ? "project" : "user";
 }
 
-/// <summary>Which foreign layouts to read in place. DSH's own and the built-ins are always read.</summary>
+/// <summary>Which foreign layouts to read in place. Vision's own and the built-ins are always read.</summary>
 [Flags]
 public enum SkillSources
 {
@@ -222,7 +222,7 @@ public sealed record SkillLocations(string Home, string AppSupport)
     /// (<see cref="ClaudeProjectNames.Encode"/>), each with a MEMORY.md index and the notes it lists.</summary>
     public string ProjectNotes => Path.Combine(AppSupport, "project-notes");
 
-    /// <summary>Where a new project skill is written: <c>.vision\skills</c>. (Skills in DSH's <c>.dsh\skills</c> are
+    /// <summary>Where a new project skill is written: <c>.vision\skills</c>. (Skills in the legacy <c>.dsh\skills</c> are
     /// read too, and edited where they are; see <see cref="ProjectFolders"/>.)</summary>
     public static string ProjectSkills(string project) => ProjectFolders.Folder(project, "skills");
 }

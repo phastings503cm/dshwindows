@@ -16,7 +16,7 @@ public sealed partial class SparkGuide
     private UIElement WelcomePage() => Ui.Stack(
         Picture("need", "A DGX Spark, a home router, a PC, and — only for reinstalling — a USB stick, keyboard and screen."),
         Heading("Let's set up your DGX Spark"),
-        Lead("This guide takes you from a Spark in its box to chatting with it here in DSH. Every step has a picture, and you won't need to type anything into a terminal."),
+        Lead("This guide takes you from a Spark in its box to chatting with it here in Vision. Every step has a picture, and you won't need to type anything into a terminal."),
         Subheading("What you need"),
         Bullets(
             (Icons.Bolt, "Your **DGX Spark** and its power adapter."),
@@ -24,7 +24,7 @@ public sealed partial class SparkGuide
             (Icons.Laptop, "**This PC**, on that same network."),
             (Icons.Stopwatch, "About **20 minutes** — longer the first time a model downloads."),
             (Icons.Download, "Only if you want to erase and reinstall the Spark: a **USB stick of 16 GB or more**, and a keyboard and screen for the Spark.")),
-        Aside("DSH will help you with the Spark's first-time setup, find it on your network, install Spark Swapper (a free, open-source control panel for the Spark) over a secure remote login, get a model running, and connect this app to it. Everything stays on your own network."),
+        Aside("Vision will help you with the Spark's first-time setup, find it on your network, install Spark Swapper (a free, open-source control panel for the Spark) over a secure remote login, get a model running, and connect this app to it. Everything stays on your own network."),
         Stuck("You can close this window at any time — the guide remembers where you were. Open it again from Settings › General › Setup wizard, or Help › Run Setup Wizard."));
 
     private UIElement StartPage()
@@ -42,7 +42,7 @@ public sealed partial class SparkGuide
             Choice(Icons.Bolt, "Brand new", "Just out of the box, never set up. Most people pick this.",
                 _state.Start == GuideStart.New, () => Choose(GuideStart.New)),
             Choice(Icons.Refresh, "Start fresh — erase and reinstall",
-                "Reinstall DGX OS from a USB stick DSH makes for you. Everything on the Spark is erased.",
+                "Reinstall DGX OS from a USB stick Vision makes for you. Everything on the Spark is erased.",
                 _state.Start == GuideStart.Fresh, () => Choose(GuideStart.Fresh)),
             Choice(Icons.CheckMark, "It's already set up", "It's on my network and I know the username and password I created for it.",
                 _state.Start == GuideStart.Existing, () => Choose(GuideStart.Existing)),
@@ -106,12 +106,12 @@ public sealed partial class SparkGuide
             Heading("Create your account on the Spark"),
             Steps(
                 "On the device that joined the Spark's Wi-Fi, open a browser (Edge, Chrome, Safari…) and go to the **setup page from the sticker**, like http://spark-3f2a.local.",
-                "Choose a **username** and a **password**. Write them down — DSH needs them in a few minutes.",
+                "Choose a **username** and a **password**. Write them down — Vision needs them in a few minutes.",
                 "Pick your **home Wi-Fi** and type its password — or choose the wired network if you plugged in a cable.",
                 "Accept the license and finish the setup."),
             Field("Setup page (optional — if this PC is on the Spark's Wi-Fi)", _setupAddress),
             row,
-            Aside("This creates the Spark's first user account — its administrator. It's the same account you'd use to sign in on its screen. DSH will use it once, to install Spark Swapper, and doesn't save the password."),
+            Aside("This creates the Spark's first user account — its administrator. It's the same account you'd use to sign in on its screen. Vision will use it once, to install Spark Swapper, and doesn't save the password."),
             Stuck("Page won't open? Check the device is still connected to the Spark's Wi-Fi, and type the address exactly as on the sticker, starting with http://. Some phones switch back to mobile data when Wi-Fi has no internet: turn mobile data off for a moment."));
     }
 
@@ -131,7 +131,7 @@ public sealed partial class SparkGuide
         _clockTimer ??= new DispatcherTimer(TimeSpan.FromSeconds(1), DispatcherPriority.Background, (_, _) =>
         {
             var elapsed = DateTime.Now - _waitStarted;
-            _waitClock.Text = $"Waiting {elapsed.Minutes}:{elapsed.Seconds:00} — DSH is watching your network for the Spark.";
+            _waitClock.Text = $"Waiting {elapsed.Minutes}:{elapsed.Seconds:00} — Vision is watching your network for the Spark.";
         }, _dispatcher);
         _clockTimer.Start();
         _ = WatchAsync(cts.Token);
@@ -183,7 +183,7 @@ public sealed partial class SparkGuide
             Steps(
                 "After the setup page, the Spark switches off its own Wi-Fi, joins your home network, installs updates and restarts. **This takes about 10 minutes.** Leave it plugged in.",
                 "Put this PC (and the laptop or phone you used) back on your **home Wi-Fi**.",
-                "When DSH spots the Spark on your network it tells you here — or just continue once 10 minutes have passed."),
+                "When Vision spots the Spark on your network it tells you here — or just continue once 10 minutes have passed."),
             status,
             Aside("The update downloads the latest DGX OS fixes and drivers. The light on the Spark may go off and on while it restarts; that's normal."),
             Stuck("More than 20 minutes and still nothing? Check the Spark's light is on and that your router shows a new device called spark-…. If you picked the wrong Wi-Fi or mistyped its password, the hotspot comes back — join it again and redo the setup page."));

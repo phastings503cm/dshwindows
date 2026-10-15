@@ -56,7 +56,7 @@ public sealed partial class SparkGuide
                              "==> git 2.43.0 present.",
                              "==> Cloning https://github.com/gnubyte/DGX-Spark-Swapper → /home/alice/spark-swapper …",
                              "==> Installing the app (systemd service, cert, config)…",
-                             "[sudo] password for alice: (answered by DSH)",
+                             "[sudo] password for alice: (answered by Vision)",
                              "==> installing app to /opt/spark-swapper",
                              "==> rendering config: user=alice host=192.168.1.42 openclaw=/home/alice/.npm-global/bin/openclaw",
                              "==> generating a self-signed certificate (10 years)",
@@ -122,7 +122,7 @@ public sealed partial class SparkGuide
             case GuidePage.Connect:
                 _connect[0] = (StepState.Done, "Got it.");
                 _connect[1] = (StepState.Done, "https://192.168.1.42:11443 answers, with the same certificate you trusted.");
-                _connect[2] = (StepState.Done, "DSH now talks to https://192.168.1.42:11443/v1 · qwen3.8-27b-sglang");
+                _connect[2] = (StepState.Done, "Vision now talks to https://192.168.1.42:11443/v1 · qwen3.8-27b-sglang");
                 _connect[3] = (StepState.Done, "It answered:");
                 _hello = "Hello and welcome to your new DGX Spark — it's great to meet you! What shall we build first?";
                 _state.Connected = true;

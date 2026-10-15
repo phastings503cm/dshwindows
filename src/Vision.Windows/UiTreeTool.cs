@@ -180,7 +180,7 @@ public sealed class UiTreeTool : IToolExecutor
         if (work.IsFaulted)
         {
             var why = (work.Exception?.InnerException?.Message ?? "unknown error").Trim().TrimEnd('.');
-            return $"Error: could not read the accessibility tree of '{app}': {TextUtil.Prefix(why, 200)}. An app running as administrator hides its tree from a DSH that isn't.";
+            return $"Error: could not read the accessibility tree of '{app}': {TextUtil.Prefix(why, 200)}. An app running as administrator hides its tree from Vision unless Vision runs as administrator too.";
         }
         var (text, _) = work.Result;
         if (text.Length == 0)

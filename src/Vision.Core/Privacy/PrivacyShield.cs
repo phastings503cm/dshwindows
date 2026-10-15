@@ -44,7 +44,7 @@ public sealed class ShieldOptions
 public sealed record ShieldReport(string Route, IReadOnlyDictionary<SensitiveKind, int> Counts, int Unchecked = 0)
 {
     /// <summary>Said once in a chat the first time something that can't be checked goes to a model that isn't private.</summary>
-    public const string UncheckedNotice = "Pictures and files that aren't plain text are sent as they are — DSH can't check them for sensitive details.";
+    public const string UncheckedNotice = "Pictures and files that aren't plain text are sent as they are — Vision can't check them for sensitive details.";
 
     public int Total => Counts.Values.Sum();
 

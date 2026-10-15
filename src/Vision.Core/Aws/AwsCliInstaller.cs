@@ -97,7 +97,7 @@ public sealed class AwsCliInstaller
     public Func<AwsCliInstallScope, Uri> MsiUrl { get; init; } = scope => new Uri(scope == AwsCliInstallScope.AllUsers ? SystemMsiUrl : UserMsiUrl);
 
     /// <summary>Reads the downloaded file's Authenticode signature. Throwing means "couldn't check", and
-    /// DSH then refuses to install.</summary>
+    /// Vision then refuses to install.</summary>
     public Func<string, CancellationToken, Task<AuthenticodeSignature>> CheckSignature { get; init; } = PowerShellSignatureAsync;
 
     /// <summary>Runs msiexec and returns its exit code (1223 when Windows' approval prompt was declined).</summary>
@@ -120,7 +120,7 @@ public sealed class AwsCliInstaller
     public static string? PlatformProblemFor(bool isWindows, Architecture architecture, int windowsBuild)
     {
         if (!isWindows)
-            return "DSH installs the AWS CLI on Windows only. Install it with your system's package manager, or from https://aws.amazon.com/cli/.";
+            return "Vision installs the AWS CLI on Windows only. Install it with your system's package manager, or from https://aws.amazon.com/cli/.";
         if (architecture is Architecture.X86 or Architecture.Arm)
             return "The AWS CLI needs 64-bit Windows.";
         if (architecture == Architecture.Arm64 && windowsBuild < 22000)
@@ -134,7 +134,7 @@ public sealed class AwsCliInstaller
 
     /// <summary>The scope that upgrades <paramref name="current"/> in place: all users when it is in the
     /// system install folder, otherwise just this user (the per-user MSI installs beside anything
-    /// unofficial, and DSH then finds the new one).</summary>
+    /// unofficial, and Vision then finds the new one).</summary>
     public static AwsCliInstallScope ScopeFor(AwsCliStatus current, string? systemFolder = null)
     {
         var path = current switch
@@ -179,7 +179,7 @@ public sealed class AwsCliInstaller
             catch (Exception ex) when (ex is HttpRequestException or IOException or TaskCanceledException && !cancellationToken.IsCancellationRequested)
             {
                 return new(AwsCliInstallOutcome.DownloadFailed,
-                    $"DSH couldn't download the AWS CLI installer ({ex.Message}). Check your internet connection and try again.");
+                    $"Vision couldn't download the AWS CLI installer ({ex.Message}). Check your internet connection and try again.");
             }
             if (!HasMsiHeader(msi))
                 return new(AwsCliInstallOutcome.DownloadFailed,
@@ -194,11 +194,11 @@ public sealed class AwsCliInstaller
             catch (Exception ex) when (ex is not OperationCanceledException)
             {
                 return new(AwsCliInstallOutcome.SignatureRejected,
-                    $"DSH couldn't check the installer's digital signature ({ex.Message}), so it didn't install it.");
+                    $"Vision couldn't check the installer's digital signature ({ex.Message}), so it didn't install it.");
             }
             if (!IsAmazonSignature(signature, out var reason))
                 return new(AwsCliInstallOutcome.SignatureRejected,
-                    $"The downloaded installer isn't validly signed by Amazon ({reason}), so DSH didn't run it.");
+                    $"The downloaded installer isn't validly signed by Amazon ({reason}), so Vision didn't run it.");
 
             cancellationToken.ThrowIfCancellationRequested();
             var elevated = scope == AwsCliInstallScope.AllUsers;
@@ -233,7 +233,7 @@ public sealed class AwsCliInstaller
                 return outcome with { Message = message, Cli = status };
             }
             keepLog = true;
-            return new(AwsCliInstallOutcome.Failed, $"The installer finished, but DSH still can't use the AWS CLI: {status.Summary}",
+            return new(AwsCliInstallOutcome.Failed, $"The installer finished, but Vision still can't use the AWS CLI: {status.Summary}",
                 exitCode, status, ExistingLog(log));
         }
         finally
@@ -388,7 +388,7 @@ public sealed class AwsCliInstaller
     }
 
     /// <summary>The real signature check: Windows PowerShell's Get-AuthenticodeSignature. Throws when
-    /// PowerShell isn't there or doesn't answer — DSH then refuses to install rather than install unchecked.</summary>
+    /// PowerShell isn't there or doesn't answer — Vision then refuses to install rather than install unchecked.</summary>
     public static async Task<AuthenticodeSignature> PowerShellSignatureAsync(string path, CancellationToken cancellationToken)
     {
         if (!OperatingSystem.IsWindows()) throw new PlatformNotSupportedException("Checking a digital signature needs Windows.");
