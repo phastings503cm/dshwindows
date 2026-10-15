@@ -268,7 +268,7 @@ def need(t):
     lap, (sx, sy, sw, sh) = laptop(t, 356, 90, 104)
     body = lap + rect(sx + 8, sy + 8, sw - 16, 8, t["accent_soft"], rx=3) + rect(sx + 8, sy + 22, sw * .55, 5, t["surface3"], rx=2.5) + rect(sx + 8, sy + 31, sw * .7, 5, t["surface3"], rx=2.5)
     out += body + circle(sx + sw - 13, sy + sh - 12, 7, "url(#brand)")
-    out += caption(t, 408, 196, "This PC with DSH", "on the same network")
+    out += caption(t, 408, 196, "This PC with Vision", "on the same network")
     # optional
     out += card(t, 488, 70, 100, 184, rx=12)
     out += text(538, 90, "ONLY TO", 8.5, 700, t["muted"], "middle", spacing=.8)
@@ -456,7 +456,7 @@ def download(t):
     out += path(f"M{fx + 52},{fy + 32} V{fy + 60} M{fx + 42},{fy + 51} L{fx + 52},{fy + 61} L{fx + 62},{fy + 51}", stroke="#92400e", sw=3.2)
     out += text(fx + 52, fy + 102, "Downloads", 11, 700, t["ink"], "middle")
     out += text(30, 38, "Download the recovery file", 17, 700, t["ink"])
-    out += text(30, 56, "From NVIDIA's website, then tell DSH where you saved it.", 11, 500, t["muted"])
+    out += text(30, 56, "From NVIDIA's website, then tell Vision where you saved it.", 11, 500, t["muted"])
     return out
 
 
@@ -476,7 +476,7 @@ def usb_writer(t):
     out += text(456, 245, "label BOOTME", 10, 600, t["muted"], family=MONO)
     out += check(470, 120, 16, t["ok"]) + text(494, 116, "Checked", 11, 700, t["ink"]) + text(494, 131, "before erasing", 10, 500, t["muted"])
     out += text(30, 38, "Make the recovery stick", 17, 700, t["ink"])
-    out += text(30, 56, "DSH erases the stick and copies NVIDIA's files onto it — one click.", 11, 500, t["muted"])
+    out += text(30, 56, "Vision erases the stick and copies NVIDIA's files onto it — one click.", 11, 500, t["muted"])
     return out
 
 
@@ -526,7 +526,7 @@ def scanner(t):
     out += text(rx0, 228, "Scanning 192.168.1.1 – 254 …", 9.5, 600, t["muted"])
     out += rect(rx0, 236, 250, 5, t["surface3"], rx=2.5) + rect(rx0, 236, 170, 5, "url(#brandH)", rx=2.5)
     out += text(30, 38, "Finding your Spark", 17, 700, t["ink"])
-    out += text(30, 56, "DSH looks around your network — no IP addresses to type.", 11, 500, t["muted"])
+    out += text(30, 56, "Vision looks around your network — no IP addresses to type.", 11, 500, t["muted"])
     return out
 
 
@@ -539,7 +539,7 @@ def terminal(t):
     lines = [
         ("#4ade80", "==> git 2.43.0 present."),
         ("#4ade80", "==> Cloning DGX-Spark-Swapper …"),
-        ("#94a3b8", "[sudo] password for alice: (answered by DSH)"),
+        ("#94a3b8", "[sudo] password for alice: (answered by Vision)"),
         ("#e2e8f0", "==> installing app to /opt/spark-swapper"),
         ("#e2e8f0", "==> generating a self-signed certificate"),
         ("#4ade80", "Spark Swapper is up: https://192.168.1.42:8999"),
@@ -558,7 +558,7 @@ def terminal(t):
     out += text(kx + 14, ky + 78, "…Hs8fYt3mWq0", 9.5, 600, t["ink"], family=MONO)
     out += check(kx + 24, ky + 100, 8, t["ok"]) + text(kx + 38, ky + 104, "Remembered", 9.5, 700, t["ok"])
     out += text(30, 38, "Install Spark Swapper", 17, 700, t["ink"])
-    out += text(30, 56, "DSH signs in to the Spark and runs the installer for you.", 11, 500, t["muted"])
+    out += text(30, 56, "Vision signs in to the Spark and runs the installer for you.", 11, 500, t["muted"])
     return out
 
 
@@ -617,7 +617,7 @@ def vision_connected(t):
     out += f'<path d="M{x},{y + 12} A12,12 0 0 1 {x + 12},{y} H{x + 110} V{y + h} H{x + 12} A12,12 0 0 1 {x},{y + h - 12} Z" fill="{t["surface2"]}"/>'
     # logo mark
     out += rect(x + 12, y + 12, 18, 18, "url(#brand)", rx=5) + circle(x + 21, y + 20, 5, "none", stroke="#ffffff", sw=2)
-    out += text(x + 36, y + 25, "DSH", 11, 700, t["ink"])
+    out += text(x + 36, y + 25, "Vision", 11, 700, t["ink"])
     for i, s in enumerate(["New chat", "Fix stock bug", "Spark setup"]):
         out += rect(x + 10, y + 42 + i * 22, 90, 17, t["accent_soft"] if i == 0 else "none", rx=4)
         out += text(x + 16, y + 54 + i * 22, s, 9, 600 if i == 0 else 500, t["ink"])
@@ -636,7 +636,7 @@ def vision_connected(t):
     out += check(560, 110, 11, t["ok"])
     out += path("M444,164 C458,164 462,150 474,150", stroke=t["ok"], sw=2.4, dash="3 4")
     out += lock(524, 214, .9, t["ok"]) + text(534, 218, "pinned", 9.5, 700, t["ok"])
-    out += text(30, 38, "DSH is connected", 17, 700, t["ink"])
+    out += text(30, 38, "Vision is connected", 17, 700, t["ink"])
     out += text(30, 56, "Chats now run on your Spark — privately, on your own network.", 11, 500, t["muted"])
     return out
 
@@ -659,7 +659,7 @@ def done(t):
         out += card(t, px - w / 2, 218, w, 26, rx=13)
         out += text(px, 235, label, 9.5, 600, t["ink"], "middle")
     out += text(300, 38, "You're all set", 18, 700, t["ink"], "middle")
-    out += text(300, 56, "Your Spark, Spark Swapper and DSH are working together.", 11, 500, t["muted"], "middle")
+    out += text(300, 56, "Your Spark, Spark Swapper and Vision are working together.", 11, 500, t["muted"], "middle")
     return out
 
 

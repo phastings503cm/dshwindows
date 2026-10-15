@@ -51,12 +51,12 @@ def terminal_window(t, x, y, w, h, lines, title="Windows Terminal"):
 
 def bedrock_welcome(t):
     out = ""
-    # DSH on a laptop, left
+    # Vision on a laptop, left
     inner = rect(52, 116, 150, 12, t["accent_soft"], rx=3) + rect(52, 134, 110, 8, t["surface3"], rx=3)
     inner += rect(52, 148, 128, 8, t["surface3"], rx=3) + rect(52, 162, 92, 8, t["surface3"], rx=3)
     lap, _ = laptop(t, 40, 104, 176, inner)
     out += lap
-    out += text(128, 250, "DSH on this PC", 11, 700, t["ink"], "middle")
+    out += text(128, 250, "Vision on this PC", 11, 700, t["ink"], "middle")
     # the connection
     out += path("M226,150 C262,150 270,128 306,128", stroke=t["accent"], sw=2.4, dash="4 5")
     out += lock(266, 156, .9, t["ok"]) + text(278, 160, "signed in", 9, 700, t["ok"])
@@ -68,7 +68,7 @@ def bedrock_welcome(t):
     out += chip(t, 370, 148, "Mistral", "muted") + chip(t, 428, 148, "DeepSeek", "muted") + chip(t, 494, 148, "Qwen", "muted")
     out += caption(t, 440, 222, "Pay-as-you-go models", "billed to your AWS account")
     out += text(30, 38, "Use models from Amazon Bedrock", 17, 700, t["ink"])
-    out += text(30, 56, "Sign in with your AWS account in the browser — DSH sets up everything else.", 11, 500, t["muted"])
+    out += text(30, 56, "Sign in with your AWS account in the browser — Vision sets up everything else.", 11, 500, t["muted"])
     return out
 
 
@@ -80,7 +80,7 @@ def aws_cli_install(t):
     out += rect(x, y, w, 26, t["surface2"], rx=10) + rect(x, y + 16, w, 10, t["surface2"])
     out += text(x + 12, y + 17, "AWS Command Line Interface v2 Setup", 9.5, 600, t["ink"])
     out += text(x + 18, y + 52, "Installing the AWS CLI", 13, 700, t["ink"])
-    out += text(x + 18, y + 68, "DSH uses it to sign you in and talk to your account.", 9.5, 500, t["muted"])
+    out += text(x + 18, y + 68, "Vision uses it to sign you in and talk to your account.", 9.5, 500, t["muted"])
     out += rect(x + 18, y + 86, w - 36, 10, t["surface3"], rx=5) + rect(x + 18, y + 86, (w - 36) * .68, 10, "url(#brandH)", rx=5)
     out += text(x + 18, y + 112, "Copying files…", 9.5, 500, t["muted"])
     out += rect(x + w - 92, y + h - 36, 74, 22, t["surface"], rx=5, stroke=t["stroke"]) + text(x + w - 55, y + h - 21, "Cancel", 9.5, 600, t["muted"], "middle")
@@ -94,7 +94,7 @@ def aws_cli_install(t):
     for i, s in enumerate(["Downloaded from Amazon", "Signature checked", "Installed"]):
         out += check(412, 194 + i * 20, 7, t["ok"]) + text(425, 197.5 + i * 20, s, 9.5, 600, t["ink"])
     out += text(30, 38, "One tool first: the AWS CLI", 17, 700, t["ink"])
-    out += text(30, 56, "DSH downloads Amazon's official installer, checks its signature and runs it.", 11, 500, t["muted"])
+    out += text(30, 56, "Vision downloads Amazon's official installer, checks its signature and runs it.", 11, 500, t["muted"])
     return out
 
 
@@ -114,13 +114,13 @@ def aws_signin(t):
         ("> aws login", "#e2e8f0"),
         ("Opening your browser…", "#94a3b8"),
         ("Waiting for sign-in…", "#94a3b8"),
-        ("Updated profile dsh-bedrock", "#4ade80"),
-    ], "AWS CLI (DSH runs it)")
+        ("Updated profile vision-bedrock", "#4ade80"),
+    ], "AWS CLI (Vision runs it)")
     out += check(566, 208, 10, t["ok"])
     out += text(386, 214, "Signed in to AWS", 11, 700, t["ink"])
     out += text(386, 229, "no keys to copy or paste", 9.5, 500, t["muted"])
     out += text(30, 38, "Sign in with your browser", 17, 700, t["ink"])
-    out += text(30, 56, "The same sign-in as the AWS website. DSH never sees your password.", 11, 500, t["muted"])
+    out += text(30, 56, "The same sign-in as the AWS website. Vision never sees your password.", 11, 500, t["muted"])
     return out
 
 
@@ -144,11 +144,11 @@ def bedrock_models(t):
         out += text(x + 44, ry + 13, name, 10.5, 700, t["ink"]) + text(x + 44, ry + 25, maker, 8.5, 500, t["muted"])
         out += chip(t, x + w - 128, ry + 6, status, tone)
     out += card(t, 440, 92, 136, 128, rx=12)
-    out += text(508, 114, "DSH checks", 11.5, 700, t["ink"], "middle")
+    out += text(508, 114, "Vision checks", 11.5, 700, t["ink"], "middle")
     for i, s in enumerate(["Is it in this Region?", "Terms accepted?", "Form on file?", "You're allowed?"]):
         out += check(456, 132 + i * 21, 6.5, t["ok"]) + text(468, 135.5 + i * 21, s, 8.8, 600, t["ink"])
     out += text(30, 38, "Pick a model", 17, 700, t["ink"])
-    out += text(30, 56, "DSH shows what each one needs before you can use it — and does it for you.", 11, 500, t["muted"])
+    out += text(30, 56, "Vision shows what each one needs before you can use it — and does it for you.", 11, 500, t["muted"])
     return out
 
 
@@ -202,7 +202,7 @@ def bedrock_connected(t):
     out += card(t, x, y, w, h, rx=12)
     out += f'<path d="M{x},{y + 12} A12,12 0 0 1 {x + 12},{y} H{x + 110} V{y + h} H{x + 12} A12,12 0 0 1 {x},{y + h - 12} Z" fill="{t["surface2"]}"/>'
     out += rect(x + 12, y + 12, 18, 18, "url(#brand)", rx=5) + circle(x + 21, y + 20, 5, "none", stroke="#ffffff", sw=2)
-    out += text(x + 36, y + 25, "DSH", 11, 700, t["ink"])
+    out += text(x + 36, y + 25, "Vision", 11, 700, t["ink"])
     for i, s in enumerate(["New chat", "Refactor API", "Write tests"]):
         out += rect(x + 10, y + 42 + i * 22, 90, 17, t["accent_soft"] if i == 0 else "none", rx=4)
         out += text(x + 16, y + 54 + i * 22, s, 9, 600 if i == 0 else 500, t["ink"])
@@ -222,7 +222,7 @@ def bedrock_connected(t):
     out += check(560, 116, 10, t["ok"])
     out += path("M444,158 C452,158 454,156 460,156", stroke=t["ok"], sw=2.4, dash="3 4")
     out += lock(488, 196, .8, t["ok"]) + text(498, 200, "stays signed in", 9, 700, t["ok"])
-    out += text(30, 38, "DSH is connected", 17, 700, t["ink"])
+    out += text(30, 38, "Vision is connected", 17, 700, t["ink"])
     out += text(30, 56, "Chats run on Bedrock in your AWS account. Pay only for what you use.", 11, 500, t["muted"])
     return out
 
