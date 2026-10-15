@@ -75,13 +75,13 @@ jobs:
           Write-Host "DSH $version"
 
       - name: Test
-        run: dotnet test tests/Dsh.Core.Tests -c Release --logger "console;verbosity=minimal"
+        run: dotnet test tests/Vision.Core.Tests -c Release --logger "console;verbosity=minimal"
 
       - name: App tests
-        run: dotnet test tests/Dsh.App.Tests -c Release --logger "console;verbosity=minimal"
+        run: dotnet test tests/Vision.App.Tests -c Release --logger "console;verbosity=minimal"
 
       - name: Machine tool tests
-        run: dotnet test tests/Dsh.Windows.Tests -c Release --logger "console;verbosity=minimal"
+        run: dotnet test tests/Vision.Windows.Tests -c Release --logger "console;verbosity=minimal"
 
       - name: Install Inno Setup
         shell: pwsh
@@ -98,7 +98,7 @@ jobs:
 
       - name: UI self-test (smoke test of the packaged app)
         shell: pwsh
-        run: ./scripts/self-test.ps1 -Exe artifacts/publish/win-x64/DSH/DSH.exe -Output "$env:RUNNER_TEMP/selftest"
+        run: ./scripts/self-test.ps1 -Exe artifacts/publish/win-x64/DSH/Vision.exe -Output "$env:RUNNER_TEMP/selftest"
 
       - name: "Installer test: silent install, launch, uninstall"
         shell: pwsh
@@ -134,7 +134,7 @@ jobs:
             "| **Windows x64** (most PCs) | [DSH-$env:VERSION-win-x64-setup.exe]($base/DSH-$env:VERSION-win-x64-setup.exe) | [DSH-$env:VERSION-win-x64-portable.zip]($base/DSH-$env:VERSION-win-x64-portable.zip) |"
             "| **Windows on ARM** (Snapdragon, Surface Pro X) | [DSH-$env:VERSION-win-arm64-setup.exe]($base/DSH-$env:VERSION-win-arm64-setup.exe) | [DSH-$env:VERSION-win-arm64-portable.zip]($base/DSH-$env:VERSION-win-arm64-portable.zip) |"
             ""
-            "The installer needs no administrator rights (it installs for your user) and adds DSH to the Start menu and, optionally, to the folder right-click menu. The portable zip runs from anywhere: unzip and start ``DSH\DSH.exe``."
+            "The installer needs no administrator rights (it installs for your user) and adds DSH to the Start menu and, optionally, to the folder right-click menu. The portable zip runs from anywhere: unzip and start ``DSH\Vision.exe``."
             ""
             "Windows 10 (1809 or later) or Windows 11. Builds are self-contained: no .NET install needed. They are not code-signed yet, so SmartScreen may say *Windows protected your PC* — choose **More info → Run anyway**. Checksums are in ``SHA256SUMS.txt``."
             ""

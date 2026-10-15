@@ -18,7 +18,7 @@ This is a Windows port of [DSH for macOS](https://github.com/gnubyte/deepharness
 match the macOS app; the shell, terminal, paths, secrets and installer are Windows-native.
 
 ```
-you → Dsh.Core.Engine → OpenAI-compatible /chat/completions → tool calls → files & shell → you
+you → Vision.Core.Engine → OpenAI-compatible /chat/completions → tool calls → files & shell → you
 ```
 
 ## Download
@@ -34,8 +34,8 @@ Every push to the default branch builds, tests and publishes a release. Get the 
 - **Installer** — no administrator rights needed (installs for your user under
   `%LOCALAPPDATA%\Programs\DSH`), adds a Start menu entry, and optionally **Open with DSH** on the
   folder right-click menu. Uninstall from *Settings › Apps*; your chats and settings stay.
-- **Portable** — unzip anywhere and run `DSH\DSH.exe`. Put an empty file named `portable` next to
-  `DSH.exe` to keep settings and chats in a `data` folder beside it instead of `%APPDATA%\DSH`.
+- **Portable** — unzip anywhere and run `DSH\Vision.exe`. Put an empty file named `portable` next to
+  `Vision.exe` to keep settings and chats in a `data` folder beside it instead of `%APPDATA%\DSH`.
 
 Requires Windows 10 1809 or later, or Windows 11. Builds are self-contained (no .NET install
 needed). They aren't code-signed yet, so SmartScreen may show *Windows protected your PC* — choose
@@ -119,7 +119,7 @@ closed at any point and picks up where you left off.
    network for the Spark to come back. *Start fresh* makes NVIDIA's recovery USB stick for you: pick
    the recovery archive you downloaded from NVIDIA (`.tar.gz`, `.zip` or an unpacked folder) and a USB
    stick; DSH checks the files fit FAT32, asks Windows for permission (a small elevated helper,
-   `DSH.exe --write-recovery-usb`, does the erasing — only USB disks between 8 and 256 GB that don't
+   `Vision.exe --write-recovery-usb`, does the erasing — only USB disks between 8 and 256 GB that don't
    hold Windows are offered, and the disk is re-checked right before it is wiped), writes the
    known-good layout (MBR, one active FAT32 partition ≤ 31 GB labelled `BOOTME`,
    `EFI\BOOT\recovery.txt`) and shows how to boot from it.
@@ -149,7 +149,7 @@ Later: manage the Spark at `https://<spark>:8999` or in Settings › Model serve
 update*); reset a forgotten Swapper login on the Spark with `sudo spark-swapper-reset-login`. Spark
 Swapper logs: `journalctl -u spark-swapper -f` on the Spark.
 
-The guide's pictures are drawn by `src/Dsh.App/Assets/Guide/make_art.py`; the Spark Swapper
+The guide's pictures are drawn by `src/Vision.App/Assets/Guide/make_art.py`; the Spark Swapper
 screenshots in them are from its repository (MIT, see `SWAPPER-SCREENSHOTS-LICENSE.txt` there).
 
 ## AI Models: primary, subagents and backups
@@ -614,11 +614,11 @@ Needs the [.NET 10 SDK](https://dotnet.microsoft.com/download). The app builds o
 library and its tests also build and run on Linux and macOS.
 
 ```powershell
-dotnet build DSH.sln
-dotnet test tests/Dsh.Core.Tests
-dotnet test tests/Dsh.App.Tests       # Windows: task lists, /goal, background agents, vault
-dotnet test tests/Dsh.Windows.Tests   # Windows: screenshots, windows, mouse and keyboard
-dotnet run --project src/Dsh.App
+dotnet build Vision.sln
+dotnet test tests/Vision.Core.Tests
+dotnet test tests/Vision.App.Tests       # Windows: task lists, /goal, background agents, vault
+dotnet test tests/Vision.Windows.Tests   # Windows: screenshots, windows, mouse and keyboard
+dotnet run --project src/Vision.App
 ```
 
 To produce the release files locally (installers need [Inno Setup](https://jrsoftware.org/isinfo.php) 6.3 or later;
@@ -629,20 +629,20 @@ To produce the release files locally (installers need [Inno Setup](https://jrsof
 ./scripts/package.ps1 -Arch x64 -SkipInstaller # just a portable x64 build
 ```
 
-`DSH.exe --self-test <folder> [--theme light|dark]` renders every main view and window to PNGs using
+`Vision.exe --self-test <folder> [--theme light|dark]` renders every main view and window to PNGs using
 a throwaway data folder and a demo project, and exits non-zero on any error. CI runs it on Windows.
 
 ### Layout
 
 | Path | What |
 |---|---|
-| `src/Dsh.Core` | The harness: OpenAI-compatible client, engine, tools, permissions, compaction, skills, plugins, importing from Claude Code, Cursor and OpenClaw, long-term memory, the subagent fleet, VT emulator, ConPTY, conversation log |
-| `src/Dsh.App` | The WPF app |
-| `src/Dsh.Windows` | The computer-use tools (screen capture, UI Automation, input) |
-| `tests/Dsh.Core.Tests` | xUnit tests (Windows-only ones are skipped elsewhere) |
-| `tests/Dsh.App.Tests` | The app host against a fake model server: task lists, /goal, background agents, vault |
-| `tests/Dsh.Windows.Tests` | The computer-use tools against real windows |
-| `installer/DSH.iss` | Inno Setup script |
+| `src/Vision.Core` | The harness: OpenAI-compatible client, engine, tools, permissions, compaction, skills, plugins, importing from Claude Code, Cursor and OpenClaw, long-term memory, the subagent fleet, VT emulator, ConPTY, conversation log |
+| `src/Vision.App` | The WPF app |
+| `src/Vision.Windows` | The computer-use tools (screen capture, UI Automation, input) |
+| `tests/Vision.Core.Tests` | xUnit tests (Windows-only ones are skipped elsewhere) |
+| `tests/Vision.App.Tests` | The app host against a fake model server: task lists, /goal, background agents, vault |
+| `tests/Vision.Windows.Tests` | The computer-use tools against real windows |
+| `installer/Vision.iss` | Inno Setup script |
 | `scripts/` | Packaging, self-test and installer-test scripts used by CI |
 | `.github/workflows` | `ci.yml` (pull requests and branches), `release.yml` (default branch → GitHub release) |
 

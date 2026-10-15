@@ -1,0 +1,30 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- The harness: LLM client, agent loop, tools, permissions, skills,
+       terminal emulation. No UI dependency, so it is testable headlessly on
+       any OS; Windows-only services (ConPTY, Credential Manager) are guarded
+       at runtime. -->
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <RootNamespace>Vision.Core</RootNamespace>
+    <AssemblyName>Vision.Core</AssemblyName>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- DPAPI for the credential vault's values file. The package builds on
+         every OS; the API throws PlatformNotSupportedException off Windows. -->
+    <PackageReference Include="System.Security.Cryptography.ProtectedData" Version="10.0.12" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="Vision.Core.Tests" />
+    <InternalsVisibleTo Include="Vision" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- SSH to a DGX Spark: the setup guide installs Spark Swapper over it. -->
+    <PackageReference Include="SSH.NET" Version="2026.0.0" />
+  </ItemGroup>
+
+</Project>

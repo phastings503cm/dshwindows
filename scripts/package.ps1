@@ -47,12 +47,12 @@ Add-Type -AssemblyName System.IO.Compression.FileSystem
 
 foreach ($a in $Arch) {
     $rid = "win-$a"
-    # Publish into a folder named DSH so the portable zip unpacks to DSH\DSH.exe.
+    # Publish into a folder named DSH so the portable zip unpacks to DSH\Vision.exe.
     $publish = [System.IO.Path]::Combine($out, 'publish', $rid, 'DSH')
     if (Test-Path $publish) { Remove-Item -Recurse -Force $publish }
 
     $readyToRun = if ($SkipReadyToRun) { 'false' } else { 'true' }
-    dotnet publish ([System.IO.Path]::Combine($root, 'src', 'Dsh.App', 'Dsh.App.csproj')) -c Release -r $rid --self-contained true `
+    dotnet publish ([System.IO.Path]::Combine($root, 'src', 'Vision.App', 'Vision.App.csproj')) -c Release -r $rid --self-contained true `
         "-p:Version=$Version" "-p:PublishReadyToRun=$readyToRun" -p:DebugType=none -p:DebugSymbols=false -o $publish
     if ($LASTEXITCODE -ne 0) { throw "dotnet publish failed for $rid" }
 
@@ -62,7 +62,7 @@ foreach ($a in $Arch) {
     Write-Host "  $zip"
 
     if (-not $SkipInstaller) {
-        & $iscc /Q "/DAppVersion=$Version" "/DArch=$a" "/DSourceDir=$publish" "/DOutputDir=$out" ([System.IO.Path]::Combine($root, 'installer', 'DSH.iss'))
+        & $iscc /Q "/DAppVersion=$Version" "/DArch=$a" "/DSourceDir=$publish" "/DOutputDir=$out" ([System.IO.Path]::Combine($root, 'installer', 'Vision.iss'))
         if ($LASTEXITCODE -ne 0) { throw "Inno Setup failed for $rid" }
         Write-Host "  $(Join-Path $out "DSH-$Version-$rid-setup.exe")"
     }

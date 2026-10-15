@@ -1,6 +1,6 @@
 <#
 .SYNOPSIS
-    Runs DSH's built-in UI self-test (DSH.exe --self-test) and fails when it reports a problem.
+    Runs the built-in UI self-test (Vision.exe --self-test) and fails when it reports a problem.
 
 .DESCRIPTION
     The self-test starts DSH against a throwaway data folder and a demo project, fills a chat with

@@ -37,8 +37,8 @@ $process = Start-Process -FilePath $installerPath -PassThru -Wait -ArgumentList 
     '/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', '/CURRENTUSER', '/TASKS=contextmenu', "/LOG=`"$log`"")
 if ($process.ExitCode -ne 0) { throw "The installer exited with code $($process.ExitCode) (see $log)." }
 
-$exe = Join-Path $installDir 'DSH.exe'
-if (-not (Test-Path $exe)) { throw "DSH.exe was not installed to $installDir." }
+$exe = Join-Path $installDir 'Vision.exe'
+if (-not (Test-Path $exe)) { throw "Vision.exe was not installed to $installDir." }
 if (-not (Test-Path $uninstallKey)) { throw 'The uninstall entry is missing from Settings > Apps.' }
 $entry = Get-ItemProperty $uninstallKey
 Write-Host "  Installed $($entry.DisplayName) $($entry.DisplayVersion) to $installDir"
@@ -60,7 +60,7 @@ $process = Start-Process -FilePath $uninstaller -PassThru -Wait -ArgumentList @(
     '/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', "/LOG=`"$(Join-Path $Output 'uninstall.log')`"")
 if ($process.ExitCode -ne 0) { throw "The uninstaller exited with code $($process.ExitCode)." }
 # The uninstaller hands off to a copy of itself in %TEMP%, so wait for the files to go.
-Wait-Until { -not (Test-Path $exe) } 120 'DSH.exe to be removed'
+Wait-Until { -not (Test-Path $exe) } 120 'Vision.exe to be removed'
 Wait-Until { -not (Test-Path $uninstallKey) } 60 'the uninstall entry to be removed'
 foreach ($key in $menuKeys) {
     if (Test-Path $key) { throw "Uninstall left the folder menu entry $key behind." }
