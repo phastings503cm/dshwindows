@@ -3,7 +3,7 @@ namespace Vision.Core.Tests;
 /// <summary>New: the per-session JSON store, always pointed at a scratch folder.</summary>
 public sealed class ConversationLogTests : IDisposable
 {
-    private readonly TempDirectory _dir = new("dsh-log");
+    private readonly TempDirectory _dir = new("vision-log");
 
     public void Dispose() => _dir.Dispose();
 

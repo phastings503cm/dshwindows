@@ -1,25 +1,25 @@
 namespace Vision.Core.Tests;
 
-/// <summary>Chats without a project: the prompt they get and their scratch folders (under a DSH_HOME of their own).</summary>
+/// <summary>Chats without a project: the prompt they get and their scratch folders (under a VISION_HOME of their own).</summary>
 [Collection(SerialStaticState.Name)]
 public sealed class PlainChatTests : IDisposable
 {
     private const string Coding = "You are a capable coding agent…";
-    private readonly TempDirectory _home = new("dsh-plain-home");
-    private readonly string? _previous = Environment.GetEnvironmentVariable("DSH_HOME");
+    private readonly TempDirectory _home = new("vision-plain-home");
+    private readonly string? _previous = Environment.GetEnvironmentVariable("VISION_HOME");
 
-    public PlainChatTests() => Environment.SetEnvironmentVariable("DSH_HOME", _home.Path);
+    public PlainChatTests() => Environment.SetEnvironmentVariable("VISION_HOME", _home.Path);
 
     public void Dispose()
     {
-        Environment.SetEnvironmentVariable("DSH_HOME", _previous);
+        Environment.SetEnvironmentVariable("VISION_HOME", _previous);
         _home.Dispose();
     }
 
     [Fact]
     public void AChatWithoutAProjectGetsTheRegularConversationPrompt()
     {
-        var scratch = Path.Combine("C:", "Users", "pat", "AppData", "Roaming", "DSH", "Chats", "abc");
+        var scratch = Path.Combine("C:", "Users", "pat", "AppData", "Roaming", "Vision", "Chats", "abc");
         var prompt = PlainChat.BasePrompt(null, scratch, Coding);
         Assert.StartsWith("You are DSH, a helpful assistant in a native Windows app. This is a regular conversation: no project folder is open and none is needed — never ask the user to open one.", prompt);
         Assert.Contains($"work in this chat's own scratch folder, {scratch}; it belongs to this chat and starts empty.", prompt);
@@ -45,6 +45,24 @@ public sealed class PlainChatTests : IDisposable
         Assert.False(PlainChat.IsScratch(Path.Combine(Path.GetTempPath(), "Chats", "1234")));
         Assert.False(PlainChat.IsScratch(null));
         Assert.False(PlainChat.IsScratch(@"C:\code\inventory"));
+    }
+
+    [Fact]
+    public void AScratchFolderRecordedUnderDshsOldFolderIsStillAChatWithoutAProject()
+    {
+        // Legacy: DSH (Vision's former name) kept scratch folders in %APPDATA%\DSH\Chats. A chat recorded there must not
+        // turn into a "project" chat pointing at a folder that has moved; it works in the same folder under Vision's.
+        var legacy = Path.Combine(AppPaths.LegacyDefaultRoot, "Chats", "1234");
+        Assert.Equal(Path.Combine(AppPaths.LegacyDefaultRoot, "Chats"), PlainChat.LegacyRoot);
+        Assert.True(PlainChat.IsScratch(legacy));
+        Assert.True(PlainChat.IsScratch(Path.Combine(legacy, "notes")));
+        Assert.False(PlainChat.IsScratch(PlainChat.LegacyRoot)); // the root itself is no chat's
+        Assert.False(PlainChat.IsScratch(Path.Combine(AppPaths.LegacyDefaultRoot, "skills", "Chats")));
+
+        Assert.Equal(PlainChat.Folder("1234"), PlainChat.InCurrentRoot(legacy));
+        Assert.Equal(Path.Combine(PlainChat.Folder("1234"), "notes"), PlainChat.InCurrentRoot(Path.Combine(legacy, "notes")));
+        Assert.Equal(PlainChat.Folder("1234"), PlainChat.InCurrentRoot(PlainChat.Folder("1234")));
+        Assert.Equal(@"C:\code\inventory", PlainChat.InCurrentRoot(@"C:\code\inventory"));
     }
 
     [Fact]

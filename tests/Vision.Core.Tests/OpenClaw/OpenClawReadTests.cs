@@ -154,7 +154,7 @@ public sealed class OpenClawScannerTests : IDisposable
     [Fact]
     public async Task NothingFoundIsAnEmptyList()
     {
-        using var empty = new TempDirectory("dsh-nothing");
+        using var empty = new TempDirectory("vision-nothing");
         Assert.Empty(await OpenClawScanner.FindAsync(new LocalFileSource(empty.Path, new Dictionary<string, string>())));
     }
 

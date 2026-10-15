@@ -3,7 +3,7 @@ namespace Vision.Core.Tests;
 /// <summary>Runs a tool directly (no engine) against a scratch workspace.</summary>
 public sealed class ToolTestContext : IDisposable
 {
-    public TempDirectory Root { get; } = new("dsh-tools");
+    public TempDirectory Root { get; } = new("vision-tools");
 
     public ToolContext Context { get; }
 

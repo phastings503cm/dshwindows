@@ -10,7 +10,7 @@ namespace Vision.App.Tests;
 /// /goal, background agents and the vault, end to end through AgentHost against a fake model server.</summary>
 public sealed class QueueRunnerTests : IDisposable
 {
-    private readonly string _dir = Path.Combine(Path.GetTempPath(), $"dsh-queue-{Guid.NewGuid():N}");
+    private readonly string _dir = Path.Combine(Path.GetTempPath(), $"vision-queue-{Guid.NewGuid():N}");
     private readonly FakeModelServer _server = new();
 
     public QueueRunnerTests()

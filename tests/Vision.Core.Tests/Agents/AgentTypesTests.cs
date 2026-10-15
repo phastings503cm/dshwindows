@@ -2,7 +2,7 @@ namespace Vision.Core.Tests;
 
 public sealed class AgentTypesTests : IDisposable
 {
-    private readonly TempDirectory _root = new("dsh-agents");
+    private readonly TempDirectory _root = new("vision-agents");
 
     public void Dispose() => _root.Dispose();
 
@@ -154,9 +154,9 @@ public sealed class AgentTypesTests : IDisposable
         Directory.CreateDirectory(user);
         File.WriteAllText(Path.Combine(user, "explore.md"), "---\nname: explore\ndescription: My own explorer\n---\nBe thorough.");
         File.WriteAllText(Path.Combine(user, "helper.md"), "---\ndescription: User helper\n---\nHelp.");
-        Write("proj/.dsh/agents/helper.md", "---\ndescription: Project helper\n---\nHelp in this project.");
+        Write("proj/.vision/agents/helper.md", "---\ndescription: Project helper\n---\nHelp in this project.");
         Write("proj/.claude/agents/docs.md", "---\ndescription: Writes docs\ntools: Read, Write\n---\nWrite docs.");
-        Write("proj/.dsh/agents/broken.md", "---\n---\n");
+        Write("proj/.vision/agents/broken.md", "---\n---\n");
 
         var catalog = AgentCatalog.Load(Path.Combine(_root.Path, "proj"), [user]);
         Assert.Equal("My own explorer", catalog.Find("explore")!.Description);
@@ -168,6 +168,26 @@ public sealed class AgentTypesTests : IDisposable
         // Built-ins come first, in their usual order; the rest follow alphabetically.
         Assert.Equal(["general", "explore", "plan", "review", "worker"], catalog.All.Take(5).Select(a => a.Name));
         Assert.Equal(["docs", "helper"], catalog.All.Skip(5).Select(a => a.Name));
+    }
+
+    [Fact]
+    public void AgentsInALegacyDshFolderStillLoadAndTheVisionFolderWins()
+    {
+        // Legacy: a project set up for DSH (Vision's former name) keeps its agents in .dsh\agents.
+        Write("proj/.dsh/agents/old.md", "---\ndescription: From .dsh\n---\nOld.");
+        Write("proj/.dsh/agents/both.md", "---\ndescription: From .dsh\n---\nOld.");
+        Write("proj/.vision/agents/both.md", "---\ndescription: From .vision\n---\nNew.");
+        Write("proj/.claude/agents/both.md", "---\ndescription: From .claude\n---\nClaude.");
+
+        var project = Path.Combine(_root.Path, "proj");
+        var catalog = AgentCatalog.Load(project, []);
+
+        Assert.Equal("From .dsh", catalog.Find("old")!.Description);
+        Assert.Equal("From .vision", catalog.Find("both")!.Description);
+        // A file added to either folder changes the stamp, so it's picked up while the app runs.
+        var stamp = AgentCatalog.Stamp(project, []);
+        Write("proj/.dsh/agents/later.md", "---\ndescription: Later\n---\nLater.");
+        Assert.NotEqual(stamp, AgentCatalog.Stamp(project, []));
     }
 
     [Fact]

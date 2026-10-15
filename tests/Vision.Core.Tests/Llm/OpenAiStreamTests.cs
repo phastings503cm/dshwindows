@@ -127,7 +127,7 @@ public sealed class OpenAiStreamTests
                 _ => Reply(Sse("back online")),
             };
         });
-        using var root = new TempDirectory("dsh-stream");
+        using var root = new TempDirectory("vision-stream");
         var engine = new Engine(Client(handler), new ToolRegistry([]), "s",
             new EngineConfig("m") { Retry = new RetryPolicy { Delay = _ => TimeSpan.Zero } },
             root.Path, new PermissionPolicy(PermissionPreset.FullAccess, root.Path), Gates.Allow);
@@ -186,7 +186,7 @@ public sealed class OpenAiStreamTests
     public void EveryToolSpecParametersAreJsonObjects()
     {
         // SGLang (Pydantic) rejects anything else: five 0.8.0 specs once shipped corrupted.
-        using var dir = new TempDirectory("dsh-specs");
+        using var dir = new TempDirectory("vision-specs");
         var registry = ToolRegistry.Standard().Adding(ToolRegistry.BackgroundAgentTools())
             .Adding([new QueueAddTool((_, _, _, _) => Task.FromResult("")), new VaultSearchTool(new CredentialVault(dir.Path, new MemoryBlobStore()))]);
         foreach (var spec in registry.Specs)

@@ -44,10 +44,15 @@ public static class ShellIntegration
         catch (Exception) { }
     }
 
-    private const string FolderMenuKey = @"Software\Classes\Directory\shell\DSH";
-    private const string BackgroundMenuKey = @"Software\Classes\Directory\Background\shell\DSH";
+    private const string FolderMenuKey = @"Software\Classes\Directory\shell\Vision";
+    private const string BackgroundMenuKey = @"Software\Classes\Directory\Background\shell\Vision";
 
-    /// <summary>Whether "Open with DSH" is on the folder right-click menu (per user, no admin rights).</summary>
+    /// <summary>Legacy: the keys of DSH's (Vision's former name) "Open with DSH". Removed whenever the menu is set, so
+    /// Explorer never shows a stale entry pointing at DSH.exe next to "Open with Vision".</summary>
+    private const string LegacyFolderMenuKey = @"Software\Classes\Directory\shell\DSH";
+    private const string LegacyBackgroundMenuKey = @"Software\Classes\Directory\Background\shell\DSH";
+
+    /// <summary>Whether "Open with Vision" is on the folder right-click menu (per user, no admin rights).</summary>
     public static bool IsFolderMenuInstalled
     {
         get
@@ -64,13 +69,15 @@ public static class ShellIntegration
         }
     }
 
-    /// <summary>Add or remove "Open with DSH" on folders and folder backgrounds in Explorer. The
+    /// <summary>Add or remove "Open with Vision" on folders and folder backgrounds in Explorer. The
     /// installer does this too; the switch in Settings serves the portable zip.</summary>
     public static bool SetFolderMenu(bool installed)
     {
         try
         {
             var exe = Environment.ProcessPath ?? throw new InvalidOperationException("Unknown executable path.");
+            foreach (var legacy in new[] { LegacyFolderMenuKey, LegacyBackgroundMenuKey })
+                Microsoft.Win32.Registry.CurrentUser.DeleteSubKeyTree(legacy, throwOnMissingSubKey: false);
             foreach (var (key, argument) in new[] { (FolderMenuKey, "%1"), (BackgroundMenuKey, "%V") })
             {
                 if (!installed)
@@ -79,7 +86,7 @@ public static class ShellIntegration
                     continue;
                 }
                 using var entry = Microsoft.Win32.Registry.CurrentUser.CreateSubKey(key);
-                entry.SetValue(null, "Open with DSH");
+                entry.SetValue(null, "Open with Vision");
                 entry.SetValue("Icon", $"\"{exe}\",0");
                 using var command = entry.CreateSubKey("command");
                 command.SetValue(null, $"\"{exe}\" \"{argument}\"");
@@ -90,6 +97,22 @@ public static class ShellIntegration
         {
             return false;
         }
+    }
+
+    /// <summary>After bringing DSH's data over: a portable DSH's "Open with DSH" (per user, pointing at DSH.exe)
+    /// becomes "Open with Vision". Nothing happens when there is none.</summary>
+    public static void ReplaceLegacyFolderMenu()
+    {
+        try
+        {
+            using var legacy = Microsoft.Win32.Registry.CurrentUser.OpenSubKey(LegacyFolderMenuKey);
+            if (legacy is null) return;
+        }
+        catch (Exception)
+        {
+            return;
+        }
+        SetFolderMenu(true);
     }
 
     /// <summary>Move a file or folder to the Recycle Bin (recoverable). Returns false on failure.</summary>

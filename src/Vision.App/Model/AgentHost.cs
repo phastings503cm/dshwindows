@@ -76,7 +76,7 @@ public sealed partial class AgentHost : ObservableObject
     /// <summary>Everything about skills one turn needs: what exists, what's on, and the prompt text.</summary>
     private sealed record SkillState(IReadOnlyList<Skill> All, IReadOnlyList<Skill> Active, SkillPromptResult Result, int Signature);
 
-    /// <param name="queueFile">Where every chat's task list is saved (default %APPDATA%\DSH\task-queue.json).</param>
+    /// <param name="queueFile">Where every chat's task list is saved (default %APPDATA%\Vision\task-queue.json).</param>
     /// <param name="skillLocations">Where skills live (tests point it at a temp folder).</param>
     /// <param name="vault">The credentials vault (default: DPAPI-encrypted, under the data folder).</param>
     /// <param name="memory">The long-term memory (default: under the data folder).</param>
@@ -250,7 +250,7 @@ public sealed partial class AgentHost : ObservableObject
     private void ForgetScratch(string chatId)
     {
         var scratch = PlainChat.Folder(chatId).TrimEnd('\\', '/');
-        if (Sessions.Any(s => s.Cwd is { } cwd && string.Equals(cwd.TrimEnd('\\', '/'), scratch, StringComparison.OrdinalIgnoreCase))) return;
+        if (Sessions.Any(s => s.Cwd is { } cwd && string.Equals(PlainChat.InCurrentRoot(cwd).TrimEnd('\\', '/'), scratch, StringComparison.OrdinalIgnoreCase))) return;
         PlainChat.Delete(chatId);
     }
 

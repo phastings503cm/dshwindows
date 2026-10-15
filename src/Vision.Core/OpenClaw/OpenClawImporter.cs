@@ -234,7 +234,7 @@ public static class OpenClawImporter
     {
         var skipped = new Dictionary<string, string>(StringComparer.Ordinal);
         var ledger = ImportLedger.Load(locations);
-        var staging = Path.Combine(Path.GetTempPath(), "dsh-openclaw-" + Guid.NewGuid().ToString("N")[..12]);
+        var staging = Path.Combine(Path.GetTempPath(), "vision-openclaw-" + Guid.NewGuid().ToString("N")[..12]);
         try
         {
             Directory.CreateDirectory(staging);

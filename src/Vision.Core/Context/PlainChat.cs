@@ -5,26 +5,39 @@ namespace Vision.Core;
 // A chat with no project folder is a regular conversation, not a coding session: the model is told so, is never
 // nudged towards opening a folder, and gets a scratch folder of the chat's own for the times it does need files
 // or commands (a skill that runs a script, a document to draft, data to convert). The scratch folder is
-// %APPDATA%\DSH\Chats\<chat id>\ (or the portable data folder), made on first use and moved to the Recycle Bin with
-// the chat — files the agent made there can still be got back.
+// %APPDATA%\Vision\Chats\<chat id>\ (or the portable data folder), made on first use and moved to the Recycle Bin
+// with the chat — files the agent made there can still be got back.
 
 public static class PlainChat
 {
     /// <summary>Where every chat's scratch folder lives.</summary>
     public static string Root => Path.Combine(AppPaths.Root, "Chats");
 
+    /// <summary>Legacy: where DSH (Vision's former name) kept scratch folders, %APPDATA%\DSH\Chats. A chat whose folder
+    /// is recorded there is still a chat without a project — its folder now lives under <see cref="Root"/> (see
+    /// <see cref="DataFolderMigration"/>, which also rewrites the recorded folder; this covers anything it missed).</summary>
+    public static string LegacyRoot => Path.Combine(AppPaths.LegacyDefaultRoot, "Chats");
+
     /// <summary>This chat's scratch folder (not created here).</summary>
     public static string Folder(string chatId) => Path.Combine(Root, chatId);
 
-    /// <summary>Whether <paramref name="path"/> is a chat's scratch folder (or inside one).</summary>
-    public static bool IsScratch(string? path)
+    /// <summary>Whether <paramref name="path"/> is a chat's scratch folder (or inside one) — under <see cref="Root"/>,
+    /// or under DSH's <see cref="LegacyRoot"/>.</summary>
+    public static bool IsScratch(string? path) => Under(Root, path) || Under(LegacyRoot, path);
+
+    /// <summary><paramref name="path"/> where it is now: a scratch folder recorded under DSH's <see cref="LegacyRoot"/>
+    /// becomes the same folder under <see cref="Root"/>; anything else is returned as it is.</summary>
+    public static string InCurrentRoot(string path) =>
+        !Under(Root, path) && Under(LegacyRoot, path) && DataFolderPaths.Rewrite(path, LegacyRoot, Root) is { } moved ? moved : path;
+
+    private static bool Under(string rootFolder, string? path)
     {
         if (string.IsNullOrWhiteSpace(path)) return false;
         // A cheap test first: most paths asked about are project folders.
         if (path.IndexOf("Chats", StringComparison.OrdinalIgnoreCase) < 0) return false;
         try
         {
-            var root = Path.GetFullPath(Root).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar) + Path.DirectorySeparatorChar;
+            var root = Path.GetFullPath(rootFolder).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar) + Path.DirectorySeparatorChar;
             var full = Path.GetFullPath(path).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar) + Path.DirectorySeparatorChar;
             return full.StartsWith(root, OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal)
                    && full.Length > root.Length;

@@ -7,7 +7,7 @@ namespace Vision.Core.Tests;
 /// ~/.claude, ~/.cursor or skills.</summary>
 internal sealed class SkillFixture : IDisposable
 {
-    private readonly TempDirectory _temp = new("dsh-skills");
+    private readonly TempDirectory _temp = new("vision-skills");
 
     public SkillFixture()
     {
@@ -205,7 +205,7 @@ public sealed class SkillCatalogTests : IDisposable
 
     private void Populate()
     {
-        _fx.Skill(".dsh/skills/mine", "mine", "Use when DSH-owned.");
+        _fx.Skill(".vision/skills/mine", "mine", "Use when Vision-owned.");
         _fx.Skill(".agents/skills/shared", "shared", "Use when agents-standard.");
         _fx.Skill(".claude/skills/claudey", "claudey", "Use when Claude.", extra: "allowed-tools: Read, Grep\nargument-hint: <file>\n");
         _fx.Skill(".claude/skills/private-flow", "private-flow", "User-only flow.", extra: "disable-model-invocation: true\n");
@@ -218,13 +218,13 @@ public sealed class SkillCatalogTests : IDisposable
         _fx.Write(".cursor/rules/manual.mdc", "---\nalwaysApply: false\n---\nOnly when asked.");
         _fx.Skill(".cursor/skills/cursory", "cursory", "Use when Cursor.");
         _fx.Skill(".claude/skills/dupe", "dupe", "claude copy");
-        _fx.Skill(".dsh/skills/dupe", "dupe", "dsh copy");
+        _fx.Skill(".vision/skills/dupe", "dupe", "vision copy");
         _fx.Skill(".claude/skills", "x", "y", root: _fx.Home); // ~/.claude/skills/SKILL.md is not a skill dir
         _fx.Skill(".claude/skills/homey", "homey", "Use when at home.", root: _fx.Home);
         _fx.Skill(".cursor/skills/homecursor", "homecursor", "Cursor home.", root: _fx.Home);
         _fx.Skill("skills/usery", "usery", "Use when user-wide.", root: _fx.Support);
         _fx.Skill("skills-builtin/godot-debugging", "godot-debugging", "Use when Godot.", root: _fx.Support);
-        _fx.Skill(".dsh/skills/_drafts/nope", "nope", "hidden");
+        _fx.Skill(".vision/skills/_drafts/nope", "nope", "hidden");
     }
 
     [Fact]
@@ -273,7 +273,7 @@ public sealed class SkillCatalogTests : IDisposable
         var all = SkillCatalog.LoadAll(_fx.Project, _fx.Locations);
         var dupes = all.Where(s => s.Name == "dupe").ToList();
         Assert.Equal(2, dupes.Count);
-        Assert.Equal("dsh copy", dupes.First(s => !s.Shadowed).Description); // .dsh beats .claude
+        Assert.Equal("vision copy", dupes.First(s => !s.Shadowed).Description); // .vision beats .claude
         Assert.Equal(SkillOrigin.Claude, dupes.First(s => s.Shadowed).Origin);
         Assert.Single(SkillCatalog.Load(_fx.Project, _fx.Locations), s => s.Name == "dupe");
     }
@@ -306,9 +306,9 @@ public sealed class SkillPromptTests : IDisposable
 
     public SkillPromptTests()
     {
-        _fx.Skill(".dsh/skills/alpha", "alpha", "Use when doing alpha work.", body: "ALPHA STEPS");
-        _fx.Skill(".dsh/skills/beta", "beta", "Use when doing beta work.", body: "BETA $ARGUMENTS");
-        _fx.Write(".dsh/skills/beta/scripts/run.sh", "echo hi");
+        _fx.Skill(".vision/skills/alpha", "alpha", "Use when doing alpha work.", body: "ALPHA STEPS");
+        _fx.Skill(".vision/skills/beta", "beta", "Use when doing beta work.", body: "BETA $ARGUMENTS");
+        _fx.Write(".vision/skills/beta/scripts/run.sh", "echo hi");
         _fx.Write(".claude/commands/ship.md", "SHIP $1");
         _fx.Write(".cursor/rules/always.mdc", "---\ndescription: House\nalwaysApply: true\n---\nALWAYS BE TESTING");
         _fx.Write(".cursor/rules/glob.mdc", "---\ndescription: Lore\nglobs: [\"docs/**\"]\n---\nLORE BODY");
@@ -369,7 +369,7 @@ public sealed class SkillPromptTests : IDisposable
     [Fact]
     public void OversizedSkillIsCappedNotDropped()
     {
-        _fx.Skill(".dsh/skills/huge", "huge", "Use when huge.", body: new string('x', 100_000));
+        _fx.Skill(".vision/skills/huge", "huge", "Use when huge.", body: new string('x', 100_000));
         var all = SkillCatalog.Load(_fx.Project, _fx.Locations);
         var huge = all.First(s => s.Name == "huge");
         var r = SkillPrompt.Build(all, new SkillSelection { Pinned = new HashSet<string> { huge.Id } });
@@ -430,7 +430,7 @@ public sealed class SkillDraftTests : IDisposable
         Assert.Equal("Proposed by the agent", draft.SourceLabel);
 
         var landed = SkillDrafts.Approve(draft, _fx.Project, locations: _fx.Locations);
-        Assert.EndsWith(".dsh/skills/godot-export-android/SKILL.md", SkillFixture.Slashes(landed));
+        Assert.EndsWith(".vision/skills/godot-export-android/SKILL.md", SkillFixture.Slashes(landed));
         Assert.False(File.Exists(Path.Combine(Path.GetDirectoryName(landed)!, "draft.json")));
         Assert.Empty(SkillDrafts.List(_fx.Locations));
         var live = SkillCatalog.Load(_fx.Project, _fx.Locations);
@@ -582,8 +582,8 @@ public sealed class SkillDraftTests : IDisposable
     [Fact]
     public void TrashUsesTheRecycleBinWhenSetAndDeletesOtherwise()
     {
-        _fx.Skill(".dsh/skills/keep", "keep", "Use when trashing.");
-        _fx.Skill(".dsh/skills/gone", "gone", "Use when trashing.");
+        _fx.Skill(".vision/skills/keep", "keep", "Use when trashing.");
+        _fx.Skill(".vision/skills/gone", "gone", "Use when trashing.");
         var skills = SkillCatalog.Load(_fx.Project, _fx.Locations);
         var recycled = new List<string>();
         SkillManager.RecycleBin = path =>
@@ -594,7 +594,7 @@ public sealed class SkillDraftTests : IDisposable
         try
         {
             SkillManager.Trash(skills.First(s => s.Name == "keep"));
-            Assert.Equal(new[] { Path.Combine(_fx.Project, ".dsh", "skills", "keep") }, recycled);
+            Assert.Equal(new[] { Path.Combine(_fx.Project, ".vision", "skills", "keep") }, recycled);
             SkillManager.RecycleBin = _ => false;
             Assert.Throws<SkillException>(() => SkillManager.Trash(skills.First(s => s.Name == "gone")));
         }
@@ -602,9 +602,9 @@ public sealed class SkillDraftTests : IDisposable
         {
             SkillManager.RecycleBin = null;
         }
-        Assert.True(Directory.Exists(Path.Combine(_fx.Project, ".dsh", "skills", "gone")));
+        Assert.True(Directory.Exists(Path.Combine(_fx.Project, ".vision", "skills", "gone")));
         SkillManager.Trash(skills.First(s => s.Name == "gone"));
-        Assert.False(Directory.Exists(Path.Combine(_fx.Project, ".dsh", "skills", "gone")));
+        Assert.False(Directory.Exists(Path.Combine(_fx.Project, ".vision", "skills", "gone")));
         var missing = Assert.Throws<SkillException>(() => SkillManager.Trash(skills.First(s => s.Name == "gone")));
         Assert.Equal(SkillErrorKind.NotFound, missing.Kind);
     }

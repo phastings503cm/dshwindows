@@ -3,7 +3,7 @@ namespace Vision.Core.Tests;
 /// <summary>Ported from the ProjectContextTests class in HarnessTests.swift.</summary>
 public sealed class ProjectContextTests : IDisposable
 {
-    private readonly TempDirectory _root = new("dsh-ctx");
+    private readonly TempDirectory _root = new("vision-ctx");
     /// <summary>Never read the developer's real ~/.claude, ~/.cursor or %APPDATA% skills.</summary>
     private readonly SkillLocations _isolated;
 
@@ -55,11 +55,45 @@ public sealed class ProjectContextTests : IDisposable
     [Fact]
     public void ProjectSkillsWinOverUserSkillsOnNameClash()
     {
-        _root.Write(".dsh/skills/x/SKILL.md", "---\nname: x\ndescription: high\n---\n");
+        _root.Write(".vision/skills/x/SKILL.md", "---\nname: x\ndescription: high\n---\n");
         _root.Write(".agents/skills/x/SKILL.md", "---\nname: x\ndescription: low\n---\n");
 
         var skill = Assert.Single(ProjectContext.Load(_root.Path, _isolated).Skills);
         Assert.Equal("high", skill.Description);
+    }
+
+    [Fact]
+    public void VisionMdAndTheLegacyDshMdAreBothRead()
+    {
+        // Legacy: projects set up for DSH (Vision's former name) have DSH.md, often committed; it is read forever.
+        _root.Write("VISION.md", "New instructions.");
+        _root.Write("DSH.md", "Old instructions.");
+
+        var context = ProjectContext.Load(_root.Path, _isolated);
+
+        Assert.Equal(["VISION.md", "DSH.md"], context.Instructions.Select(i => i.Label));
+        Assert.Equal("New instructions.", context.Instructions[0].Text.Trim());
+        Assert.Equal("Old instructions.", context.Instructions[1].Text.Trim());
+        Assert.True(File.Exists(_root["DSH.md"])); // never moved or renamed
+    }
+
+    [Fact]
+    public void SkillsInALegacyDshFolderStillLoadAndTheVisionFolderWins()
+    {
+        // Legacy: a project set up for DSH keeps its skills in .dsh\skills.
+        _root.Write(".dsh/skills/old/SKILL.md", "---\nname: old\ndescription: from .dsh\n---\n");
+        _root.Write(".dsh/skills/both/SKILL.md", "---\nname: both\ndescription: from .dsh\n---\n");
+        _root.Write(".vision/skills/both/SKILL.md", "---\nname: both\ndescription: from .vision\n---\n");
+
+        var skills = ProjectContext.Load(_root.Path, _isolated).Skills;
+
+        Assert.Equal("from .dsh", skills.Single(s => s.Name == "old").Description);
+        Assert.Equal(SkillOrigin.Vision, skills.Single(s => s.Name == "old").Origin);
+        Assert.Equal(SkillScope.Project, skills.Single(s => s.Name == "old").Scope);
+        Assert.Equal("from .vision", skills.Single(s => s.Name == "both").Description);
+        // New project skills are written to .vision only.
+        Assert.Equal(Path.Combine(_root.Path, ".vision", "skills"), SkillLocations.ProjectSkills(_root.Path));
+        Assert.Equal(Path.Combine(_root.Path, ".vision", "skills"), SkillManager.Base(SkillScope.Project, _root.Path, _isolated));
     }
 
     [Fact]
@@ -113,7 +147,7 @@ public sealed class ProjectContextTests : IDisposable
 /// <summary>New: worktrees, detached HEADs, the daily log, and case-insensitive file names.</summary>
 public sealed class ProjectContextLoadingTests : IDisposable
 {
-    private readonly TempDirectory _root = new("dsh-ctx2");
+    private readonly TempDirectory _root = new("vision-ctx2");
     private readonly SkillLocations _isolated;
 
     public ProjectContextLoadingTests() => _isolated = new SkillLocations(_root["fake-home"], _root["fake-support"]);
@@ -168,7 +202,7 @@ public sealed class ProjectContextLoadingTests : IDisposable
     [Fact]
     public void PromptSupplementCanLeaveSkillsOut()
     {
-        _root.Write(".dsh/skills/lint/SKILL.md", "---\nname: lint\ndescription: Use when linting.\n---\n");
+        _root.Write(".vision/skills/lint/SKILL.md", "---\nname: lint\ndescription: Use when linting.\n---\n");
         var context = ProjectContext.Load(_root.Path, _isolated);
         Assert.Contains("Use when linting.", context.PromptSupplement("env"));
         Assert.DoesNotContain("Use when linting.", context.PromptSupplement("env", includeSkills: false));

@@ -85,7 +85,7 @@ Name: "english"; MessagesFile: "compiler:Default.isl"
 
 [Tasks]
 Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{cm:AdditionalIcons}"; Flags: unchecked
-Name: "contextmenu"; Description: "Add ""Open with DSH"" to the folder right-click menu"; GroupDescription: "Explorer integration:"
+Name: "contextmenu"; Description: "Add ""Open with Vision"" to the folder right-click menu"; GroupDescription: "Explorer integration:"
 
 [InstallDelete]
 ; Legacy: before the rename to Vision the executable was DSH.exe, its main assembly DSH.dll and the
@@ -106,14 +106,18 @@ Name: "{autoprograms}\{#AppName}"; Filename: "{app}\{#AppExe}"; Comment: "A nati
 Name: "{autodesktop}\{#AppName}"; Filename: "{app}\{#AppExe}"; Tasks: desktopicon
 
 [Registry]
-; "Open with DSH" on folders and on the background of an open folder. HKA is HKCU for a per-user
+; Legacy: Vision was called DSH, whose "Open with DSH" lived under shell\DSH and ran DSH.exe. An upgrade
+; removes it (whatever the tasks chosen now), so Explorer never keeps a dead entry next to the new one.
+Root: HKA; Subkey: "Software\Classes\Directory\shell\DSH"; ValueType: none; Flags: deletekey
+Root: HKA; Subkey: "Software\Classes\Directory\Background\shell\DSH"; ValueType: none; Flags: deletekey
+; "Open with Vision" on folders and on the background of an open folder. HKA is HKCU for a per-user
 ; install and HKLM for an all-users one.
-Root: HKA; Subkey: "Software\Classes\Directory\shell\DSH"; ValueType: string; ValueName: ""; ValueData: "Open with DSH"; Flags: uninsdeletekey; Tasks: contextmenu
-Root: HKA; Subkey: "Software\Classes\Directory\shell\DSH"; ValueType: string; ValueName: "Icon"; ValueData: """{app}\{#AppExe}"",0"; Tasks: contextmenu
-Root: HKA; Subkey: "Software\Classes\Directory\shell\DSH\command"; ValueType: string; ValueName: ""; ValueData: """{app}\{#AppExe}"" ""%1"""; Tasks: contextmenu
-Root: HKA; Subkey: "Software\Classes\Directory\Background\shell\DSH"; ValueType: string; ValueName: ""; ValueData: "Open with DSH"; Flags: uninsdeletekey; Tasks: contextmenu
-Root: HKA; Subkey: "Software\Classes\Directory\Background\shell\DSH"; ValueType: string; ValueName: "Icon"; ValueData: """{app}\{#AppExe}"",0"; Tasks: contextmenu
-Root: HKA; Subkey: "Software\Classes\Directory\Background\shell\DSH\command"; ValueType: string; ValueName: ""; ValueData: """{app}\{#AppExe}"" ""%V"""; Tasks: contextmenu
+Root: HKA; Subkey: "Software\Classes\Directory\shell\Vision"; ValueType: string; ValueName: ""; ValueData: "Open with Vision"; Flags: uninsdeletekey; Tasks: contextmenu
+Root: HKA; Subkey: "Software\Classes\Directory\shell\Vision"; ValueType: string; ValueName: "Icon"; ValueData: """{app}\{#AppExe}"",0"; Tasks: contextmenu
+Root: HKA; Subkey: "Software\Classes\Directory\shell\Vision\command"; ValueType: string; ValueName: ""; ValueData: """{app}\{#AppExe}"" ""%1"""; Tasks: contextmenu
+Root: HKA; Subkey: "Software\Classes\Directory\Background\shell\Vision"; ValueType: string; ValueName: ""; ValueData: "Open with Vision"; Flags: uninsdeletekey; Tasks: contextmenu
+Root: HKA; Subkey: "Software\Classes\Directory\Background\shell\Vision"; ValueType: string; ValueName: "Icon"; ValueData: """{app}\{#AppExe}"",0"; Tasks: contextmenu
+Root: HKA; Subkey: "Software\Classes\Directory\Background\shell\Vision\command"; ValueType: string; ValueName: ""; ValueData: """{app}\{#AppExe}"" ""%V"""; Tasks: contextmenu
 
 [Run]
 Filename: "{app}\{#AppExe}"; Description: "{cm:LaunchProgram,{#AppName}}"; Flags: nowait postinstall skipifsilent

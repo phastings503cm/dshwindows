@@ -115,7 +115,7 @@ public sealed class AwsCliInstaller
         OperatingSystem.IsWindows() ? Environment.OSVersion.Version.Build : 0);
 
     /// <summary>Where downloads go (a fresh folder inside it per install).</summary>
-    public string WorkFolder { get; init; } = Path.Combine(Path.GetTempPath(), "dsh-aws-cli");
+    public string WorkFolder { get; init; } = Path.Combine(Path.GetTempPath(), "vision-aws-cli");
 
     public static string? PlatformProblemFor(bool isWindows, Architecture architecture, int windowsBuild)
     {

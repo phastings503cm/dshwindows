@@ -391,19 +391,19 @@ public sealed class SwapperConnectTests
         await using var swapper = new FakeSwapper2();
         using (var client = new SparkSwapperClient(swapper.Url, "pat", "correct horse", swapper.Fingerprint))
         {
-            var grant = await client.CreateTokenAsync("DSH on TESTPC");
+            var grant = await client.CreateTokenAsync("Vision on TESTPC");
             Assert.NotNull(grant);
             Assert.Equal(FakeSwapper2.Token, grant.Token);
             Assert.Equal("1a2b3c4d", grant.Id);
             Assert.Equal("https://127.0.0.1:11443/v1", grant.Connect!.ApiBase);
             var post = swapper.Server.Requests.Single(r => r.Path == "/api/tokens/create");
-            Assert.Contains("\"label\":\"DSH on TESTPC\"", post.Body);
+            Assert.Contains("\"label\":\"Vision on TESTPC\"", post.Body);
             Assert.Contains(swapper.Server.Requests, r => r.Path == "/api/login");
         }
 
         await using var old = new FakeSwapper2(old: true);
         using var legacy = new SparkSwapperClient(old.Url, "pat", "correct horse", old.Fingerprint);
-        Assert.Null(await legacy.CreateTokenAsync("DSH on TESTPC"));
+        Assert.Null(await legacy.CreateTokenAsync("Vision on TESTPC"));
         Assert.Equal("vllm-local", (await legacy.CredentialsAsync()).ApiKey); // the password route still works
     }
 
@@ -438,7 +438,7 @@ public sealed class SwapperConnectTests
     public async Task SigningInWithALoginKeepsATokenRatherThanThePassword()
     {
         await using var swapper = new FakeSwapper2();
-        var result = await SwapperSetupFlows.SignInAsync(swapper.Url, "pat", "correct horse", swapper.Fingerprint, "DSH on TESTPC");
+        var result = await SwapperSetupFlows.SignInAsync(swapper.Url, "pat", "correct horse", swapper.Fingerprint, "Vision on TESTPC");
         Assert.True(result.UsesToken);
         Assert.Equal(FakeSwapper2.Token, result.Secret);
         Assert.Equal("DGX Spark (spark-3f2a)", result.Connection.Name);
@@ -448,7 +448,7 @@ public sealed class SwapperConnectTests
         Assert.Equal(SwapperAuth.Token, result.Connection.Auth);
 
         await using var old = new FakeSwapper2(old: true);
-        var legacy = await SwapperSetupFlows.SignInAsync(old.Url, "pat", "correct horse", old.Fingerprint, "DSH on TESTPC");
+        var legacy = await SwapperSetupFlows.SignInAsync(old.Url, "pat", "correct horse", old.Fingerprint, "Vision on TESTPC");
         Assert.False(legacy.UsesToken);
         Assert.Equal("correct horse", legacy.Secret);
         Assert.Equal(SwapperAuth.Password, legacy.Connection.Auth);
@@ -456,7 +456,7 @@ public sealed class SwapperConnectTests
         Assert.Equal("https://127.0.0.1:11443/v1", legacy.Connection.ApiBase);
 
         var wrong = await Assert.ThrowsAsync<SwapperException>(() =>
-            SwapperSetupFlows.SignInAsync(swapper.Url, "pat", "nope", swapper.Fingerprint, "DSH on TESTPC"));
+            SwapperSetupFlows.SignInAsync(swapper.Url, "pat", "nope", swapper.Fingerprint, "Vision on TESTPC"));
         Assert.Equal(SwapperErrorKind.BadLogin, wrong.Kind);
     }
 
@@ -474,7 +474,7 @@ public sealed class SwapperConnectTests
     }
 
     [Fact]
-    public void TokenLabelsNameTheComputer() => Assert.Equal("DSH on TESTPC", SwapperAddress.TokenLabel("TESTPC"));
+    public void TokenLabelsNameTheComputer() => Assert.Equal("Vision on TESTPC", SwapperAddress.TokenLabel("TESTPC"));
 
     // MARK: - Addresses
 
@@ -522,7 +522,7 @@ public sealed class SwapperConnectTests
         Assert.True(connection.Serves(Routes[0]));
         Assert.True(connection.Serves(Routes[1]));
         Assert.False(connection.Serves(Routes[2]));
-        Assert.Equal($"DSH/swapper/{connection.Id}", connection.SecretTarget);
+        Assert.Equal($"Vision/swapper/{connection.Id}", connection.SecretTarget);
 
         // Saved and read back, it is the same connection (the secret is never in it).
         var json = JsonSerializer.Serialize(connection, new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.CamelCase });

@@ -20,6 +20,9 @@ namespace Vision.App.Views;
 /// clock ticks) rebuilds the rows, never the form you're typing in.</summary>
 public sealed class QueuePanel : UserControl
 {
+    /// <summary>The drag-and-drop format of a task row being moved within the list.</summary>
+    private const string QueueTaskDragFormat = "vision-queue-task";
+
     private readonly AppModel _model;
     private AgentHost Host => _model.Host;
     private TaskQueue Queue => Host.Queue;
@@ -342,7 +345,7 @@ public sealed class QueuePanel : UserControl
             _dragging = true;
             try
             {
-                DragDrop.DoDragDrop(row, new DataObject("dsh-queue-task", task.Id), DragDropEffects.Move);
+                DragDrop.DoDragDrop(row, new DataObject(QueueTaskDragFormat, task.Id), DragDropEffects.Move);
             }
             finally
             {
@@ -353,12 +356,12 @@ public sealed class QueuePanel : UserControl
         row.MouseLeftButtonUp += (_, _) => pressed = null;
         row.DragOver += (_, e) =>
         {
-            e.Effects = e.Data.GetData("dsh-queue-task") is string dragged && dragged != task.Id ? DragDropEffects.Move : DragDropEffects.None;
+            e.Effects = e.Data.GetData(QueueTaskDragFormat) is string dragged && dragged != task.Id ? DragDropEffects.Move : DragDropEffects.None;
             e.Handled = true;
         };
         row.Drop += (_, e) =>
         {
-            if (e.Data.GetData("dsh-queue-task") is not string dragged || dragged == task.Id) return;
+            if (e.Data.GetData(QueueTaskDragFormat) is not string dragged || dragged == task.Id) return;
             if (Queue.Find(dragged)?.Status != QueueTaskStatus.Queued) return;
             Host.QueueMoveOnto(dragged, task.Id);
             _selectedId = dragged;

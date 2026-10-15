@@ -24,7 +24,7 @@ public sealed class AwsCliCredentialSource : IAwsCredentialSource
     private AwsCredentials? _cached;
     private TaskCompletionSource<AwsCredentials>? _inFlight;
 
-    /// <param name="profile">The AWS CLI profile (e.g. "dsh-bedrock").</param>
+    /// <param name="profile">The AWS CLI profile (e.g. "vision-bedrock").</param>
     /// <param name="region">Passed as --region; null lets the profile's own Region apply. The CLI
     /// refreshes an `aws login` session through that Region's sign-in endpoint, so it must have one:
     /// <see cref="AwsSignIn.LoginAsync"/> saves the Region into the profile for this reason.</param>

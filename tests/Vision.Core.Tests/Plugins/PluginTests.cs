@@ -282,19 +282,19 @@ public sealed class PluginManifestParseTests
     }
 }
 
-/// <summary>New: loading from disk. The user plugin folder lives under DSH_HOME, which these tests
+/// <summary>New: loading from disk. The user plugin folder lives under VISION_HOME, which these tests
 /// point at a scratch folder (and restore), so the real profile is never read.</summary>
 [Collection(SerialStaticState.Name)]
 public sealed class PluginLoadTests : IDisposable
 {
-    private readonly TempDirectory _dir = new("dsh-plugins");
-    private readonly string? _previousHome = Environment.GetEnvironmentVariable("DSH_HOME");
+    private readonly TempDirectory _dir = new("vision-plugins");
+    private readonly string? _previousHome = Environment.GetEnvironmentVariable("VISION_HOME");
 
-    public PluginLoadTests() => Environment.SetEnvironmentVariable("DSH_HOME", _dir["home"]);
+    public PluginLoadTests() => Environment.SetEnvironmentVariable("VISION_HOME", _dir["home"]);
 
     public void Dispose()
     {
-        Environment.SetEnvironmentVariable("DSH_HOME", _previousHome);
+        Environment.SetEnvironmentVariable("VISION_HOME", _previousHome);
         _dir.Dispose();
     }
 
@@ -302,9 +302,9 @@ public sealed class PluginLoadTests : IDisposable
     public void ProjectPluginsWinAndBadFilesAreReported()
     {
         var project = _dir["project"];
-        _dir.Write("project/.dsh/plugins/b.json",
+        _dir.Write("project/.vision/plugins/b.json",
             """{"name":"shared","description":"project copy","tools":[{"name":"p_tool","description":"d","command":"echo p"}]}""");
-        _dir.Write("project/.dsh/plugins/a.json", "{ not json");
+        _dir.Write("project/.vision/plugins/a.json", "{ not json");
         _dir.Write("home/plugins/shared.json", """{"name":"shared","description":"user copy","tools":[]}""");
         _dir.Write("home/plugins/extra.json", """{"name":"extra","tools":[{"name":"x","description":"d","command":"echo x"}]}""");
         _dir.Write("home/plugins/notes.txt", "not a manifest");
@@ -314,8 +314,24 @@ public sealed class PluginLoadTests : IDisposable
         Assert.Equal(["shared", "extra"], plugins.Select(p => p.Name));
         Assert.Equal("project copy", plugins[0].Description);
         Assert.StartsWith("a.json: ", Assert.Single(errors));
-        Assert.Equal([Path.Combine(project, ".dsh", "plugins"), Path.Combine(_dir["home"], "plugins")],
+        Assert.Equal([Path.Combine(project, ".vision", "plugins"), Path.Combine(project, ".dsh", "plugins"), Path.Combine(_dir["home"], "plugins")],
             PluginLoader.Directories(project));
+    }
+
+    [Fact]
+    public void PluginsInALegacyDshFolderStillLoadAndTheVisionFolderWins()
+    {
+        // Legacy: a project set up for DSH (Vision's former name) keeps its plugins in .dsh\plugins.
+        var project = _dir["project"];
+        _dir.Write("project/.dsh/plugins/old.json", """{"name":"old","description":"from .dsh","tools":[]}""");
+        _dir.Write("project/.dsh/plugins/both.json", """{"name":"both","description":"from .dsh","tools":[]}""");
+        _dir.Write("project/.vision/plugins/both.json", """{"name":"both","description":"from .vision","tools":[]}""");
+
+        var (plugins, errors) = PluginLoader.Load(project);
+
+        Assert.Empty(errors);
+        Assert.Equal("from .dsh", plugins.Single(p => p.Name == "old").Description);
+        Assert.Equal("from .vision", plugins.Single(p => p.Name == "both").Description);
     }
 
     [Fact]

@@ -2,8 +2,8 @@ namespace Vision.Core.Tests;
 
 public sealed class MemoryInstructionsTests : IDisposable
 {
-    private readonly TempDirectory _project = new("dsh-mem-project");
-    private readonly TempDirectory _data = new("dsh-mem-data");
+    private readonly TempDirectory _project = new("vision-mem-project");
+    private readonly TempDirectory _data = new("vision-mem-data");
 
     public void Dispose()
     {

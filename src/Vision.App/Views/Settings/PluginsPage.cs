@@ -20,7 +20,7 @@ public sealed class PluginsPage : UserControl
         page.Children.Add(Ui.Title("Plugins"));
         var intro = Ui.Secondary(
             "A plugin is a JSON manifest declaring tools backed by shell commands. Put one in your plugins folder " +
-            $"({PluginLoader.UserDirectory}) or in a project's .dsh\\plugins folder, then reload. A plugin runs shell commands, so its " +
+            $"({PluginLoader.UserDirectory}) or in a project's .vision\\plugins folder, then reload. A plugin runs shell commands, so its " +
             "tools ask before running unless its manifest says otherwise.");
         intro.Margin = new Thickness(0, 6, 0, 10);
         page.Children.Add(intro);

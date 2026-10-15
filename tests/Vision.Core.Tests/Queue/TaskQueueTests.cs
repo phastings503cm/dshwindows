@@ -236,7 +236,7 @@ public sealed class TaskQueueTests
     [Fact]
     public void PersistenceRoundTrip()
     {
-        using var dir = new TempDirectory("dsh-queue");
+        using var dir = new TempDirectory("vision-queue");
         var path = dir["task-queue.json"];
         var q = new TaskQueue(path, _clock);
         var a = q.Add("A", details: "do a", chatId: "s");

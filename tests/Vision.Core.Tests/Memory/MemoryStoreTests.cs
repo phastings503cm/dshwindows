@@ -2,7 +2,7 @@ namespace Vision.Core.Tests;
 
 public sealed class MemoryStoreTests : IDisposable
 {
-    private readonly TempDirectory _dir = new("dsh-memory");
+    private readonly TempDirectory _dir = new("vision-memory");
 
     public void Dispose() => _dir.Dispose();
 

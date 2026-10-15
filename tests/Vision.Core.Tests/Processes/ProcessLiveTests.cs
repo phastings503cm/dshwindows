@@ -212,12 +212,13 @@ public sealed class ProcessLiveTests : IDisposable
         _tools.Root.Write("sub/marker.txt", "x");
         var start = await Start(new
         {
-            command = "echo \"var=$DSH_TEST_VAR agent=$DSH_AGENT\"; ls",
+            // The legacy DSH_AGENT is still set, for users' scripts written for DSH (Vision's former name).
+            command = "echo \"var=$VISION_TEST_VAR agent=$VISION_AGENT legacy=$DSH_AGENT\"; ls",
             cwd = "sub",
-            env = new Dictionary<string, string> { ["DSH_TEST_VAR"] = "hello-env" },
+            env = new Dictionary<string, string> { ["VISION_TEST_VAR"] = "hello-env" },
         });
         var all = await ReadToExit(ProcessToolTests.FirstId(start), TimeSpan.FromSeconds(30), start);
-        Assert.Contains("var=hello-env agent=1", all);
+        Assert.Contains("var=hello-env agent=1 legacy=1", all);
         Assert.Contains("marker.txt", all);
     }
 
@@ -364,13 +365,14 @@ public sealed class ProcessLiveTests : IDisposable
         _tools.Root.Write("sub/marker.txt", "x");
         var start = await Start(new
         {
-            command = "Write-Output ('var=' + $env:DSH_TEST_VAR + ' agent=' + $env:DSH_AGENT); Get-ChildItem -Name",
+            // The legacy DSH_AGENT is still set, for users' scripts written for DSH (Vision's former name).
+            command = "Write-Output ('var=' + $env:VISION_TEST_VAR + ' agent=' + $env:VISION_AGENT + ' legacy=' + $env:DSH_AGENT); Get-ChildItem -Name",
             cwd = "sub",
-            env = new Dictionary<string, string> { ["DSH_TEST_VAR"] = "hello-env" },
+            env = new Dictionary<string, string> { ["VISION_TEST_VAR"] = "hello-env" },
         });
         var id = ProcessToolTests.FirstId(start);
         var all = await ReadToExit(id, TimeSpan.FromSeconds(90), start);
-        Assert.Contains("var=hello-env agent=1", all);
+        Assert.Contains("var=hello-env agent=1 legacy=1", all);
         Assert.Contains("marker.txt", all);
     }
 }

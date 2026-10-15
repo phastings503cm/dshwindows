@@ -827,7 +827,7 @@ public sealed class ExportSkillsWindow : SkillDialog
             Fail("Select at least one skill.");
             return;
         }
-        var dialog = new SaveFileDialog { Filter = "Zip archive|*.zip", FileName = "dsh-skills.zip" };
+        var dialog = new SaveFileDialog { Filter = "Zip archive|*.zip", FileName = "vision-skills.zip" };
         if (dialog.ShowDialog(this) != true) return;
         try
         {

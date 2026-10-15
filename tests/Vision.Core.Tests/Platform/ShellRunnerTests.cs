@@ -14,7 +14,7 @@ internal static class Sh
 /// promises: stdin is closed, output is cleaned, cancellation stops the command.</summary>
 public sealed class ShellRunnerTests : IDisposable
 {
-    private readonly TempDirectory _cwd = new("dsh-shell");
+    private readonly TempDirectory _cwd = new("vision-shell");
 
     public void Dispose() => _cwd.Dispose();
 
@@ -130,7 +130,7 @@ public sealed class ShellRunnerTests : IDisposable
 [Collection(TimingSensitive.Name)]
 public sealed class ShellRunnerPromptTests : IDisposable
 {
-    private readonly TempDirectory _cwd = new("dsh-shell-prompt");
+    private readonly TempDirectory _cwd = new("vision-shell-prompt");
 
     public void Dispose() => _cwd.Dispose();
 
@@ -164,7 +164,7 @@ public sealed class ShellRunnerPromptTests : IDisposable
 /// <summary>New: run_shell_command's formatting of the runner's result.</summary>
 public sealed class RunShellCommandToolTests : IDisposable
 {
-    private readonly TempDirectory _cwd = new("dsh-shell-tool");
+    private readonly TempDirectory _cwd = new("vision-shell-tool");
 
     public void Dispose() => _cwd.Dispose();
 

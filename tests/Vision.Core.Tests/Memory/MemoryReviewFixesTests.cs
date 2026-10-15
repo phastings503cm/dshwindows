@@ -5,8 +5,8 @@ namespace Vision.Core.Tests;
 /// forms, pinned notes, mirrored files and secrets must behave.</summary>
 public sealed class MemoryReviewFixesTests : IDisposable
 {
-    private readonly TempDirectory _dir = new("dsh-memfix");
-    private readonly TempDirectory _project = new("dsh-memfix-project");
+    private readonly TempDirectory _dir = new("vision-memfix");
+    private readonly TempDirectory _project = new("vision-memfix-project");
 
     public void Dispose()
     {

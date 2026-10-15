@@ -19,7 +19,9 @@ $installerPath = (Resolve-Path $Installer).Path
 New-Item -ItemType Directory -Force -Path $Output | Out-Null
 $appId = '{6F3B2E7A-9C41-4D8B-A5E2-3C7D9B1F0A64}_is1'
 $uninstallKey = "HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\$appId"
-$menuKeys = @('HKCU:\Software\Classes\Directory\shell\DSH', 'HKCU:\Software\Classes\Directory\Background\shell\DSH')
+$menuKeys = @('HKCU:\Software\Classes\Directory\shell\Vision', 'HKCU:\Software\Classes\Directory\Background\shell\Vision')
+# Legacy: the folder menu DSH (Vision's former name) registered. Seeded before the install, which must remove it.
+$legacyMenuKeys = @('HKCU:\Software\Classes\Directory\shell\DSH', 'HKCU:\Software\Classes\Directory\Background\shell\DSH')
 $installDir = Join-Path $env:LOCALAPPDATA 'Programs\DSH'
 $shortcut = Join-Path ([Environment]::GetFolderPath('Programs')) 'DSH.lnk'
 
@@ -29,6 +31,11 @@ function Wait-Until([scriptblock] $Condition, [int] $Seconds, [string] $What) {
         if ((Get-Date) -gt $deadline) { throw "Timed out after $Seconds s waiting for $What." }
         Start-Sleep -Milliseconds 500
     }
+}
+
+foreach ($key in $legacyMenuKeys) {
+    New-Item -Path (Join-Path $key 'command') -Force | Out-Null
+    Set-ItemProperty -Path $key -Name '(default)' -Value 'Open with the old app'
 }
 
 Write-Host "Installing $installerPath"
@@ -47,7 +54,10 @@ foreach ($key in $menuKeys) {
     $command = (Get-ItemProperty (Join-Path $key 'command')).'(default)'
     if ($command -notlike "*$exe*") { throw "Folder menu entry $key runs '$command', expected $exe." }
 }
-Write-Host '  Start menu shortcut and folder menu entries are in place'
+foreach ($key in $legacyMenuKeys) {
+    if (Test-Path $key) { throw "The install left the old folder menu entry $key in place." }
+}
+Write-Host '  Start menu shortcut and folder menu entries are in place; the old folder menu entries are gone'
 
 Write-Host 'Launching the installed app (UI self-test, light theme)'
 & (Join-Path $PSScriptRoot 'self-test.ps1') -Exe $exe -Output (Join-Path $Output 'selftest') -Theme light

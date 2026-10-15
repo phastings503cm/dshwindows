@@ -21,7 +21,7 @@ public sealed record LogSession
 }
 
 /// <summary>Per-session conversation store: one JSON file per session under
-/// %APPDATA%\DSH\conversations. Plain files, so a search tool (or grep) works on them directly.
+/// %APPDATA%\Vision\conversations. Plain files, so a search tool (or grep) works on them directly.
 /// Not thread-safe: use it from the UI thread.</summary>
 public sealed class ConversationLog
 {

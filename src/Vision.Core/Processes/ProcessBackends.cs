@@ -40,9 +40,9 @@ internal static class BackgroundCommandLine
             .AppendLine("try { [Console]::OutputEncoding = [System.Text.Encoding]::UTF8; $OutputEncoding = [System.Text.Encoding]::UTF8 } catch { }")
             .AppendLine("if ($PSStyle) { $PSStyle.OutputRendering = 'PlainText' }")
             .AppendLine(command)
-            .AppendLine("$__dshOk = $?")
+            .AppendLine("$__visionOk = $?")
             .AppendLine("if ($LASTEXITCODE -is [int] -and $LASTEXITCODE -ne 0) { exit $LASTEXITCODE }")
-            .AppendLine("if (-not $__dshOk) { exit 1 }")
+            .AppendLine("if (-not $__visionOk) { exit 1 }")
             .AppendLine("exit 0")
             .ToString();
         var encoded = Convert.ToBase64String(Encoding.Unicode.GetBytes(script));
@@ -50,7 +50,7 @@ internal static class BackgroundCommandLine
         // The Windows command line tops out at 32,767 characters; long scripts go through a file that
         // removes itself (PowerShell parses the whole file before running it).
         if (encoded.Length < 28_000) return [.. common, "-EncodedCommand", encoded];
-        var file = Path.Combine(Path.GetTempPath(), $"dsh-bg-{Guid.NewGuid():N}.ps1");
+        var file = Path.Combine(Path.GetTempPath(), $"vision-bg-{Guid.NewGuid():N}.ps1");
         var selfDeleting = "Remove-Item -LiteralPath $PSCommandPath -Force -ErrorAction SilentlyContinue" + Environment.NewLine + script;
         File.WriteAllText(file, selfDeleting, new UTF8Encoding(encoderShouldEmitUTF8Identifier: true));
         return [.. common, "-File", file];
@@ -81,11 +81,8 @@ internal static class BackgroundCommandLine
     public static Dictionary<string, string> EnvironmentFor(ProcessLaunch launch, IEnumerable<KeyValuePair<string, string>>? extra = null)
     {
         var comparer = OperatingSystem.IsWindows() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal;
-        var environment = new Dictionary<string, string>(comparer)
-        {
-            ["PYTHONIOENCODING"] = "utf-8",
-            ["DSH_AGENT"] = "1",
-        };
+        var environment = new Dictionary<string, string>(comparer) { ["PYTHONIOENCODING"] = "utf-8" };
+        foreach (var (key, value) in AgentEnvironment.Markers) environment[key] = value;
         foreach (var (key, value) in extra ?? []) environment[key] = value;
         foreach (var (key, value) in launch.Environment) environment[key] = value;
         return environment;

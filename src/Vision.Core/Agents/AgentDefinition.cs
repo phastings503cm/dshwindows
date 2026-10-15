@@ -227,7 +227,8 @@ public sealed class AgentCatalog
     }
 
     /// <summary>Load built-ins, then every agent file in <paramref name="userDirectories"/>, then in the
-    /// project's <c>.dsh/agents</c> and <c>.claude/agents</c> (project files win). Unreadable files are skipped.</summary>
+    /// project's <c>.claude/agents</c>, <c>.dsh/agents</c> (DSH's, Vision's former name) and <c>.vision/agents</c>
+    /// (project files win; <c>.vision</c> over <c>.dsh</c>). Unreadable files are skipped.</summary>
     public static AgentCatalog Load(string? projectRoot, IEnumerable<string>? userDirectories = null)
     {
         var byName = new Dictionary<string, AgentDefinition>(StringComparer.OrdinalIgnoreCase);
@@ -237,7 +238,9 @@ public sealed class AgentCatalog
         if (!string.IsNullOrEmpty(projectRoot))
         {
             Merge(byName, Path.Combine(projectRoot, ".claude", "agents"), "project");
-            Merge(byName, Path.Combine(projectRoot, ".dsh", "agents"), "project");
+            // Later merges win: the legacy folder, then the app's own.
+            foreach (var folder in ProjectFolders.ReadFolders(projectRoot, "agents").Reverse())
+                Merge(byName, folder, "project");
         }
         var builtInOrder = AgentDefinition.BuiltIn.Select(a => a.Name).ToList();
         var ordered = byName.Values
@@ -254,7 +257,7 @@ public sealed class AgentCatalog
         if (!string.IsNullOrEmpty(projectRoot))
         {
             folders.Add(Path.Combine(projectRoot, ".claude", "agents"));
-            folders.Add(Path.Combine(projectRoot, ".dsh", "agents"));
+            folders.AddRange(ProjectFolders.ReadFolders(projectRoot, "agents"));
         }
         long stamp = 17;
         foreach (var folder in folders)

@@ -265,7 +265,7 @@ public static class SkillImporter
         try
         {
             using var request = new HttpRequestMessage(HttpMethod.Get, url);
-            request.Headers.TryAddWithoutValidation("User-Agent", $"DSH/{AppInfo.Version}");
+            request.Headers.TryAddWithoutValidation("User-Agent", $"Vision/{AppInfo.Version}");
             using var response = await http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, quiet.Token).ConfigureAwait(false);
             if (!response.IsSuccessStatusCode) return (int)response.StatusCode;
             if (response.Content.Headers.ContentLength > MaxDownloadBytes) throw SkillException.TooLarge("That download is too large.");
@@ -777,7 +777,7 @@ public static class ExportFormats
         ExportFormat.Claude => "claude",
         ExportFormat.Cursor => "cursor",
         ExportFormat.Agents => "agents",
-        _ => "dsh",
+        _ => "vision",
     };
 
     public static string Label(this ExportFormat format) => format switch
@@ -786,7 +786,7 @@ public static class ExportFormats
         ExportFormat.Claude => "Claude Code (.claude/skills)",
         ExportFormat.Cursor => "Cursor (.cursor/rules, .mdc)",
         ExportFormat.Agents => "Agent Skills (.agents/skills)",
-        _ => "DSH (.dsh/skills)",
+        _ => "Vision (.vision/skills)",
     };
 
     public static string Detail(this ExportFormat format) => format switch
@@ -843,7 +843,7 @@ public static class SkillExporter
                 ExportFormat.Claude => [".claude", "skills", slug],
                 ExportFormat.Cursor => [".cursor", "skills", slug],
                 ExportFormat.Agents => [".agents", "skills", slug],
-                _ => [".dsh", "skills", slug],
+                _ => [ProjectFolders.Name, "skills", slug],
             };
             var staged = SkillFiles.StagingDirectory();
             try

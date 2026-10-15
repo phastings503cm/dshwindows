@@ -16,7 +16,7 @@ namespace Vision.App.Model;
 
 public sealed partial class AgentHost
 {
-    /// <summary>Long-term memory: notes searched for each message (%APPDATA%\DSH\memory).</summary>
+    /// <summary>Long-term memory: notes searched for each message (%APPDATA%\Vision\memory).</summary>
     public MemoryStore Memory { get; private set; } = null!;
 
     /// <summary>The model servers subagents run on. The active route is the primary; routes flagged

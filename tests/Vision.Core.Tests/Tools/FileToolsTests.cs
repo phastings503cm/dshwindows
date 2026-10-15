@@ -68,7 +68,7 @@ public sealed class FileToolsTests : IDisposable
     [Fact]
     public async Task ReadFileAcceptsAbsolutePaths()
     {
-        using var elsewhere = new TempDirectory("dsh-read-elsewhere");
+        using var elsewhere = new TempDirectory("vision-read-elsewhere");
         var path = elsewhere.Write("outside.txt", "hello");
         Assert.Equal("1 | hello", await _tools.Output(new ReadFileTool(), new { file_path = path }));
     }
@@ -193,7 +193,7 @@ public sealed class FileToolsTests : IDisposable
         Assert.DoesNotContain("open", text);
         Assert.Equal(edits, text.Split("taken").Length - 1);
         // And nobody left a temp file behind.
-        Assert.DoesNotContain(Directory.GetFiles(Root.Path), f => f.EndsWith(".dsh-tmp", StringComparison.Ordinal));
+        Assert.DoesNotContain(Directory.GetFiles(Root.Path), f => f.EndsWith(".vision-tmp", StringComparison.Ordinal));
     }
 
     [Fact]
@@ -203,12 +203,12 @@ public sealed class FileToolsTests : IDisposable
         // same path uses the same name, so it replaces it — orphans do not pile up.
         Root.Write("a.txt", "old");
         var path = Path.Combine(Root.Path, "a.txt");
-        File.WriteAllText(path + ".dsh-tmp", "half a write");
+        File.WriteAllText(path + ".vision-tmp", "half a write");
 
         FileText.Write(path, "new text", new TextFileFormat(false, false));
 
         Assert.Equal("new text", File.ReadAllText(path));
-        Assert.DoesNotContain(Directory.GetFiles(Root.Path), f => f.EndsWith(".dsh-tmp", StringComparison.Ordinal));
+        Assert.DoesNotContain(Directory.GetFiles(Root.Path), f => f.EndsWith(".vision-tmp", StringComparison.Ordinal));
     }
 
     [Fact]
@@ -230,7 +230,7 @@ public sealed class FileToolsTests : IDisposable
 
         Assert.ThrowsAny<Exception>(() => FileText.Write(folder, "text", new TextFileFormat(false, false)));
 
-        Assert.DoesNotContain(Directory.GetFiles(Root.Path), f => f.EndsWith(".dsh-tmp", StringComparison.Ordinal));
+        Assert.DoesNotContain(Directory.GetFiles(Root.Path), f => f.EndsWith(".vision-tmp", StringComparison.Ordinal));
         Assert.True(Directory.Exists(folder));
     }
 }

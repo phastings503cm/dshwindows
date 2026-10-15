@@ -55,7 +55,7 @@ public sealed class FileTextTests : IDisposable
         FileText.Write(path, "a\nb\r\nc\n", new TextFileFormat(HasBom: true, UsesCrlf: true));
 
         Assert.Equal(WithBom("a\r\nb\r\nc\r\n"), File.ReadAllBytes(path));
-        Assert.False(File.Exists(path + ".dsh-tmp"));
+        Assert.False(File.Exists(path + ".vision-tmp"));
     }
 
     [Fact]

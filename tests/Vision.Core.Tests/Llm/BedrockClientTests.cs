@@ -16,7 +16,7 @@ public sealed class BedrockClientTests
     private const string Runtime = "https://bedrock-runtime.us-east-1.amazonaws.com";
 
     private static ProviderProfile Profile(string model = Sonnet45) =>
-        new(ProviderKind.Bedrock, "Bedrock", Runtime, model) { AwsProfile = "dsh-bedrock", AwsRegion = "us-east-1" };
+        new(ProviderKind.Bedrock, "Bedrock", Runtime, model) { AwsProfile = "vision-bedrock", AwsRegion = "us-east-1" };
 
     private static BedrockClient Client(FakeHttpHandler handler, IAwsCredentialSource? source = null, ProviderProfile? profile = null) =>
         new(profile ?? Profile(), source ?? new StaticAwsCredentialSource(SigV4Tests.WithToken), handler, new ManualClock(SigV4Tests.Now));
@@ -72,7 +72,7 @@ public sealed class BedrockClientTests
     private sealed class SignedOutSource : IAwsCredentialSource
     {
         public Task<AwsCredentials> GetAsync(bool forceRefresh = false, CancellationToken cancellationToken = default) =>
-            throw new AwsSignInRequiredException("dsh-bedrock", "The SSO session has expired.");
+            throw new AwsSignInRequiredException("vision-bedrock", "The SSO session has expired.");
     }
 
     private static string Disposition(Exception error) => RequestRetry.Disposition(error).GetType().Name;
@@ -323,7 +323,7 @@ public sealed class BedrockClientTests
         var error = await Assert.ThrowsAsync<LlmException>(() => CollectAsync(Client(handler, source)));
         Assert.Equal(2, handler.Requests.Count);
         Assert.Equal("Fail", Disposition(error));
-        Assert.Contains("aws login --profile dsh-bedrock", error.Message);
+        Assert.Contains("aws login --profile vision-bedrock", error.Message);
     }
 
     [Fact]
@@ -352,7 +352,7 @@ public sealed class BedrockClientTests
         Assert.Equal("Fail", Disposition(error));
         Assert.Contains("expired", error.Message);
         Assert.Contains("Settings › AI Models", error.Message);
-        Assert.Contains("aws login --profile dsh-bedrock", error.Message);
+        Assert.Contains("aws login --profile vision-bedrock", error.Message);
         Assert.IsType<AwsSignInRequiredException>(error.InnerException);
         Assert.Empty(handler.Requests);
     }
@@ -489,7 +489,7 @@ public sealed class BedrockClientTests
             ? Reply(Reasoning(0, "plan"), Reasoning(0, signature: "sig-1"), ToolStart(1, "tooluse_9", EchoTool.ToolName),
                     ToolInput(1, """{"text":"ping"}"""), Stop("tool_use"))
             : Reply(TextDelta(0, "all done"), Stop("end_turn")));
-        using var root = new TempDirectory("dsh-bedrock");
+        using var root = new TempDirectory("vision-bedrock");
         var profile = Profile(Sonnet45);
         var engine = new Engine(Client(handler, profile: profile), new ToolRegistry([new EchoTool()]), "system",
             new EngineConfig(Sonnet45) { Thinking = ThinkingLevel.High, Retry = RetryPolicy.Off },
@@ -637,9 +637,9 @@ public sealed class ProviderClientsTests
                 asked.Add(profile.AwsProfile);
                 return new StaticAwsCredentialSource(SigV4Tests.NoToken);
             };
-            var bedrock = new ProviderProfile(ProviderKind.Bedrock, "B", "", "amazon.nova-pro-v1:0") { AwsProfile = "dsh-bedrock", AwsRegion = "us-east-1" };
+            var bedrock = new ProviderProfile(ProviderKind.Bedrock, "B", "", "amazon.nova-pro-v1:0") { AwsProfile = "vision-bedrock", AwsRegion = "us-east-1" };
             Assert.IsType<BedrockClient>(ProviderClients.Create(bedrock));
-            Assert.Equal(["dsh-bedrock"], asked);
+            Assert.Equal(["vision-bedrock"], asked);
 
             var keyed = new ProviderProfile(ProviderKind.Bedrock, "B", "", "amazon.nova-pro-v1:0") { ApiKey = "bedrock-api-key-x", AwsRegion = "us-east-1" };
             var client = Assert.IsType<BedrockClient>(ProviderClients.Create(keyed));

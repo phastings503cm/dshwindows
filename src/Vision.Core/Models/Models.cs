@@ -119,7 +119,7 @@ public sealed record ProviderProfile
     /// server is trusted to present — e.g. the DGX Spark's nginx TLS front. Checked only when normal
     /// Windows trust fails; null = normal trust only.</summary>
     public string? PinnedCertificate { get; set; }
-    /// <summary>Bedrock: the AWS CLI profile whose sign-in DSH uses (e.g. "dsh-bedrock"). Null with an
+    /// <summary>Bedrock: the AWS CLI profile whose sign-in DSH uses (e.g. "vision-bedrock"). Null with an
     /// <see cref="ApiKey"/> = authenticate with that Bedrock API key instead.</summary>
     public string? AwsProfile { get; set; }
     /// <summary>Bedrock: the AWS Region to call (e.g. "us-east-1").</summary>

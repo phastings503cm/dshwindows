@@ -2,7 +2,7 @@ namespace Vision.Core.Tests;
 
 public sealed class ClaudeProjectNamesTests : IDisposable
 {
-    private readonly TempDirectory _root = new("dsh-names");
+    private readonly TempDirectory _root = new("vision-names");
 
     public void Dispose() => _root.Dispose();
 

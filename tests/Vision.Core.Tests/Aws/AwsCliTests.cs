@@ -123,8 +123,8 @@ public sealed class AwsCliTests
     [Fact]
     public void ProfileRegionAndJsonAreAppended()
     {
-        Assert.Equal(["bedrock", "list-foundation-models", "--profile", "dsh-bedrock", "--region", "eu-central-1", "--output", "json"],
-            AwsCli.Arguments(["bedrock", "list-foundation-models"], "dsh-bedrock", "eu-central-1"));
+        Assert.Equal(["bedrock", "list-foundation-models", "--profile", "vision-bedrock", "--region", "eu-central-1", "--output", "json"],
+            AwsCli.Arguments(["bedrock", "list-foundation-models"], "vision-bedrock", "eu-central-1"));
         Assert.Equal(["sts", "get-caller-identity"], AwsCli.Arguments(["sts", "get-caller-identity"], null, "", json: false));
     }
 
@@ -143,8 +143,8 @@ public sealed class AwsCliTests
         Assert.Empty((await cli.RunJsonAsync(["bedrock", "put-use-case-for-model-access"], "p", "us-east-1")).AsObject());
         var bad = await Assert.ThrowsAsync<AwsCliException>(() => cli.RunJsonAsync(["bedrock", "weird"], "p", "us-east-1"));
         Assert.Contains("couldn't read", bad.Message);
-        var signIn = await Assert.ThrowsAsync<AwsSignInRequiredException>(() => cli.RunJsonAsync(["bedrock", "list-foundation-models"], "dsh-bedrock", "us-east-1"));
-        Assert.Equal("dsh-bedrock", signIn.Profile);
+        var signIn = await Assert.ThrowsAsync<AwsSignInRequiredException>(() => cli.RunJsonAsync(["bedrock", "list-foundation-models"], "vision-bedrock", "us-east-1"));
+        Assert.Equal("vision-bedrock", signIn.Profile);
         Assert.Contains("expired", signIn.Message);
         Assert.Equal(TimeSpan.FromMinutes(2), runner.Calls[0].Options!.Timeout);
     }
@@ -168,8 +168,8 @@ public sealed class AwsCliTests
         var classified = AwsCliErrors.Classify(new AwsCliResult(255, "", "\naws: [ERROR]: " + error + "\n"), "bedrock");
         Assert.Equal(AwsCliFailure.SignInRequired, classified.Kind);
         Assert.Contains(mentions, classified.Message);
-        var exception = Assert.IsType<AwsSignInRequiredException>(AwsCliErrors.ToException(classified, "dsh-bedrock"));
-        Assert.Equal("dsh-bedrock", exception.Profile);
+        var exception = Assert.IsType<AwsSignInRequiredException>(AwsCliErrors.ToException(classified, "vision-bedrock"));
+        Assert.Equal("vision-bedrock", exception.Profile);
         Assert.IsType<AwsCliException>(exception.InnerException);
     }
 
@@ -248,18 +248,18 @@ public sealed class AwsCliTests
     [UnixFact]
     public async Task PassesArgumentsVerbatimAndSetsTheEnvironment()
     {
-        using var dir = new TempDirectory("dsh-aws");
+        using var dir = new TempDirectory("vision-aws");
         var aws = Script(dir, """
             for a in "$@"; do echo "arg=[$a]"; done
             echo "pager=[${AWS_PAGER-unset}] hint=[$AWS_CLI_AGENT_TOOLKIT_HINT_DISABLED] prompt=[$AWS_CLI_AUTO_PROMPT] enc=[$AWS_CLI_OUTPUT_ENCODING] fmt=[$AWS_CLI_ERROR_FORMAT]"
-            echo "extra=[$DSH_EXTRA] gone=[${HOME-unset}]"
+            echo "extra=[$VISION_EXTRA] gone=[${HOME-unset}]"
             echo "café ✓" >&2
             exit 3
             """);
         var lines = new List<AwsCliLine>();
         var result = await new ProcessAwsCliRunner(aws).RunAsync(["--form-data", "a b \"c\" 'd' $HOME;x"], new AwsCliRunOptions
         {
-            Environment = new Dictionary<string, string?> { ["DSH_EXTRA"] = "yes", ["HOME"] = null },
+            Environment = new Dictionary<string, string?> { ["VISION_EXTRA"] = "yes", ["HOME"] = null },
             OnLine = line => { lock (lines) lines.Add(line); },
         });
         Assert.Equal(3, result.ExitCode);
@@ -274,7 +274,7 @@ public sealed class AwsCliTests
     [UnixFact]
     public async Task AnswersPromptsThatHaveNoNewline()
     {
-        using var dir = new TempDirectory("dsh-aws");
+        using var dir = new TempDirectory("vision-aws");
         var aws = Script(dir, """
             echo "Attempting to open your default browser."
             printf 'Do you want to overwrite it to use B instead? (y/n): '
@@ -299,7 +299,7 @@ public sealed class AwsCliTests
     [UnixFact]
     public async Task StandardInputIsClosedUnlessSomethingAnswers()
     {
-        using var dir = new TempDirectory("dsh-aws");
+        using var dir = new TempDirectory("vision-aws");
         var aws = Script(dir, "if read line; then echo \"in [$line]\"; else echo eof; fi");
         Assert.Equal("eof\n", (await new ProcessAwsCliRunner(aws).RunAsync([])).Stdout);
         Assert.Equal("in [hello]\n", (await new ProcessAwsCliRunner(aws).RunAsync([], new AwsCliRunOptions { StandardInput = "hello\n" })).Stdout);
@@ -308,7 +308,7 @@ public sealed class AwsCliTests
     [UnixFact]
     public async Task TimesOutAndCancels()
     {
-        using var dir = new TempDirectory("dsh-aws");
+        using var dir = new TempDirectory("vision-aws");
         var aws = Script(dir, "echo started; sleep 30");
         var clock = Stopwatch.StartNew();
         var timedOut = await new ProcessAwsCliRunner(aws).RunAsync([], new AwsCliRunOptions { Timeout = TimeSpan.FromMilliseconds(500) });
@@ -324,7 +324,7 @@ public sealed class AwsCliTests
     [UnixFact]
     public async Task AFailingAnswererStopsTheCli()
     {
-        using var dir = new TempDirectory("dsh-aws");
+        using var dir = new TempDirectory("vision-aws");
         var aws = Script(dir, "printf 'Enter the authorization code displayed in your browser: '; read code; echo done");
         await Assert.ThrowsAsync<InvalidOperationException>(() => new ProcessAwsCliRunner(aws).RunAsync([], new AwsCliRunOptions
         {
@@ -336,7 +336,7 @@ public sealed class AwsCliTests
     [UnixFact]
     public async Task ChecksARealExecutable()
     {
-        using var dir = new TempDirectory("dsh-aws");
+        using var dir = new TempDirectory("vision-aws");
         var aws = Script(dir, "echo 'aws-cli/2.37.5 Python/3.13.9 Linux/6.8 exe/x86_64.ubuntu.24'");
         var status = await AwsCli.CheckAsync(new AwsCliSearch { ExplicitPath = aws, FileName = "aws", IgnoreCase = false });
         Assert.Equal(new Version(2, 37, 5), Assert.IsType<AwsCliStatus.Ready>(status).Version);
@@ -345,5 +345,5 @@ public sealed class AwsCliTests
 
     [Fact]
     public async Task AMissingExecutableIsAnIOException() =>
-        await Assert.ThrowsAsync<IOException>(() => new ProcessAwsCliRunner("/nonexistent/dsh/aws").RunAsync(["--version"]));
+        await Assert.ThrowsAsync<IOException>(() => new ProcessAwsCliRunner("/nonexistent/vision/aws").RunAsync(["--version"]));
 }

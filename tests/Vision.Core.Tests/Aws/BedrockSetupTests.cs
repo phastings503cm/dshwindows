@@ -201,16 +201,16 @@ public sealed class BedrockSetupTests
         var runner = new FakeAwsCliRunner()
             .On(["bedrock", "list-foundation-models"], FoundationModels)
             .OnSequence(["bedrock", "list-inference-profiles"], new AwsCliResult(0, page1, ""), new AwsCliResult(0, page2, ""));
-        var setup = new BedrockSetup(new AwsCli(runner), "dsh-bedrock", "us-east-1");
+        var setup = new BedrockSetup(new AwsCli(runner), "vision-bedrock", "us-east-1");
         var models = await setup.ListModelsAsync();
 
         Assert.Equal("us.anthropic.claude-sonnet-4-5-20250929-v1:0", models.Single(m => m.ModelId.Contains("sonnet-4-5")).InvokeId);
         Assert.Equal("global.anthropic.claude-haiku-4-5-20251001-v1:0", models.Single(m => m.ModelId.Contains("haiku-4-5")).InvokeId);
-        Assert.Equal(["bedrock", "list-foundation-models", "--by-output-modality", "TEXT", "--profile", "dsh-bedrock", "--region", "us-east-1", "--output", "json"],
+        Assert.Equal(["bedrock", "list-foundation-models", "--by-output-modality", "TEXT", "--profile", "vision-bedrock", "--region", "us-east-1", "--output", "json"],
             runner.Calls[0].Args);
         var profileCalls = runner.CallsTo("bedrock", "list-inference-profiles");
         Assert.Equal(2, profileCalls.Count);
-        Assert.Equal(["bedrock", "list-inference-profiles", "--type-equals", "SYSTEM_DEFINED", "--profile", "dsh-bedrock", "--region", "us-east-1", "--output", "json"],
+        Assert.Equal(["bedrock", "list-inference-profiles", "--type-equals", "SYSTEM_DEFINED", "--profile", "vision-bedrock", "--region", "us-east-1", "--output", "json"],
             profileCalls[0].Args);
         Assert.True(profileCalls[1].HasPair("--starting-token", "eyJuZXh0IjogMn0="));
     }
@@ -271,7 +271,7 @@ public sealed class BedrockSetupTests
     {
         var runner = new FakeAwsCliRunner();
         script(runner);
-        return (new BedrockSetup(new AwsCli(runner), "dsh-bedrock", "us-east-1", time), runner);
+        return (new BedrockSetup(new AwsCli(runner), "vision-bedrock", "us-east-1", time), runner);
     }
 
     [Theory]
@@ -316,7 +316,7 @@ public sealed class BedrockSetupTests
         Assert.Equal("Input tokens (per 1K): US$0.0030; OutputTokenCount: US$0.0150 per 1K tokens", offer.PricingSummary);
         Assert.Equal("No refunds for usage already billed.", offer.RefundPolicy);
         Assert.Equal("1 year", offer.DurationText);
-        Assert.Equal(["bedrock", "list-foundation-model-agreement-offers", "--model-id", "cohere.command-r-plus-v1:0", "--profile", "dsh-bedrock", "--region", "us-east-1", "--output", "json"],
+        Assert.Equal(["bedrock", "list-foundation-model-agreement-offers", "--model-id", "cohere.command-r-plus-v1:0", "--profile", "vision-bedrock", "--region", "us-east-1", "--output", "json"],
             runner.CallsTo("bedrock", "list-foundation-model-agreement-offers")[0].Args);
     }
 
@@ -473,7 +473,7 @@ public sealed class BedrockSetupTests
         Assert.Equal(UseCaseSubmission.Submitted, await setup.SubmitUseCaseAsync(Acme));
         var put = Assert.Single(runner.CallsTo("bedrock", "put-use-case-for-model-access"));
         Assert.Equal(["bedrock", "put-use-case-for-model-access", "--form-data", Acme.ToBase64(), "--cli-binary-format", "base64",
-                      "--profile", "dsh-bedrock", "--region", "us-east-1", "--output", "json"], put.Args);
+                      "--profile", "vision-bedrock", "--region", "us-east-1", "--output", "json"], put.Args);
         Assert.Equal(Acme.ToJson(), Encoding.UTF8.GetString(Convert.FromBase64String(put.Args[3])));
     }
 
@@ -503,7 +503,7 @@ public sealed class BedrockSetupTests
         var (setup, runner) = Setup(r => r.On(["bedrock", "create-foundation-model-agreement"], """{"modelId": "cohere.command-r-plus-v1:0"}"""));
         await setup.AcceptAgreementAsync("cohere.command-r-plus-v1:0", "eyJvZmZlcklkIjoib2ZmZXItM2syIn0=");
         Assert.Equal(["bedrock", "create-foundation-model-agreement", "--model-id", "cohere.command-r-plus-v1:0", "--offer-token", "eyJvZmZlcklkIjoib2ZmZXItM2syIn0=",
-                      "--profile", "dsh-bedrock", "--region", "us-east-1", "--output", "json"], Assert.Single(runner.Calls).Args);
+                      "--profile", "vision-bedrock", "--region", "us-east-1", "--output", "json"], Assert.Single(runner.Calls).Args);
     }
 
     [Fact]

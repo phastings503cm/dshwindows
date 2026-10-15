@@ -274,8 +274,8 @@ public static partial class SwapperAddress
     [GeneratedRegex(@"^(?:[A-Za-z][A-Za-z0-9+.\-]*://)?(?:\[[^\]]*\]|[^/:?#\[\]]+):\d+(?:[/?#]|$)", RegexOptions.CultureInvariant)]
     private static partial Regex TypedPort();
 
-    /// <summary>"DSH on DESKTOP-1234" — the label a token gets, so the Swapper's Connect tab says whose it is.</summary>
-    public static string TokenLabel(string? machineName = null) => $"DSH on {machineName ?? Environment.MachineName}";
+    /// <summary>"Vision on DESKTOP-1234" — the label a token gets, so the Swapper's Connect tab says whose it is.</summary>
+    public static string TokenLabel(string? machineName = null) => $"Vision on {machineName ?? Environment.MachineName}";
 }
 
 // MARK: - /swap

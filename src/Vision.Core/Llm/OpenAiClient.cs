@@ -869,9 +869,9 @@ public sealed class OpenAiClient : IProviderClient
         return parts;
     }
 
-    /// <summary>"DSH/0.7.12 (Windows)" — who is calling, honestly. (Some plans check the calling app; DSH never claims to
-    /// be another one.)</summary>
-    public static string UserAgent => $"DSH/{AppInfo.Version} (Windows)";
+    /// <summary>"Vision/0.9.12 (Windows)" — who is calling, honestly. (Some plans check the calling app; Vision never claims
+    /// to be another one.)</summary>
+    public static string UserAgent => $"Vision/{AppInfo.Version} (Windows)";
 
     /// <summary>Authorization + user-supplied custom headers on every request.</summary>
     private void ApplyHeaders(HttpRequestMessage req)

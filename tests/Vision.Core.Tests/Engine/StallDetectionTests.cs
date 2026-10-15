@@ -5,7 +5,7 @@ namespace Vision.Core.Tests;
 /// different "Time Elapsed" line does not make a repeated call look new.</summary>
 public sealed class StallDetectionTests : IDisposable
 {
-    private readonly TempDirectory _root = new("dsh-stalls");
+    private readonly TempDirectory _root = new("vision-stalls");
 
     public void Dispose() => _root.Dispose();
 

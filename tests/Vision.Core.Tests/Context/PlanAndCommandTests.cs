@@ -106,7 +106,7 @@ public sealed class NewSlashCommandTests
 
 public sealed class PlanEventTests : IDisposable
 {
-    private readonly TempDirectory _root = new("dsh-plan");
+    private readonly TempDirectory _root = new("vision-plan");
 
     public void Dispose() => _root.Dispose();
 

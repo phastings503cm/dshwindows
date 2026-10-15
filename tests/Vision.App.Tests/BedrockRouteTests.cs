@@ -10,7 +10,7 @@ namespace Vision.App.Tests;
 /// the same profile in again.</summary>
 public sealed class BedrockRouteTests : IDisposable
 {
-    private readonly string _dir = Path.Combine(Path.GetTempPath(), $"dsh-bedrock-{Guid.NewGuid():N}");
+    private readonly string _dir = Path.Combine(Path.GetTempPath(), $"vision-bedrock-{Guid.NewGuid():N}");
     private readonly FakeModelServer _server = new();
 
     public BedrockRouteTests()

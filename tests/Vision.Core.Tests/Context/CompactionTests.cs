@@ -5,7 +5,7 @@ namespace Vision.Core.Tests;
 /// <summary>Ported from CompactionTests.swift.</summary>
 public sealed class CompactionTests : IDisposable
 {
-    private readonly TempDirectory _root = new("dsh-compact");
+    private readonly TempDirectory _root = new("vision-compact");
 
     public void Dispose() => _root.Dispose();
 

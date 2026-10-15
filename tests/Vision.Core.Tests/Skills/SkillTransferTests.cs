@@ -121,10 +121,10 @@ public sealed class SkillTransferTests : IDisposable
         var repo = Path.Combine(_fx.Base, "repo3");
         _fx.Skill("skills/fine", "fine", "Use when nothing is linked.", root: repo);
         var secret = _fx.Write("secret.md", "---\nname: stolen\ndescription: Use when stealing.\n---\nTOP SECRET");
-        _fx.Skill(".dsh/skills/elsewhere", "elsewhere", "Use when outside the import.");
+        _fx.Skill(".vision/skills/elsewhere", "elsewhere", "Use when outside the import.");
         Directory.CreateDirectory(Path.Combine(repo, "skills", "evil"));
         if (!TryLink(() => File.CreateSymbolicLink(Path.Combine(repo, "skills", "evil", "SKILL.md"), secret))) return;
-        if (!TryLink(() => Directory.CreateSymbolicLink(Path.Combine(repo, "skills", "linked"), Path.Combine(_fx.Project, ".dsh", "skills")))) return;
+        if (!TryLink(() => Directory.CreateSymbolicLink(Path.Combine(repo, "skills", "linked"), Path.Combine(_fx.Project, ".vision", "skills")))) return;
         var plan = SkillImporter.Scan(repo);
         Assert.Equal(new[] { "fine" }, plan.Candidates.Select(c => c.Name));
     }
@@ -160,8 +160,8 @@ public sealed class SkillTransferTests : IDisposable
     [Fact]
     public void ExportPortableZipThenImportItBack()
     {
-        _fx.Skill(".dsh/skills/alpha", "alpha", "Use when alpha.", body: "ALPHA");
-        _fx.Write(".dsh/skills/alpha/ref/notes.md", "notes");
+        _fx.Skill(".vision/skills/alpha", "alpha", "Use when alpha.", body: "ALPHA");
+        _fx.Write(".vision/skills/alpha/ref/notes.md", "notes");
         _fx.Write(".cursor/rules/beta.mdc", "---\ndescription: Beta rule\nglobs: [\"b/**\"]\n---\nBETA");
         var skills = SkillCatalog.Load(_fx.Project, _fx.Locations);
         var zip = Path.Combine(_fx.Base, "out.zip");
@@ -191,8 +191,8 @@ public sealed class SkillTransferTests : IDisposable
     [Fact]
     public void LayoutZipsHoldTheirDotFoldersAndAReadme()
     {
-        _fx.Skill(".dsh/skills/alpha", "alpha", "Use when alpha.", body: "ALPHA");
-        _fx.Write(".dsh/skills/alpha/ref/notes.md", "notes");
+        _fx.Skill(".vision/skills/alpha", "alpha", "Use when alpha.", body: "ALPHA");
+        _fx.Write(".vision/skills/alpha/ref/notes.md", "notes");
         var zip = Path.Combine(_fx.Base, "claude.zip");
         File.WriteAllText(zip, "an older export"); // replaced, not appended to
         SkillExporter.Zip(SkillCatalog.Load(_fx.Project, _fx.Locations), ExportFormat.Claude, zip);
@@ -440,9 +440,9 @@ public sealed class SkillTransferTests : IDisposable
     [Fact]
     public void ExportLayoutsAreReadableByTheirTools()
     {
-        _fx.Skill(".dsh/skills/alpha", "alpha", "Use when alpha.", body: "ALPHA");
-        _fx.Skill(".dsh/skills/withfiles", "withfiles", "Use when files.", body: "F");
-        _fx.Write(".dsh/skills/withfiles/scripts/run.sh", "echo");
+        _fx.Skill(".vision/skills/alpha", "alpha", "Use when alpha.", body: "ALPHA");
+        _fx.Skill(".vision/skills/withfiles", "withfiles", "Use when files.", body: "F");
+        _fx.Write(".vision/skills/withfiles/scripts/run.sh", "echo");
         _fx.Write(".claude/commands/ship.md", "---\ndescription: Ship\n---\nShip it");
         var skills = SkillCatalog.Load(_fx.Project, _fx.Locations);
 
@@ -466,7 +466,7 @@ public sealed class SkillTransferTests : IDisposable
 
         foreach (var (format, sub) in new[]
                  {
-                     (ExportFormat.Agents, ".agents/skills/alpha/SKILL.md"), (ExportFormat.Vision, ".dsh/skills/alpha/SKILL.md"),
+                     (ExportFormat.Agents, ".agents/skills/alpha/SKILL.md"), (ExportFormat.Vision, ".vision/skills/alpha/SKILL.md"),
                      (ExportFormat.Portable, "alpha/SKILL.md"),
                  })
         {
@@ -479,7 +479,7 @@ public sealed class SkillTransferTests : IDisposable
     [Fact]
     public void ExportConflictPolicies()
     {
-        _fx.Skill(".dsh/skills/alpha", "alpha", "Use when alpha.");
+        _fx.Skill(".vision/skills/alpha", "alpha", "Use when alpha.");
         var skills = SkillCatalog.Load(_fx.Project, _fx.Locations);
         var root = Path.Combine(_fx.Base, "target");
         SkillExporter.Write(skills, ExportFormat.Claude, root);
@@ -498,7 +498,7 @@ public sealed class SkillTransferTests : IDisposable
     public void ExportFormatsDescribeThemselves()
     {
         Assert.Equal(5, ExportFormats.All.Count);
-        Assert.Equal(new[] { "portable", "claude", "cursor", "agents", "dsh" }, ExportFormats.All.Select(f => f.RawValue()));
+        Assert.Equal(new[] { "portable", "claude", "cursor", "agents", "vision" }, ExportFormats.All.Select(f => f.RawValue()));
         Assert.All(ExportFormats.All, f =>
         {
             Assert.NotEmpty(f.Label());

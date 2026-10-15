@@ -4,7 +4,7 @@ namespace Vision.Core.Tests;
 /// tool; the macOS-only TerminalGuardTests are not ported).</summary>
 public sealed class ToolImageEngineTests : IDisposable
 {
-    private readonly TempDirectory _root = new("dsh-images");
+    private readonly TempDirectory _root = new("vision-images");
 
     public void Dispose() => _root.Dispose();
 
@@ -128,7 +128,7 @@ public sealed class ToolImageEngineTests : IDisposable
 /// <summary>New: the approvals model behind screen and input control.</summary>
 public sealed class ComputerAccessTests : IDisposable
 {
-    private readonly TempDirectory _root = new("dsh-computer");
+    private readonly TempDirectory _root = new("vision-computer");
 
     public void Dispose() => _root.Dispose();
 

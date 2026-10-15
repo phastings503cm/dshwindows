@@ -39,7 +39,7 @@ internal sealed class ConcurrencyClient : ILlmClient
 
 public sealed class MultiAgentTests : IDisposable
 {
-    private readonly TempDirectory _root = new("dsh-multiagent");
+    private readonly TempDirectory _root = new("vision-multiagent");
 
     public void Dispose() => _root.Dispose();
 

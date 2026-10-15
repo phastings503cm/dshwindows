@@ -137,7 +137,7 @@ public sealed class PseudoConsoleSession : IDisposable
         }
         variables["TERM"] = "xterm-256color";
         variables["COLORTERM"] = "truecolor";
-        variables["TERM_PROGRAM"] = "DSH";
+        variables["TERM_PROGRAM"] = "Vision";
         foreach (var (key, value) in overrides ?? new Dictionary<string, string>()) variables[key] = value;
         var block = new StringBuilder();
         foreach (var (key, value) in variables)

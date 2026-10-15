@@ -178,7 +178,7 @@ public static class PluginLoader
     public static IReadOnlyList<string> Directories(string? project)
     {
         var dirs = new List<string>();
-        if (project is not null) dirs.Add(Path.Combine(project, ".dsh", "plugins"));
+        if (project is not null) dirs.AddRange(ProjectFolders.ReadFolders(project, "plugins"));
         dirs.Add(UserDirectory);
         return dirs;
     }

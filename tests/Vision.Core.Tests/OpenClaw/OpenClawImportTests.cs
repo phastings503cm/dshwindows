@@ -3,7 +3,7 @@ namespace Vision.Core.Tests;
 public sealed class OpenClawImportTests : IDisposable
 {
     private readonly OpenClawFixture _fx = new();
-    private readonly TempDirectory _dsh = new("dsh-target");
+    private readonly TempDirectory _dsh = new("vision-target");
 
     public void Dispose()
     {
@@ -216,7 +216,7 @@ public sealed class OpenClawImportTests : IDisposable
 
 public sealed class RemoteFileSourceTests : IDisposable
 {
-    private readonly TempDirectory _root = new("dsh-remote");
+    private readonly TempDirectory _root = new("vision-remote");
 
     public void Dispose() => _root.Dispose();
 
@@ -231,7 +231,7 @@ public sealed class RemoteFileSourceTests : IDisposable
     {
         using var source = Source(out _);
         Assert.Equal(_root.Path, await source.HomeAsync(default));
-        Assert.Null(await source.EnvironmentAsync("DSH_SURELY_NOT_SET_12345", default));
+        Assert.Null(await source.EnvironmentAsync("VISION_SURELY_NOT_SET_12345", default));
         Assert.Null(await source.EnvironmentAsync("BAD NAME; rm -rf /", default)); // refused, never run
         Assert.NotNull(await source.EnvironmentAsync("HOME", default));
     }

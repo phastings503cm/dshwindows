@@ -194,7 +194,7 @@ public sealed record AgentShell(ShellKind Kind, string Executable, string Displa
             RedirectStandardError = true,
         };
         psi.Environment["PYTHONIOENCODING"] = "utf-8";
-        psi.Environment["DSH_AGENT"] = "1";
+        foreach (var (name, value) in AgentEnvironment.Markers) psi.Environment[name] = value;
         switch (Kind)
         {
             case ShellKind.PowerShell:
@@ -227,16 +227,16 @@ public sealed record AgentShell(ShellKind Kind, string Executable, string Displa
             .AppendLine("try { [Console]::OutputEncoding = [System.Text.Encoding]::UTF8; $OutputEncoding = [System.Text.Encoding]::UTF8 } catch { }")
             .AppendLine("if ($PSStyle) { $PSStyle.OutputRendering = 'PlainText' }")
             .AppendLine(command)
-            .AppendLine("$__dshOk = $?")
+            .AppendLine("$__visionOk = $?")
             .AppendLine("if ($LASTEXITCODE -is [int] -and $LASTEXITCODE -ne 0) { exit $LASTEXITCODE }")
-            .AppendLine("if (-not $__dshOk) { exit 1 }")
+            .AppendLine("if (-not $__visionOk) { exit 1 }")
             .AppendLine("exit 0")
             .ToString();
         var encoded = Convert.ToBase64String(Encoding.Unicode.GetBytes(script));
         string[] common = ["-NoLogo", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-OutputFormat", "Text"];
         // The Windows command line tops out at 32,767 characters; long scripts go through a file.
         if (encoded.Length < 28_000) return [.. common, "-EncodedCommand", encoded];
-        var file = Path.Combine(Path.GetTempPath(), $"dsh-cmd-{Guid.NewGuid():N}.ps1");
+        var file = Path.Combine(Path.GetTempPath(), $"vision-cmd-{Guid.NewGuid():N}.ps1");
         // PowerShell parses the whole file before running it, so the script can remove itself first
         // and nothing is left behind in %TEMP%.
         var selfDeleting = "Remove-Item -LiteralPath $PSCommandPath -Force -ErrorAction SilentlyContinue" + Environment.NewLine + script;

@@ -3,7 +3,7 @@ namespace Vision.Core.Tests;
 /// <summary>Ported from AgentToolTests.swift.</summary>
 public sealed class AgentToolTests : IDisposable
 {
-    private readonly TempDirectory _root = new("dsh-agenttool");
+    private readonly TempDirectory _root = new("vision-agenttool");
 
     public void Dispose() => _root.Dispose();
 
@@ -140,7 +140,7 @@ public sealed class AgentToolTests : IDisposable
 /// <summary>New: AgentTool argument checks, depth limit and failure reporting.</summary>
 public sealed class AgentToolGuardTests : IDisposable
 {
-    private readonly TempDirectory _root = new("dsh-agentguard");
+    private readonly TempDirectory _root = new("vision-agentguard");
 
     public void Dispose() => _root.Dispose();
 

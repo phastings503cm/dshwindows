@@ -6,7 +6,7 @@ namespace Vision.Core.Tests;
 /// counts only when the model has seen its other results, and a backstop bounds what nothing else catches.</summary>
 public sealed class EngineSafetyNetTests : IDisposable
 {
-    private readonly TempDirectory _root = new("dsh-safety");
+    private readonly TempDirectory _root = new("vision-safety");
 
     public void Dispose() => _root.Dispose();
 

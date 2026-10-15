@@ -1,7 +1,7 @@
 namespace Vision.Core;
 
 /// <summary>Copies the items a user chose from an <see cref="ExternalInventory"/> into DSH's own data
-/// folder. Everything written lands under %APPDATA%\DSH (skills, instructions, memory); the other tool's
+/// folder. Everything written lands under %APPDATA%\Vision (skills, instructions, memory); the other tool's
 /// files are only read, and nothing is run. The same limits as every other import apply — links are
 /// never followed, sizes are capped — and one item failing never stops the rest.</summary>
 public static class ExternalImporter

@@ -31,7 +31,8 @@ public sealed record ProjectContext(string Root, IReadOnlyList<InstructionFile> 
     /// .cursorrules, .claude/CLAUDE.md and CLAUDE.local.md are the same idea in Cursor's and Claude
     /// Code's layouts.</summary>
     public static readonly IReadOnlyList<string> InstructionNames =
-        ["AGENTS.md", "QWEN.md", "CLAUDE.md", ".claude/CLAUDE.md", "CLAUDE.local.md", ".cursorrules", "DSH.md", "MEMORY.md"];
+        ["AGENTS.md", "QWEN.md", "CLAUDE.md", ".claude/CLAUDE.md", "CLAUDE.local.md", ".cursorrules",
+         ProjectFolders.InstructionFile, ProjectFolders.LegacyInstructionFile, "MEMORY.md"];
 
     public static string UserSkillsDirectory => SkillLocations.Standard.UserSkills;
 

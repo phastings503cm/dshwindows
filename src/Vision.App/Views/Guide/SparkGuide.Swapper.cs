@@ -817,7 +817,7 @@ public sealed partial class SparkGuide
     }
 
     /// <summary>Put the Spark in Settings › Model servers for switching models, linked to its route. A Swapper 2.0 hands
-    /// out an app token (labelled "DSH on &lt;this PC&gt;"), which is kept instead of the Swapper password; an older one keeps
+    /// out an app token (labelled "Vision on &lt;this PC&gt;"), which is kept instead of the Swapper password; an older one keeps
     /// the login. Returns whether a token is kept.</summary>
     private async Task<bool> RegisterBoxAsync(ProviderProfile route, CancellationToken cancellationToken)
     {

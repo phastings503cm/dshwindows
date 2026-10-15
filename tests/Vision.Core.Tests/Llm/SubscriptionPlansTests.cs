@@ -188,9 +188,9 @@ public sealed class SubscriptionPlansTests
     }
 
     [Fact]
-    public void DshSaysWhoItIsHonestly()
+    public void VisionSaysWhoItIsHonestly()
     {
-        Assert.Matches(@"^DSH/[0-9A-Za-z.\-]+ \(Windows\)$", OpenAiClient.UserAgent);
+        Assert.Matches(@"^Vision/[0-9A-Za-z.\-]+ \(Windows\)$", OpenAiClient.UserAgent);
         Assert.DoesNotContain("claude", OpenAiClient.UserAgent, StringComparison.OrdinalIgnoreCase);
     }
 

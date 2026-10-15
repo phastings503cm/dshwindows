@@ -11,6 +11,18 @@ public sealed class SparkSetupTests
     public void HostsFromWhatPeopleType(string typed, string host) => Assert.Equal(host, SparkSetup.HostOf(typed));
 
     [Fact]
+    public void TheFrontTheAppWritesIsOneSparkSwapperKnowsToUpgrade()
+    {
+        // Spark Swapper's install.sh replaces a key-less front the Windows app wrote, recognising it by the nginx file's
+        // first-line marker: it matches "Written by (Vision|DSH) for Windows" (DSH being Vision's former name).
+        var conf = SparkInstaller.ModelFrontScript[SparkInstaller.ModelFrontScript.IndexOf("<<'NGINX'", StringComparison.Ordinal)..];
+        var marker = conf.Split('\n')[1].Trim();
+        Assert.StartsWith("# Written by Vision for Windows.", marker);
+        Assert.Matches("Written by (Vision|DSH) for Windows", marker);
+        Assert.DoesNotContain("Written by Spark Swapper", marker); // the Swapper's own front is left alone
+    }
+
+    [Fact]
     public void Addresses()
     {
         Assert.Equal(new Uri("https://192.168.1.42:8999"), SparkSetup.SwapperUrl("192.168.1.42"));

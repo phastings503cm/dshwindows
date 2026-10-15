@@ -5,7 +5,7 @@ namespace Vision.Core.Tests;
 /// event and thread safety.</summary>
 public sealed class TaskQueueStoreTests : IDisposable
 {
-    private readonly TempDirectory _dir = new("dsh-queue");
+    private readonly TempDirectory _dir = new("vision-queue");
     private readonly ManualClock _clock = new();
 
     public void Dispose() => _dir.Dispose();

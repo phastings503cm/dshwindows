@@ -14,7 +14,7 @@ namespace Vision.App.Model;
 
 public sealed partial class AgentHost
 {
-    /// <summary>Every chat's task list (saved to %APPDATA%\DSH\task-queue.json).</summary>
+    /// <summary>Every chat's task list (saved to %APPDATA%\Vision\task-queue.json).</summary>
     public TaskQueue Queue { get; private set; } = null!;
     /// <summary>Raised on the UI thread whenever a task list changes, or starts or stops running.</summary>
     public event Action? QueueChanged;

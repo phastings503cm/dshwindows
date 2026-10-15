@@ -3,44 +3,122 @@ using System.Text;
 
 namespace Vision.Core;
 
+/// <summary>One entry of a credential store: the secret and the user name stored with it.</summary>
+public sealed record CredentialEntry(string Secret, string? UserName);
+
+/// <summary>Where <see cref="SecretStore"/> keeps entries: Windows Credential Manager, or memory (tests, other
+/// platforms). Tests can stand in a fake one with <see cref="SecretStore.StoreOverride"/>.</summary>
+public interface ICredentialStore
+{
+    CredentialEntry? Read(string target);
+    void Write(string target, string secret, string userName);
+    void Delete(string target);
+}
+
 /// <summary>Secrets (API keys, Swapper tokens and passwords) in Windows Credential Manager — never in the
-/// settings file. Entries show up under "Windows Credentials" as DSH/…. On other platforms (tests)
+/// settings file. Entries show up under "Windows Credentials" as Vision/…. On other platforms (tests)
 /// secrets live in memory for the life of the process.</summary>
+/// <remarks>Vision was called DSH before 0.9 and kept its entries under DSH/…. Reading an entry that isn't under
+/// Vision/… yet looks for DSH's: when there is one it is copied to the new name, read back to check, and only then
+/// removed (<see cref="Read"/>). Writing or deleting an entry also removes DSH's copy of it, so an old key can never
+/// come back.</remarks>
 public static class SecretStore
 {
-    private static readonly Dictionary<string, string> Memory = new(StringComparer.Ordinal);
-    private static readonly Lock MemoryLock = new();
+    /// <summary>Every target starts with this.</summary>
+    public const string Prefix = "Vision/";
+
+    /// <summary>Legacy: the prefix DSH (Vision's former name) used. Read once per entry, to bring it over.</summary>
+    public const string LegacyPrefix = "DSH/";
+
+    private static readonly MemoryCredentialStore Memory = new();
 
     /// <summary>For tests: keep everything in memory even on Windows.</summary>
     public static bool UseMemoryOnly { get; set; }
 
-    private static bool UseCredentialManager => OperatingSystem.IsWindows() && !UseMemoryOnly;
+    /// <summary>For tests: a store of their own (a fake that fails on purpose, say). Wins over everything.</summary>
+    public static ICredentialStore? StoreOverride { get; set; }
 
-    public static string ProviderTarget(string routeId) => $"DSH/provider/{routeId}";
+    private static ICredentialStore Store =>
+        StoreOverride ?? (OperatingSystem.IsWindows() && !UseMemoryOnly ? WindowsCredentialStore.Instance : Memory);
+
+    public static string ProviderTarget(string routeId) => $"{Prefix}provider/{routeId}";
     /// <summary>The one Swapper login of versions before several boxes; read once, to move it to its connection.</summary>
-    public const string SparkTarget = "DSH/spark/login";
+    public const string SparkTarget = Prefix + "spark/login";
     /// <summary>A Swapper connection's app token or password.</summary>
-    public static string SwapperTarget(string connectionId) => $"DSH/swapper/{connectionId}";
+    public static string SwapperTarget(string connectionId) => $"{Prefix}swapper/{connectionId}";
+
+    /// <summary>Legacy: the name DSH kept <paramref name="target"/> under ("Vision/x" → "DSH/x"), or null for a target
+    /// that isn't one of ours.</summary>
+    public static string? LegacyTarget(string target) =>
+        target.StartsWith(Prefix, StringComparison.Ordinal) ? LegacyPrefix + target[Prefix.Length..] : null;
+
+    /// <summary>Bringing an entry over is read, write, read back, delete: one thread at a time, so a second reader
+    /// never finds DSH's entry gone and the new one not there yet.</summary>
+    private static readonly Lock BringOverLock = new();
 
     public static string? Read(string target)
     {
-        if (!UseCredentialManager)
+        var store = Store;
+        if (store.Read(target) is { } entry) return entry.Secret;
+        if (LegacyTarget(target) is null) return null;
+        lock (BringOverLock)
         {
-            lock (MemoryLock) return Memory.GetValueOrDefault(target);
+            // Another thread may have brought it over a moment ago.
+            if (store.Read(target) is { } again) return again.Secret;
+            return BringOver(store, target, out _);
         }
-        if (!Native.CredRead(target, Native.CredTypeGeneric, 0, out var handle)) return null;
+    }
+
+    /// <summary>Bring DSH's entries for <paramref name="targets"/> over to their Vision names now (the app does this
+    /// for every route and Swapper box at launch, so nothing waits for its first use). Returns how many were brought over.</summary>
+    public static int BringOver(IEnumerable<string> targets)
+    {
+        var store = Store;
+        var count = 0;
+        foreach (var target in targets)
+        {
+            try
+            {
+                lock (BringOverLock)
+                {
+                    if (store.Read(target) is null && BringOver(store, target, out var moved) is not null && moved) count++;
+                }
+            }
+            catch (Exception ex) when (ex is InvalidOperationException or ArgumentException or ExternalException)
+            {
+                // One unreadable entry doesn't stop the rest; it is tried again when it is read.
+            }
+        }
+        return count;
+    }
+
+    /// <summary>DSH's entry for <paramref name="target"/>, if there is one: copied to <paramref name="target"/> with the
+    /// same user name, read back, and removed only when the copy reads back the same (a copy that doesn't is removed
+    /// instead, so DSH's stays the one in use). If the copy can't be made, DSH's entry stays too. Returns DSH's secret,
+    /// or null when it had no such entry; <paramref name="moved"/> says whether it now lives under the new name only.
+    /// Never logs or reports the secret.</summary>
+    private static string? BringOver(ICredentialStore store, string target, out bool moved)
+    {
+        moved = false;
+        if (LegacyTarget(target) is not { } legacy || store.Read(legacy) is not { } old) return null;
         try
         {
-            var credential = Marshal.PtrToStructure<Native.Credential>(handle);
-            if (credential.CredentialBlob == IntPtr.Zero || credential.CredentialBlobSize == 0) return "";
-            var bytes = new byte[credential.CredentialBlobSize];
-            Marshal.Copy(credential.CredentialBlob, bytes, 0, bytes.Length);
-            return Encoding.Unicode.GetString(bytes);
+            store.Write(target, old.Secret, old.UserName ?? Environment.UserName);
+            if (store.Read(target) is { } copied && string.Equals(copied.Secret, old.Secret, StringComparison.Ordinal))
+            {
+                store.Delete(legacy);
+                moved = true;
+            }
+            else
+            {
+                store.Delete(target);
+            }
         }
-        finally
+        catch (Exception ex) when (ex is InvalidOperationException or ArgumentException or ExternalException)
         {
-            Native.CredFree(handle);
+            // Keep DSH's entry: it still works, and the next read tries again.
         }
+        return old.Secret;
     }
 
     /// <summary>Store <paramref name="secret"/>; an empty secret deletes the entry.</summary>
@@ -51,14 +129,76 @@ public static class SecretStore
             Delete(target);
             return;
         }
-        if (!UseCredentialManager)
+        var store = Store;
+        store.Write(target, secret, userName ?? Environment.UserName);
+        // DSH's older copy would otherwise come back if this entry were ever deleted.
+        if (LegacyTarget(target) is { } legacy)
         {
-            lock (MemoryLock) Memory[target] = secret;
-            return;
+            try { store.Delete(legacy); } catch (Exception ex) when (ex is InvalidOperationException or ExternalException) { }
         }
+    }
+
+    /// <summary>Remove the entry — and DSH's copy of it, if one was never brought over.</summary>
+    public static void Delete(string target)
+    {
+        var store = Store;
+        store.Delete(target);
+        if (LegacyTarget(target) is { } legacy) store.Delete(legacy);
+    }
+}
+
+/// <summary>Entries in memory, for the life of the process (tests; platforms without Credential Manager).</summary>
+public sealed class MemoryCredentialStore : ICredentialStore
+{
+    private readonly Dictionary<string, CredentialEntry> _entries = new(StringComparer.Ordinal);
+    private readonly Lock _lock = new();
+
+    public CredentialEntry? Read(string target)
+    {
+        lock (_lock) return _entries.GetValueOrDefault(target);
+    }
+
+    public void Write(string target, string secret, string userName)
+    {
+        lock (_lock) _entries[target] = new CredentialEntry(secret, userName);
+    }
+
+    public void Delete(string target)
+    {
+        lock (_lock) _entries.Remove(target);
+    }
+}
+
+/// <summary>Generic credentials in Windows Credential Manager, saved for this user on this PC.</summary>
+internal sealed class WindowsCredentialStore : ICredentialStore
+{
+    public static readonly WindowsCredentialStore Instance = new();
+
+    /// <summary>Credential Manager's limit on a secret: 5 × 512 bytes (2,560), in UTF-16.</summary>
+    public const int MaxSecretBytes = 5 * 512;
+
+    public CredentialEntry? Read(string target)
+    {
+        if (!Native.CredRead(target, Native.CredTypeGeneric, 0, out var handle)) return null;
+        try
+        {
+            var credential = Marshal.PtrToStructure<Native.Credential>(handle);
+            if (credential.CredentialBlob == IntPtr.Zero || credential.CredentialBlobSize == 0) return new CredentialEntry("", credential.UserName);
+            var bytes = new byte[credential.CredentialBlobSize];
+            Marshal.Copy(credential.CredentialBlob, bytes, 0, bytes.Length);
+            return new CredentialEntry(Encoding.Unicode.GetString(bytes), credential.UserName);
+        }
+        finally
+        {
+            Native.CredFree(handle);
+        }
+    }
+
+    public void Write(string target, string secret, string userName)
+    {
         var bytes = Encoding.Unicode.GetBytes(secret);
-        if (bytes.Length > 5 * 512) throw new ArgumentException("That secret is too long to store in Credential Manager.");
-        var blob = Marshal.AllocHGlobal(bytes.Length);
+        if (bytes.Length > MaxSecretBytes) throw new ArgumentException("That secret is too long to store in Credential Manager.");
+        var blob = Marshal.AllocHGlobal(Math.Max(1, bytes.Length));
         try
         {
             Marshal.Copy(bytes, 0, blob, bytes.Length);
@@ -69,8 +209,8 @@ public static class SecretStore
                 CredentialBlobSize = (uint)bytes.Length,
                 CredentialBlob = blob,
                 Persist = Native.CredPersistLocalMachine,
-                UserName = userName ?? Environment.UserName,
-                Comment = "Stored by DSH for Windows",
+                UserName = userName,
+                Comment = "Stored by Vision for Windows",
             };
             if (!Native.CredWrite(ref credential, 0))
                 throw new InvalidOperationException($"Couldn't save to Credential Manager (error {Marshal.GetLastWin32Error()}).");
@@ -81,15 +221,7 @@ public static class SecretStore
         }
     }
 
-    public static void Delete(string target)
-    {
-        if (!UseCredentialManager)
-        {
-            lock (MemoryLock) Memory.Remove(target);
-            return;
-        }
-        Native.CredDelete(target, Native.CredTypeGeneric, 0);
-    }
+    public void Delete(string target) => Native.CredDelete(target, Native.CredTypeGeneric, 0);
 
     private static class Native
     {

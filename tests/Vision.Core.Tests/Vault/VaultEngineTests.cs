@@ -27,7 +27,7 @@ public sealed class RecordingTool : IToolExecutor
 /// the model never sees it, and the access rules hold.</summary>
 public sealed class VaultEngineTests : IDisposable
 {
-    private readonly TempDirectory _root = new("dsh-vault-engine");
+    private readonly TempDirectory _root = new("vision-vault-engine");
 
     public void Dispose() => _root.Dispose();
 

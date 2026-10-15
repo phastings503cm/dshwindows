@@ -7,7 +7,7 @@ namespace Vision.Core.Tests;
 /// when it is not.</summary>
 public sealed class EditorBufferTests : IDisposable
 {
-    private readonly TempDirectory _root = new("dsh-buf");
+    private readonly TempDirectory _root = new("vision-buf");
 
     public void Dispose() => _root.Dispose();
 
@@ -155,7 +155,7 @@ public sealed class EditorBufferTests : IDisposable
 /// <summary>New: Windows line endings and BOMs survive an edit, and the size/encoding guards.</summary>
 public sealed class EditorBufferFormatTests : IDisposable
 {
-    private readonly TempDirectory _root = new("dsh-buf2");
+    private readonly TempDirectory _root = new("vision-buf2");
 
     public void Dispose() => _root.Dispose();
 

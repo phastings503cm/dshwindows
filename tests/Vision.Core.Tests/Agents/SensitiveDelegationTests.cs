@@ -5,7 +5,7 @@ namespace Vision.Core.Tests;
 /// <summary>A task marked sensitive runs only on a private server — never on an online service.</summary>
 public sealed class SensitiveDelegationTests : IDisposable
 {
-    private readonly TempDirectory _root = new("dsh-sensitive");
+    private readonly TempDirectory _root = new("vision-sensitive");
 
     public void Dispose() => _root.Dispose();
 

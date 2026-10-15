@@ -6,7 +6,7 @@ namespace Vision.Core.Tests;
 public sealed class OpenClawReviewFixesTests : IDisposable
 {
     private readonly OpenClawFixture _fx = new();
-    private readonly TempDirectory _dsh = new("dsh-target");
+    private readonly TempDirectory _dsh = new("vision-target");
 
     public void Dispose()
     {

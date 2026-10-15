@@ -4,7 +4,7 @@ namespace Vision.Core.Tests;
 /// the policy only does path arithmetic.</summary>
 public sealed class PermissionTests
 {
-    private static readonly string Root = Path.Combine(Path.GetTempPath(), "dsh-project");
+    private static readonly string Root = Path.Combine(Path.GetTempPath(), "vision-project");
 
     private static PermissionPolicy Policy(PermissionPreset preset) => new(preset, Root);
 
@@ -91,7 +91,7 @@ public sealed class PermissionTests
 /// Git Bash's /c/…) the port has to understand.</summary>
 public sealed class PermissionPathTests
 {
-    private static readonly string Root = Path.Combine(Path.GetTempPath(), "dsh-project");
+    private static readonly string Root = Path.Combine(Path.GetTempPath(), "vision-project");
 
     private static PermissionPolicy Policy() => new(PermissionPreset.WorkspaceWrite, Root);
 

@@ -8,7 +8,7 @@ namespace Vision.Core.Tests;
 /// ~/.claude, ~/.cursor or %APPDATA%.</summary>
 internal sealed class ProfileFixture : IDisposable
 {
-    private readonly TempDirectory _temp = new("dsh-profile");
+    private readonly TempDirectory _temp = new("vision-profile");
 
     public ProfileFixture()
     {

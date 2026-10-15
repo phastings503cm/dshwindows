@@ -4,7 +4,7 @@ namespace Vision.Core.Tests;
 /// Windows rewrite of the skill's text.</summary>
 public sealed class BuiltinSkillsTests : IDisposable
 {
-    private readonly TempDirectory _temp = new("dsh-builtin");
+    private readonly TempDirectory _temp = new("vision-builtin");
 
     public void Dispose() => _temp.Dispose();
 

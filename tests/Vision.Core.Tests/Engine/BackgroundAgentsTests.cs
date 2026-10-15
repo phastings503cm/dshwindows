@@ -47,7 +47,7 @@ public sealed class RoleScriptedClient(Func<string, string> sub, params Turn[] m
 /// <summary>Ported from BackgroundAgentsTests.swift.</summary>
 public sealed class BackgroundAgentsTests : IDisposable
 {
-    private readonly TempDirectory _root = new("dsh-bg");
+    private readonly TempDirectory _root = new("vision-bg");
 
     public void Dispose() => _root.Dispose();
 

@@ -21,8 +21,8 @@ public sealed class BackgroundCommandLineTests
         Assert.Contains(command, lines);
         Assert.Contains("$ProgressPreference = 'SilentlyContinue'", lines);
         Assert.Contains("if ($LASTEXITCODE -is [int] -and $LASTEXITCODE -ne 0) { exit $LASTEXITCODE }", lines);
-        Assert.Contains("if (-not $__dshOk) { exit 1 }", lines);
-        Assert.True(Array.IndexOf(lines, command) < Array.IndexOf(lines, "$__dshOk = $?"));
+        Assert.Contains("if (-not $__visionOk) { exit 1 }", lines);
+        Assert.True(Array.IndexOf(lines, command) < Array.IndexOf(lines, "$__visionOk = $?"));
     }
 
     [Fact]
@@ -80,11 +80,13 @@ public sealed class BackgroundCommandLineTests
     [Fact]
     public void EnvironmentMarksTheAgentAndLetsTheModelOverride()
     {
-        var launch = new ProcessLaunch("x", "/", new Dictionary<string, string> { ["DSH_AGENT"] = "custom", ["PORT"] = "3000" },
+        var launch = new ProcessLaunch("x", "/", new Dictionary<string, string> { ["VISION_AGENT"] = "custom", ["PORT"] = "3000" },
                                        80, 24, AgentShell.Default);
         var environment = BackgroundCommandLine.EnvironmentFor(launch, [new("TERM", "dumb")]);
         Assert.Equal("utf-8", environment["PYTHONIOENCODING"]);
-        Assert.Equal("custom", environment["DSH_AGENT"]);
+        Assert.Equal("custom", environment["VISION_AGENT"]);
+        // Legacy: still set for users' scripts written for DSH (Vision's former name).
+        Assert.Equal("1", environment["DSH_AGENT"]);
         Assert.Equal("3000", environment["PORT"]);
         Assert.Equal("dumb", environment["TERM"]);
     }

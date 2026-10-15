@@ -17,20 +17,51 @@ public sealed class AwsSignInTests
     ];
 
     private static readonly AwsCliResult LoggedIn = new(0,
-        "\nUpdated profile dsh-bedrock to use arn:aws:iam::111122223333:user/alice credentials.\n" +
-        "Use \"--profile dsh-bedrock\" to use the new credentials, such as \"aws sts get-caller-identity --profile dsh-bedrock\"\n", "");
+        "\nUpdated profile vision-bedrock to use arn:aws:iam::111122223333:user/alice credentials.\n" +
+        "Use \"--profile vision-bedrock\" to use the new credentials, such as \"aws sts get-caller-identity --profile vision-bedrock\"\n", "");
 
     private static Func<AwsProfiles> Profiles(string? config, string? credentials = null) => () => AwsProfiles.Parse(config, credentials);
 
     [Fact]
     public void BuildsTheLoginCommand()
     {
-        Assert.Equal(["login", "--profile", "dsh-bedrock", "--region", "eu-central-1"], AwsSignIn.LoginArguments("dsh-bedrock", "eu-central-1"));
+        Assert.Equal(["login", "--profile", "vision-bedrock", "--region", "eu-central-1"], AwsSignIn.LoginArguments("vision-bedrock", "eu-central-1"));
         Assert.Equal(["login", "--profile", "p", "--region", "us-east-1", "--remote", "--redirect-port", "8400"],
             AwsSignIn.LoginArguments("p", "us-east-1", remote: true, redirectPort: 8400));
         Assert.Equal(["sso", "login", "--profile", "corp-dev"], AwsSignIn.SsoLoginArguments("corp-dev"));
         Assert.Equal(["sso", "login", "--profile", "corp-dev", "--use-device-code", "--no-browser"], AwsSignIn.SsoLoginArguments("corp-dev", remote: true));
-        Assert.Equal("dsh-bedrock", AwsSignIn.DefaultProfile);
+        Assert.Equal("vision-bedrock", AwsSignIn.DefaultProfile);
+    }
+
+    [Fact]
+    public void TheProfileDshMadeIsStillTheAppsOwn()
+    {
+        // Legacy: DSH (Vision's former name) signed in under "dsh-bedrock"; routes made then keep using it.
+        Assert.Equal("dsh-bedrock", AwsSignIn.LegacyDefaultProfile);
+        Assert.True(AwsSignIn.IsOwnProfile("vision-bedrock"));
+        Assert.True(AwsSignIn.IsOwnProfile("dsh-bedrock"));
+        Assert.False(AwsSignIn.IsOwnProfile("work-sso"));
+        Assert.False(AwsSignIn.IsOwnProfile(null));
+    }
+
+    [Fact]
+    public void DshRoutesThatReliedOnItsDefaultProfileNameItSoTheNewDefaultChangesNothing()
+    {
+        static ProviderProfile Bedrock(string name, string? profile) =>
+            new(ProviderKind.Bedrock, name, "https://bedrock-runtime.us-east-1.amazonaws.com", "m") { AwsProfile = profile };
+        var implicitProfile = Bedrock("implicit", null);   // signed in with DSH's default profile
+        var apiKey = Bedrock("api-key", null);             // a Bedrock API key: no profile at all
+        var named = Bedrock("named", "work-sso");
+        var openAi = new ProviderProfile(ProviderKind.OpenAI, "openai", "https://api.openai.com/v1", "gpt");
+
+        var changed = AwsSignIn.PinLegacyDefaultProfile([implicitProfile, apiKey, named, openAi], route => route.Name == "api-key");
+
+        Assert.Equal(1, changed);
+        Assert.Equal("dsh-bedrock", implicitProfile.AwsProfile);
+        Assert.Null(apiKey.AwsProfile);
+        Assert.Equal("work-sso", named.AwsProfile);
+        Assert.Null(openAi.AwsProfile);
+        Assert.Equal(0, AwsSignIn.PinLegacyDefaultProfile([implicitProfile], _ => false)); // once pinned, nothing more
     }
 
     [Fact]
@@ -43,11 +74,11 @@ public sealed class AwsSignInTests
         // Before: no such profile. After: aws login wrote login_session but no region (it only saves one it asked for).
         var signIn = new AwsSignIn(new AwsCli(runner), () => loads++ == 0
             ? AwsProfiles.Parse("[default]\nregion = us-west-2\n", null)
-            : AwsProfiles.Parse("[profile dsh-bedrock]\nlogin_session = arn:aws:iam::111122223333:user/alice\n", null));
+            : AwsProfiles.Parse("[profile vision-bedrock]\nlogin_session = arn:aws:iam::111122223333:user/alice\n", null));
         var output = new List<string>();
         var links = new List<AwsSignInLink>();
 
-        var result = await signIn.LoginAsync("dsh-bedrock", "eu-central-1", new AwsSignInOptions
+        var result = await signIn.LoginAsync("vision-bedrock", "eu-central-1", new AwsSignInOptions
         {
             OnOutput = output.Add,
             OnSignInLink = links.Add,
@@ -59,17 +90,17 @@ public sealed class AwsSignInTests
         Assert.Equal(new Uri(SameDeviceUrl), Assert.Single(links).Url);
         Assert.Contains("Attempting to open your default browser. If the browser does not open, open the following URL.", output);
         var login = Assert.Single(runner.CallsTo("login"));
-        Assert.Equal(["login", "--profile", "dsh-bedrock", "--region", "eu-central-1"], login.Args);
+        Assert.Equal(["login", "--profile", "vision-bedrock", "--region", "eu-central-1"], login.Args);
         Assert.Equal(TimeSpan.FromMinutes(15), login.Options!.Timeout);
-        Assert.Equal(["configure", "set", "region", "eu-central-1", "--profile", "dsh-bedrock"], Assert.Single(runner.CallsTo("configure")).Args);
+        Assert.Equal(["configure", "set", "region", "eu-central-1", "--profile", "vision-bedrock"], Assert.Single(runner.CallsTo("configure")).Args);
     }
 
     [Fact]
     public async Task ARegionAlreadyInTheProfileIsLeftAlone()
     {
         var runner = new FakeAwsCliRunner().OnInteractive(["login"], SameDeviceOutput(), LoggedIn);
-        var signIn = new AwsSignIn(new AwsCli(runner), Profiles("[profile dsh-bedrock]\nlogin_session = old\nregion = eu-central-1\n"));
-        Assert.True((await signIn.LoginAsync("dsh-bedrock", "eu-central-1")).Succeeded);
+        var signIn = new AwsSignIn(new AwsCli(runner), Profiles("[profile vision-bedrock]\nlogin_session = old\nregion = eu-central-1\n"));
+        Assert.True((await signIn.LoginAsync("vision-bedrock", "eu-central-1")).Succeeded);
         Assert.Empty(runner.CallsTo("configure"));
     }
 
@@ -78,12 +109,12 @@ public sealed class AwsSignInTests
     [InlineData(false, "n", AwsSignInOutcome.Cancelled)]
     public async Task AnswersTheOverwriteQuestion(bool replace, string expected, AwsSignInOutcome outcome)
     {
-        const string question = "\nProfile dsh-bedrock is already configured to use session arn:aws:iam::111122223333:user/bob. Do you want to overwrite it to use arn:aws:iam::111122223333:user/alice instead? (y/n): ";
+        const string question = "\nProfile vision-bedrock is already configured to use session arn:aws:iam::111122223333:user/bob. Do you want to overwrite it to use arn:aws:iam::111122223333:user/alice instead? (y/n): ";
         // Declining, the real CLI returns without printing "Updated profile …" and exits 0.
         var final = replace ? LoggedIn : new AwsCliResult(0, "", "");
         var runner = new FakeAwsCliRunner().OnInteractive(["login"], SameDeviceOutput(new FakeCliStep.Prompt(question)), final);
-        var signIn = new AwsSignIn(new AwsCli(runner), Profiles("[profile dsh-bedrock]\nlogin_session = x\nregion = us-east-1\n"));
-        var result = await signIn.LoginAsync("dsh-bedrock", "us-east-1", new AwsSignInOptions { ReplaceExistingSession = replace });
+        var signIn = new AwsSignIn(new AwsCli(runner), Profiles("[profile vision-bedrock]\nlogin_session = x\nregion = us-east-1\n"));
+        var result = await signIn.LoginAsync("vision-bedrock", "us-east-1", new AwsSignInOptions { ReplaceExistingSession = replace });
         var (prompt, answer) = Assert.Single(runner.Answers);
         Assert.Equal(question, prompt);
         Assert.Equal(expected, answer);
@@ -97,7 +128,7 @@ public sealed class AwsSignInTests
             .OnInteractive(["login"],
                 SameDeviceOutput(new FakeCliStep.Prompt("\nConfigure AWS skills and the AWS MCP server for your AI coding agent(s)? [y/n/never]: ")), LoggedIn)
             .On(["configure", "set"], "");
-        Assert.True((await new AwsSignIn(new AwsCli(runner), Profiles(null)).LoginAsync("dsh-bedrock", "us-east-1")).Succeeded);
+        Assert.True((await new AwsSignIn(new AwsCli(runner), Profiles(null)).LoginAsync("vision-bedrock", "us-east-1")).Succeeded);
         Assert.Equal("n", Assert.Single(runner.Answers).Answer);
     }
 
@@ -117,7 +148,7 @@ public sealed class AwsSignInTests
             .On(["configure", "set"], "");
         AwsSignInLink? asked = null;
         var signIn = new AwsSignIn(new AwsCli(runner), Profiles(null));
-        var result = await signIn.LoginAsync("dsh-bedrock", "us-east-1", new AwsSignInOptions
+        var result = await signIn.LoginAsync("vision-bedrock", "us-east-1", new AwsSignInOptions
         {
             Remote = true,
             RequestAuthorizationCode = (link, _) =>
@@ -137,7 +168,7 @@ public sealed class AwsSignInTests
     {
         var runner = new FakeAwsCliRunner().OnInteractive(["login"],
             [new FakeCliStep.Line(RemoteUrl), new FakeCliStep.Prompt("\nEnter the authorization code displayed in your browser: ")], LoggedIn);
-        var result = await new AwsSignIn(new AwsCli(runner), Profiles(null)).LoginAsync("dsh-bedrock", "us-east-1", new AwsSignInOptions
+        var result = await new AwsSignIn(new AwsCli(runner), Profiles(null)).LoginAsync("vision-bedrock", "us-east-1", new AwsSignInOptions
         {
             Remote = true,
             RequestAuthorizationCode = (_, _) => Task.FromResult<string?>(null),
@@ -152,21 +183,21 @@ public sealed class AwsSignInTests
         var runner = new FakeAwsCliRunner().OnInteractive(["login"], SameDeviceOutput(new FakeCliStep.Hang()), LoggedIn);
         using var cts = new CancellationTokenSource();
         var signIn = new AwsSignIn(new AwsCli(runner), Profiles(null));
-        var login = signIn.LoginAsync("dsh-bedrock", "us-east-1", new AwsSignInOptions { OnSignInLink = _ => cts.Cancel() }, cts.Token);
+        var login = signIn.LoginAsync("vision-bedrock", "us-east-1", new AwsSignInOptions { OnSignInLink = _ => cts.Cancel() }, cts.Token);
         await Assert.ThrowsAnyAsync<OperationCanceledException>(() => login);
         Assert.Empty(runner.CallsTo("configure"));
     }
 
     [Theory]
-    [InlineData("[profile dsh-bedrock]\nsso_session = corp\nsso_account_id = 1\nsso_role_name = Dev\n", AwsSignInOutcome.UseSsoLogin)]
-    [InlineData("[profile dsh-bedrock]\nrole_arn = arn:aws:iam::1:role/x\nsource_profile = default\n", AwsSignInOutcome.ProfileHasOtherCredentials)]
-    [InlineData("[profile dsh-bedrock]\ncredential_process = vault aws\n", AwsSignInOutcome.ProfileHasOtherCredentials)]
+    [InlineData("[profile vision-bedrock]\nsso_session = corp\nsso_account_id = 1\nsso_role_name = Dev\n", AwsSignInOutcome.UseSsoLogin)]
+    [InlineData("[profile vision-bedrock]\nrole_arn = arn:aws:iam::1:role/x\nsource_profile = default\n", AwsSignInOutcome.ProfileHasOtherCredentials)]
+    [InlineData("[profile vision-bedrock]\ncredential_process = vault aws\n", AwsSignInOutcome.ProfileHasOtherCredentials)]
     public async Task ProfilesWithOtherCredentialsAreLeftAlone(string config, AwsSignInOutcome outcome)
     {
         var runner = new FakeAwsCliRunner();
-        var result = await new AwsSignIn(new AwsCli(runner), Profiles(config)).LoginAsync("dsh-bedrock", "us-east-1");
+        var result = await new AwsSignIn(new AwsCli(runner), Profiles(config)).LoginAsync("vision-bedrock", "us-east-1");
         Assert.Equal(outcome, result.Outcome);
-        Assert.Contains("dsh-bedrock", result.Message);
+        Assert.Contains("vision-bedrock", result.Message);
         Assert.Empty(runner.Calls);
     }
 
@@ -208,7 +239,7 @@ public sealed class AwsSignInTests
         Assert.Contains("Failed to retrieve an authorization code.", result.Message);
         Assert.Equal(new Uri(SameDeviceUrl), result.Link!.Url);
         Assert.Empty(runner.CallsTo("configure"));
-        Assert.Equal(["login", "--profile", "dsh-bedrock", "--region", "us-east-1"], runner.Calls[0].Args);
+        Assert.Equal(["login", "--profile", "vision-bedrock", "--region", "us-east-1"], runner.Calls[0].Args);
     }
 
     [Theory]
@@ -248,7 +279,7 @@ public sealed class AwsSignInTests
     public async Task SsoSignInNeedsAnSsoProfile()
     {
         var runner = new FakeAwsCliRunner();
-        var result = await new AwsSignIn(new AwsCli(runner), Profiles("[profile dsh-bedrock]\nlogin_session = x\n")).SsoLoginAsync("dsh-bedrock");
+        var result = await new AwsSignIn(new AwsCli(runner), Profiles("[profile vision-bedrock]\nlogin_session = x\n")).SsoLoginAsync("vision-bedrock");
         Assert.Equal(AwsSignInOutcome.NotSsoProfile, result.Outcome);
         Assert.Empty(runner.Calls);
     }
@@ -266,12 +297,12 @@ public sealed class AwsSignInTests
                 "Arn": "arn:aws:iam::123456789012:user/alice"
             }
             """);
-        var identity = await new AwsSignIn(new AwsCli(runner), Profiles(null)).VerifyAsync("dsh-bedrock", "eu-central-1");
+        var identity = await new AwsSignIn(new AwsCli(runner), Profiles(null)).VerifyAsync("vision-bedrock", "eu-central-1");
         Assert.Equal("123456789012", identity.Account);
         Assert.Equal("AIDASAMPLEUSERID", identity.UserId);
         Assert.Equal("1234-5678-9012", identity.DisplayAccount);
         Assert.Equal("Signed in to AWS account 1234-5678-9012 as alice.", identity.Description);
-        Assert.Equal(["sts", "get-caller-identity", "--profile", "dsh-bedrock", "--region", "eu-central-1", "--output", "json"], runner.Calls[0].Args);
+        Assert.Equal(["sts", "get-caller-identity", "--profile", "vision-bedrock", "--region", "eu-central-1", "--output", "json"], runner.Calls[0].Args);
     }
 
     [Theory]
@@ -285,7 +316,7 @@ public sealed class AwsSignInTests
     {
         var runner = new FakeAwsCliRunner().Fail(["sts"],
             "aws: [ERROR]: Unable to retrieve credentials: Error loading login session token: Unable to load a existing login session for session arn:aws:iam::1:user/a, Please reauthenticate with 'aws login'.", 253);
-        var ex = await Assert.ThrowsAsync<AwsSignInRequiredException>(() => new AwsSignIn(new AwsCli(runner), Profiles(null)).VerifyAsync("dsh-bedrock"));
-        Assert.Equal("dsh-bedrock", ex.Profile);
+        var ex = await Assert.ThrowsAsync<AwsSignInRequiredException>(() => new AwsSignIn(new AwsCli(runner), Profiles(null)).VerifyAsync("vision-bedrock"));
+        Assert.Equal("vision-bedrock", ex.Profile);
     }
 }

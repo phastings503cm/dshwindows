@@ -25,7 +25,7 @@ public sealed class AwsProfilesTests
         [profile tool]
         credential_process = "C:\Program Files\Vault\vault.exe" aws-creds --role=dev
 
-        [profile dsh-bedrock]
+        [profile vision-bedrock]
         login_session = arn:aws:iam::111122223333:user/alice
         Region = eu-central-1
         s3 =
@@ -68,14 +68,14 @@ public sealed class AwsProfilesTests
     public void ReadsProfilesAndHowEachSignsIn()
     {
         var profiles = AwsProfiles.Parse(Config, Credentials);
-        Assert.Equal(["default", "corp-dev", "deploy", "tool", "dsh-bedrock", "keys", "my project", "ci", "fresh", "only-in-credentials"],
+        Assert.Equal(["default", "corp-dev", "deploy", "tool", "vision-bedrock", "keys", "my project", "ci", "fresh", "only-in-credentials"],
             profiles.Profiles.Select(p => p.Name));
 
         Assert.Equal(AwsProfileKind.Empty, profiles.Find("default")!.Kind);
         Assert.Equal(AwsProfileKind.Sso, profiles.Find("corp-dev")!.Kind);
         Assert.Equal(AwsProfileKind.AssumeRole, profiles.Find("deploy")!.Kind);
         Assert.Equal(AwsProfileKind.CredentialProcess, profiles.Find("tool")!.Kind);
-        Assert.Equal(AwsProfileKind.LoginSession, profiles.Find("dsh-bedrock")!.Kind);
+        Assert.Equal(AwsProfileKind.LoginSession, profiles.Find("vision-bedrock")!.Kind);
         Assert.Equal(AwsProfileKind.AccessKeys, profiles.Find("keys")!.Kind);
         Assert.Equal(AwsProfileKind.WebIdentity, profiles.Find("ci")!.Kind);
         Assert.Equal(AwsProfileKind.Empty, profiles.Find("fresh")!.Kind);
@@ -83,7 +83,7 @@ public sealed class AwsProfilesTests
 
         Assert.Null(profiles.Find("corp"));      // an sso-session, not a profile
         Assert.Null(profiles.Find("preview"));   // not a profile section
-        Assert.Null(profiles.Find("DSH-BEDROCK")); // names are case-sensitive
+        Assert.Null(profiles.Find("VISION-BEDROCK")); // names are case-sensitive
     }
 
     [Fact]
@@ -91,13 +91,13 @@ public sealed class AwsProfilesTests
     {
         var profiles = AwsProfiles.Parse(Config, Credentials);
         Assert.Equal("us-east-1", profiles.Find("corp-dev")!.Region);
-        Assert.Equal("eu-central-1", profiles.Find("dsh-bedrock")!.Region); // keys are case-insensitive ("Region")
+        Assert.Equal("eu-central-1", profiles.Find("vision-bedrock")!.Region); // keys are case-insensitive ("Region")
         Assert.Equal("us-west-2", profiles.Find("keys")!.Region);           // config and credentials merge
         Assert.Equal("ap-northeast-1", profiles.Find("my project")!.Region); // quoted name, ":" separator
         Assert.Equal("sa-east-1", profiles.Find("only-in-credentials")!.Region);
         Assert.Null(profiles.Find("fresh")!.Region);
         Assert.Equal("\"C:\\Program Files\\Vault\\vault.exe\" aws-creds --role=dev", profiles.Find("tool")!.Settings["credential_process"]);
-        Assert.Equal("max_concurrent_requests = 20\naddressing_style = path", profiles.Find("dsh-bedrock")!.Settings["s3"]);
+        Assert.Equal("max_concurrent_requests = 20\naddressing_style = path", profiles.Find("vision-bedrock")!.Settings["s3"]);
         Assert.Equal("AKIAIOSFODNN7EXAMPLE", profiles.Find("keys")!.Settings["aws_access_key_id"]);
     }
 
@@ -105,7 +105,7 @@ public sealed class AwsProfilesTests
     public void OnlyEmptyAndLoginProfilesCanUseAwsLogin()
     {
         var profiles = AwsProfiles.Parse(Config, Credentials);
-        Assert.Equal(["default", "dsh-bedrock", "my project", "fresh"], profiles.Profiles.Where(p => p.CanUseAwsLogin).Select(p => p.Name));
+        Assert.Equal(["default", "vision-bedrock", "my project", "fresh"], profiles.Profiles.Where(p => p.CanUseAwsLogin).Select(p => p.Name));
         Assert.Equal("IAM Identity Center (SSO)", profiles.Find("corp-dev")!.KindDescription);
         Assert.Equal("access keys", profiles.Find("keys")!.KindDescription);
     }
@@ -152,7 +152,7 @@ public sealed class AwsProfilesTests
     [Fact]
     public void LoadsFromTheFilesTheEnvironmentNames()
     {
-        using var dir = new TempDirectory("dsh-aws-profiles");
+        using var dir = new TempDirectory("vision-aws-profiles");
         var config = dir.Write("config", Config);
         var credentials = dir.Write("credentials", Credentials);
         var env = new Dictionary<string, string?> { ["AWS_CONFIG_FILE"] = config, ["AWS_SHARED_CREDENTIALS_FILE"] = credentials };

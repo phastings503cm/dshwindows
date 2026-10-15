@@ -128,7 +128,7 @@ internal static class SkillFiles
     }
 
     /// <summary>A fresh (not yet created) folder under the temp directory.</summary>
-    public static string StagingDirectory() => Path.Combine(Path.GetTempPath(), $"dsh-skill-{Guid.NewGuid():N}");
+    public static string StagingDirectory() => Path.Combine(Path.GetTempPath(), $"vision-skill-{Guid.NewGuid():N}");
 
     /// <summary>Move a folder. The staging folder lives on the system drive and a project may not, so a
     /// move that fails across volumes becomes copy + delete.</summary>

@@ -41,10 +41,10 @@ public partial class App : Application
 
         var selfTest = SelfTest.Parse(args);
 
-        // One DSH per user: a second launch ("Open with DSH" on a folder) hands its folder over.
+        // One Vision per user: a second launch ("Open with Vision" on a folder) hands its folder over.
         if (selfTest is null)
         {
-            _instance = new SingleInstance("DSH-Windows");
+            _instance = new SingleInstance(SingleInstance.AppId);
             if (!_instance.IsFirst && _instance.Forward(args.Length == 0 ? ["--activate"] : args.Select(a => a.StartsWith("--", StringComparison.Ordinal) ? a : Path.GetFullPath(a)).ToArray()))
             {
                 Shutdown();
@@ -54,8 +54,13 @@ public partial class App : Application
 
         if (selfTest is not null)
         {
-            Environment.SetEnvironmentVariable("DSH_HOME", selfTest.Home);
+            Environment.SetEnvironmentVariable(AppPaths.HomeVariable, selfTest.Home);
             selfTest.Prepare();
+        }
+        else if (!BringDshDataOver(_instance!.IsFirst))
+        {
+            Shutdown();
+            return;
         }
         FontResolver.Apply(Resources);
         // Deleting a skill is recoverable, like everything else deleted from the app.
@@ -64,6 +69,10 @@ public partial class App : Application
         // Bedrock routes sign requests with the AWS CLI's sign-in.
         AwsAccounts.Install();
         var config = new AppConfig();
+        if (selfTest is null)
+        {
+            try { config.BringLegacySecretsOver(); } catch (Exception ex) { WriteCrashLog(ex, "secrets"); }
+        }
         ThemeService.Instance.Apply(selfTest?.Theme ?? config.Theme);
         var log = new ConversationLog();
         Model = new AppModel(config, log, Dispatcher);
@@ -85,11 +94,105 @@ public partial class App : Application
 
         _instance?.Listen(forwarded => Dispatcher.BeginInvoke(() => HandleForwarded(forwarded)));
 
+        Dispatcher.BeginInvoke(DispatcherPriority.ApplicationIdle, ShowDataFolderNotice);
         if (Model.NeedsSetup)
             Dispatcher.BeginInvoke(DispatcherPriority.ApplicationIdle, () => window.ShowWizard()); // offers the import once it closes
         else
             _ = window.OfferExternalImportAsync();
         if (config.CheckForUpdates) _ = CheckForUpdatesAsync();
+    }
+
+    // MARK: - DSH is now Vision
+
+    /// <summary>Set when bringing DSH's data over failed this launch (the app runs on DSH's folder meanwhile).</summary>
+    private DataMigrationOutcome? _dataFolderProblem;
+
+    /// <summary>Vision was called DSH before 0.9: bring DSH's data folder over, once, before anything opens a file
+    /// (see <see cref="DataFolderMigration"/>). False when the app must not start (the user chose to quit, or a move
+    /// stopped half-way and the data must not be split across two folders).</summary>
+    private bool BringDshDataOver(bool firstInstance)
+    {
+        // VISION_HOME (or DSH_HOME) set: the user chose the folder, and it isn't moved.
+        if (AppPaths.Overridden is not null) return true;
+        var program = AppContext.BaseDirectory;
+        DataFolderMigration migration;
+        if (AppPaths.PortableRootFor(program) is { } portable)
+        {
+            // A portable copy unpacked beside a portable DSH copies DSH's data (that copy keeps its own).
+            if (AppPaths.LegacyPortableRootFor(program) is not { } legacyPortable) return true;
+            migration = new DataFolderMigration(legacyPortable, portable, allowMove: false);
+        }
+        else
+        {
+            migration = new DataFolderMigration(AppPaths.LegacyDefaultRoot, AppPaths.DefaultRoot);
+        }
+        if (!migration.IsPending) return true;
+        // Another Vision is starting up and is bringing it over right now; the user will see that one.
+        if (!firstInstance) return false;
+
+        var previousMode = ShutdownMode;
+        ShutdownMode = ShutdownMode.OnExplicitShutdown; // a dialog closing before the main window opens mustn't end the app
+        try
+        {
+            // An old DSH still open keeps writing to the folder being brought over.
+            while (SingleInstance.IsRunning(SingleInstance.LegacyAppId))
+            {
+                var choice = Dialog.Ask("Close DSH first",
+                    "DSH is now Vision. DSH is still open, though — close it (check the taskbar and the notification area), " +
+                    "then choose Try again, so Vision can bring your chats, settings and keys over.",
+                    new Dialog.Choice("Quit", IsCancel: true), new Dialog.Choice("Try again", IsDefault: true));
+                if (choice != 1) return false;
+            }
+
+            var outcome = migration.Run();
+            if (outcome.BroughtOver)
+            {
+                try { ShellIntegration.ReplaceLegacyFolderMenu(); } catch (Exception) { }
+            }
+            if (outcome.Result != DataMigrationResult.Failed) return true;
+            if (outcome.DataFolder is null)
+            {
+                Dialog.Info("Vision couldn't finish moving your data", outcome.Problem ?? "");
+                return false;
+            }
+            // Nothing moved: run on DSH's folder this time, and try again at the next start.
+            AppPaths.SessionRoot = outcome.DataFolder;
+            _dataFolderProblem = outcome;
+            return true;
+        }
+        finally
+        {
+            ShutdownMode = previousMode;
+            MainWindow = null; // a dialog shown above became the main window; the real one is set next
+        }
+    }
+
+    /// <summary>The one-time notice after DSH's data was brought over — or why it wasn't, this time.</summary>
+    private void ShowDataFolderNotice()
+    {
+        try
+        {
+            if (_dataFolderProblem is { } failed)
+            {
+                Dialog.Info("Your DSH data stays where it is for now",
+                    $"Vision couldn't bring DSH's data folder over ({failed.Problem}). It is working in {failed.DataFolder} " +
+                    "this time — nothing is missing — and tries again the next time it starts.");
+                return;
+            }
+            if (DataFolderMigration.PendingNotice(AppPaths.Root) is not { } done) return;
+            var message = "DSH is now Vision — your chats, settings and keys came with you.";
+            if (done.LegacyLeft)
+                message += $"\n\nYour old data folder ({done.From}) was copied rather than moved, so it is still there. Once you've " +
+                           "checked everything is here, you can delete it.";
+            if (done.SkippedLinks is { Count: > 0 } links)
+                message += $"\n\nThese links in it weren't recreated (they are still in the old folder): {string.Join(", ", links)}.";
+            Dialog.Info("DSH is now Vision", message);
+            DataFolderMigration.MarkNoticeShown(AppPaths.Root);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            // The notice is a courtesy; it may show again next time.
+        }
     }
 
     private void HandleForwarded(string[] args)
@@ -147,7 +250,7 @@ public partial class App : Application
         }
     }
 
-    /// <summary>Write a crash report to %APPDATA%\DSH\logs and return its path.</summary>
+    /// <summary>Write a crash report to %APPDATA%\Vision\logs and return its path.</summary>
     public static string? WriteCrashLog(Exception? exception, string source)
     {
         if (exception is null) return null;

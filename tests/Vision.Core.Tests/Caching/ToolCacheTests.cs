@@ -2,7 +2,7 @@ namespace Vision.Core.Tests;
 
 public sealed class ToolCacheTests : IDisposable
 {
-    private readonly TempDirectory _root = new("dsh-cache");
+    private readonly TempDirectory _root = new("vision-cache");
     private readonly ManualClock _clock = new();
 
     public void Dispose() => _root.Dispose();
@@ -454,7 +454,7 @@ public sealed class ToolCacheTests : IDisposable
 /// <summary>The cache inside a real engine run.</summary>
 public sealed class ToolCacheEngineTests : IDisposable
 {
-    private readonly TempDirectory _root = new("dsh-cache-engine");
+    private readonly TempDirectory _root = new("vision-cache-engine");
 
     public void Dispose() => _root.Dispose();
 

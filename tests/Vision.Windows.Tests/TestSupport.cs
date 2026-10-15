@@ -58,7 +58,7 @@ internal sealed class NoClient : ILlmClient
 /// <summary>A unique scratch folder, deleted when disposed.</summary>
 internal sealed class TempFolder : IDisposable
 {
-    public string Path { get; } = System.IO.Path.Combine(System.IO.Path.GetTempPath(), $"dsh-machine-{Guid.NewGuid():N}");
+    public string Path { get; } = System.IO.Path.Combine(System.IO.Path.GetTempPath(), $"vision-machine-{Guid.NewGuid():N}");
 
     public TempFolder() => Directory.CreateDirectory(Path);
 

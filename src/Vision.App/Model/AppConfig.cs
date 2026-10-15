@@ -48,7 +48,7 @@ public sealed record PrivacySettings
 
 /// <summary>Persisted app configuration: providers, active model, permission preset, recent
 /// projects, editor/terminal preferences, skills choices, window placement. Stored as JSON in
-/// %APPDATA%\DSH\settings.json. API keys are kept out of it — they live in Windows Credential
+/// %APPDATA%\Vision\settings.json. API keys are kept out of it — they live in Windows Credential
 /// Manager, keyed by the provider's stable identity.</summary>
 public sealed partial class AppConfig : ObservableObject
 {
@@ -347,6 +347,19 @@ public sealed partial class AppConfig : ObservableObject
         lock (_keyLock) return _swapperSecrets.TryAdd(connection.Id, secret) ? secret : _swapperSecrets[connection.Id];
     }
 
+    /// <summary>Bring DSH's (Vision's former name) Credential Manager entries for every route and Swapper box over to
+    /// Vision's names now, rather than at each one's first use — copied, checked, then DSH's removed (see
+    /// <see cref="SecretStore"/>). Returns how many were brought over. Never shows or logs a secret.</summary>
+    public int BringLegacySecretsOver()
+    {
+        var targets = Providers.Select(p => SecretStore.ProviderTarget(p.RouteId))
+            .Concat(SwapperConnections.Select(c => c.SecretTarget))
+            .Append(SecretStore.SparkTarget)
+            .Distinct(StringComparer.Ordinal)
+            .ToList();
+        return SecretStore.BringOver(targets);
+    }
+
     /// <summary>Before there could be several boxes: make the one Swapper the user set up the first connection (its
     /// password copied to the connection's own entry; the old entry and settings stay, for an older version).</summary>
     private void MigrateLegacySwapper()
@@ -470,12 +483,16 @@ public sealed partial class AppConfig : ObservableObject
         public bool? SubagentsUsePrimary { get; set; }
         public List<SwapperConnection>? SwapperConnections { get; set; }
         public StoredPrivacy? Privacy { get; set; }
+        /// <summary>Legacy: Bedrock routes DSH saved without a profile have been given DSH's profile by name
+        /// (<see cref="AwsSignIn.PinLegacyDefaultProfile"/>); done once.</summary>
+        public bool? LegacyAwsProfilePinned { get; set; }
     }
 
     private void Load()
     {
         var migrateSwapper = false;
         var migratePrivacy = false;
+        var pinAwsProfile = false;
         _loading = true;
         try
         {
@@ -523,6 +540,8 @@ public sealed partial class AppConfig : ObservableObject
             MemoryEnabled = stored?.MemoryEnabled ?? true;
             SubagentsUsePrimary = stored?.SubagentsUsePrimary ?? true;
             Privacy = ReadPrivacy(stored?.Privacy, out migratePrivacy);
+            // Settings DSH wrote (new settings have nothing to pin, and must not be pinned later).
+            pinAwsProfile = stored is not null && stored.LegacyAwsProfilePinned != true;
             if (stored?.SwapperConnections is { } connections)
                 foreach (var connection in connections) SwapperConnections.Add(connection);
             else
@@ -539,6 +558,11 @@ public sealed partial class AppConfig : ObservableObject
         }
         // Custom terms an earlier version kept in plain text are written back encrypted straight away.
         if (migratePrivacy) SaveNow();
+        if (pinAwsProfile)
+        {
+            AwsSignIn.PinLegacyDefaultProfile(Providers, p => ApiKey(p).Length > 0);
+            SaveNow(); // also records that it was done
+        }
     }
 
     // MARK: - The shield's custom terms (encrypted)
@@ -675,6 +699,7 @@ public sealed partial class AppConfig : ObservableObject
             SubagentsUsePrimary = SubagentsUsePrimary,
             SwapperConnections = SwapperConnections.Select(c => c.DeepCopy()).ToList(),
             Privacy = WritePrivacy(Privacy),
+            LegacyAwsProfilePinned = true,
         };
         try
         {

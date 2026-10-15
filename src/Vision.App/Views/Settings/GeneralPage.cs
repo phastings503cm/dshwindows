@@ -106,8 +106,8 @@ public sealed class GeneralPage : UserControl
 
         // Windows integration
         page.Children.Add(Ui.Section("Windows"));
-        page.Children.Add(Ui.Row("\u201COpen with DSH\u201D in Explorer",
-            "Adds DSH to the right-click menu of folders, so any folder opens as a project.",
+        page.Children.Add(Ui.Row("\u201COpen with Vision\u201D in Explorer",
+            "Adds Vision to the right-click menu of folders, so any folder opens as a project.",
             Ui.Toggle(ShellIntegration.IsFolderMenuInstalled, on =>
             {
                 if (!ShellIntegration.SetFolderMenu(on)) Dialog.Info("Couldn't change the Explorer menu", "Windows refused the registry change.");

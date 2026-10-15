@@ -80,7 +80,7 @@ public sealed partial class WebFetchTool : IToolExecutor
         if (raw is null || !Uri.TryCreate(raw.Trim(), UriKind.Absolute, out var url) || url.Scheme is not ("http" or "https"))
             return "Error: a valid http(s) url is required.";
         using var req = new HttpRequestMessage(HttpMethod.Get, url);
-        req.Headers.TryAddWithoutValidation("User-Agent", $"Mozilla/5.0 (Windows NT 10.0; Win64; x64) DSH/{AppInfo.Version}");
+        req.Headers.TryAddWithoutValidation("User-Agent", $"Mozilla/5.0 (Windows NT 10.0; Win64; x64) Vision/{AppInfo.Version}");
         try
         {
             using var response = await Http.SendAsync(req, cancellationToken).ConfigureAwait(false);

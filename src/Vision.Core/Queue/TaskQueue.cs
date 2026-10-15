@@ -16,7 +16,7 @@ public sealed class TaskQueue
     /// <summary>The queue's file name under <see cref="AppPaths.Root"/>.</summary>
     public const string FileName = "task-queue.json";
 
-    /// <summary>%APPDATA%\DSH\task-queue.json (or under DSH_HOME).</summary>
+    /// <summary>%APPDATA%\Vision\task-queue.json (or under VISION_HOME).</summary>
     public static string DefaultFilePath => Path.Combine(AppPaths.Root, FileName);
 
     /// <summary>The note a task gets when a restart finds it "running": the work in flight was lost.</summary>

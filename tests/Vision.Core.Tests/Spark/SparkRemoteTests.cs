@@ -256,7 +256,7 @@ public sealed partial class SparkRemoteTests
 
     // MARK: - The installer, end to end against a pretend Spark
 
-    [GeneratedRegex(@"__DSH_BEGIN_(\w+)__")]
+    [GeneratedRegex(@"__VISION_BEGIN_(\w+)__")]
     private static partial Regex BeginNonce();
 
     /// <summary>A Spark whose shell behaves like bash running install-swapper.sh.</summary>
@@ -269,7 +269,7 @@ public sealed partial class SparkRemoteTests
             if (typed.StartsWith("exec env PS1=", StringComparison.Ordinal))
             {
                 var ready = Regex.Match(typed, @"READY_(\w+)__").Groups[1].Value;
-                return [$"__DSH_READY_{ready}__ "];
+                return [$"__VISION_READY_{ready}__ "];
             }
             if (BeginNonce().Match(typed) is { Success: true } begin)
             {
@@ -304,7 +304,7 @@ public sealed partial class SparkRemoteTests
         Assert.True(outcome.Success, outcome.Summary);
         Assert.Equal(0, outcome.ExitCode);
         var typed = spark.Shell!.Typed;
-        Assert.StartsWith("exec env PS1='__DSH_''READY_", typed[0]);
+        Assert.StartsWith("exec env PS1='__VISION_''READY_", typed[0]);
         Assert.Contains(SparkInstaller.SwapperInstallCommand, typed[1]);
         Assert.Single(typed, t => t == "hunter22\n");
         Assert.Equal("exit\n", typed[^1]);
@@ -312,7 +312,7 @@ public sealed partial class SparkRemoteTests
         Assert.Contains("[sudo] password for alice: (answered by DSH)", lines);
         Assert.Contains(lines, l => l.Contains("Spark Swapper is up"));
         Assert.DoesNotContain(lines, l => l.Contains("hunter22"));
-        Assert.DoesNotContain(lines, l => l.Contains("__DSH_"));
+        Assert.DoesNotContain(lines, l => l.Contains("__VISION_"));
     }
 
     [Fact]
@@ -354,7 +354,7 @@ public sealed partial class SparkRemoteTests
         var spark = Spark("pw", _ => [], asksPassword: false);
         spark.React = (typed, shell) =>
         {
-            if (typed.StartsWith("exec env", StringComparison.Ordinal)) return [$"__DSH_READY_{Regex.Match(typed, @"READY_(\w+)__").Groups[1].Value}__ "];
+            if (typed.StartsWith("exec env", StringComparison.Ordinal)) return [$"__VISION_READY_{Regex.Match(typed, @"READY_(\w+)__").Groups[1].Value}__ "];
             shell.Close();
             return [];
         };
@@ -378,7 +378,7 @@ public sealed partial class SparkRemoteTests
         Assert.Contains("proxy_pass http://127.0.0.1:8888;", script);
         Assert.Contains("proxy_buffering off;", script);
         Assert.Contains("\nNGINX\n", script); // the heredoc terminator sits at column 0
-        Assert.Contains("sudo bash ~/.cache/dsh/spark-model-front.sh", spark.Shell!.Typed[1]);
+        Assert.Contains("sudo bash ~/.cache/vision/spark-model-front.sh", spark.Shell!.Typed[1]);
     }
 
     [Fact]

@@ -22,13 +22,13 @@ public sealed class AgentShellTests
         var script = Decode(args[^1]);
         var lines = script.Split(Environment.NewLine);
         Assert.Contains(command, lines);
-        Assert.Contains("$__dshOk = $?", lines);
+        Assert.Contains("$__visionOk = $?", lines);
         Assert.Contains("if ($LASTEXITCODE -is [int] -and $LASTEXITCODE -ne 0) { exit $LASTEXITCODE }", lines);
-        Assert.Contains("if (-not $__dshOk) { exit 1 }", lines);
+        Assert.Contains("if (-not $__visionOk) { exit 1 }", lines);
         Assert.Contains("exit 0", lines);
         Assert.Contains("$ProgressPreference = 'SilentlyContinue'", lines);
         // The command runs first, then its status is captured.
-        Assert.True(Array.IndexOf(lines, command) < Array.IndexOf(lines, "$__dshOk = $?"));
+        Assert.True(Array.IndexOf(lines, command) < Array.IndexOf(lines, "$__visionOk = $?"));
         Assert.Contains("[Console]::OutputEncoding = [System.Text.Encoding]::UTF8", script);
         Assert.Contains("if ($PSStyle) { $PSStyle.OutputRendering = 'PlainText' }", lines);
     }
@@ -71,7 +71,7 @@ public sealed class AgentShellTests
             Assert.Equal([0xEF, 0xBB, 0xBF], bytes.Take(3));
             var script = File.ReadAllText(file);
             Assert.Contains(command, script);
-            Assert.Contains("$__dshOk = $?", script);
+            Assert.Contains("$__visionOk = $?", script);
             // The script removes itself first, so %TEMP% doesn't collect one per long command.
             Assert.StartsWith("Remove-Item -LiteralPath $PSCommandPath", script);
         }
@@ -130,6 +130,8 @@ public sealed class AgentShellTests
         Assert.True(psi.RedirectStandardInput); // closed by the runner: nothing can wait for input
         Assert.True(psi.RedirectStandardOutput);
         Assert.True(psi.RedirectStandardError);
+        Assert.Equal("1", psi.Environment["VISION_AGENT"]);
+        // Legacy: still set for users' scripts written for DSH (Vision's former name).
         Assert.Equal("1", psi.Environment["DSH_AGENT"]);
         Assert.Equal("utf-8", psi.Environment["PYTHONIOENCODING"]);
     }
@@ -147,7 +149,7 @@ public sealed class AgentShellTests
     [Fact]
     public void FindOnPathReturnsNullForUnknownTools()
     {
-        Assert.Null(AgentShell.FindOnPath($"dsh-no-such-tool-{Guid.NewGuid():N}.exe"));
+        Assert.Null(AgentShell.FindOnPath($"vision-no-such-tool-{Guid.NewGuid():N}.exe"));
     }
 
     [UnixFact]

@@ -121,7 +121,7 @@ public sealed class MemoryWindow : Window
         {
             list.Children.Add(Ui.Card(Ui.Stack(
                 Ui.Text("No instruction files", 14, FontWeights.SemiBold),
-                Ui.Secondary("A file named AGENTS.md, QWEN.md, CLAUDE.md, DSH.md, or MEMORY.md in the project root is loaded into every prompt. Create the memory scaffold to get started, or bring your instructions and notes over from Claude Code and Cursor."),
+                Ui.Secondary("A file named AGENTS.md, QWEN.md, CLAUDE.md, VISION.md, or MEMORY.md in the project root is loaded into every prompt. Create the memory scaffold to get started, or bring your instructions and notes over from Claude Code and Cursor."),
                 new Border { Height = 10 },
                 Ui.Buttons(Ui.Button("Set Up Memory", SetUpMemory, accent: true), Ui.Button("From Claude Code & Cursor…", BringIn)))));
         }

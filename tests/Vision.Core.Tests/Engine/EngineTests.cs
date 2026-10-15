@@ -3,7 +3,7 @@ namespace Vision.Core.Tests;
 /// <summary>Ported from EngineTests.swift: the agent loop driven by a scripted client.</summary>
 public sealed class EngineTests : IDisposable
 {
-    private readonly TempDirectory _root = new("dsh-engine");
+    private readonly TempDirectory _root = new("vision-engine");
 
     public void Dispose() => _root.Dispose();
 
@@ -110,7 +110,7 @@ public sealed class EngineTests : IDisposable
     [Fact]
     public async Task DeniedWriteIsRecordedAndNotExecuted()
     {
-        using var elsewhere = new TempDirectory("dsh-outside");
+        using var elsewhere = new TempDirectory("vision-outside");
         var outside = Path.Combine(elsewhere.Path, "escaped.txt");
         var call = new ToolCall("c1", "write_file", Args.Json(new { file_path = outside, content = "nope" }));
         var client = new ScriptedClient(Turn.Calling(call), new Turn("understood"));
@@ -128,7 +128,7 @@ public sealed class EngineTests : IDisposable
     [Fact]
     public async Task ApprovedWriteOutsideWorkspaceProceeds()
     {
-        using var sibling = new TempDirectory("dsh-sibling");
+        using var sibling = new TempDirectory("vision-sibling");
         var target = Path.Combine(sibling.Path, "allowed.txt");
         var call = new ToolCall("c1", "write_file", Args.Json(new { file_path = target, content = "yes" }));
         var client = new ScriptedClient(Turn.Calling(call), new Turn("written"));
@@ -222,7 +222,7 @@ public sealed class EngineTests : IDisposable
 /// cancellation), subagents, and the permission/ToolContext plumbing around them.</summary>
 public sealed class EngineExecutionTests : IDisposable
 {
-    private readonly TempDirectory _root = new("dsh-engine-exec");
+    private readonly TempDirectory _root = new("vision-engine-exec");
 
     public void Dispose() => _root.Dispose();
 

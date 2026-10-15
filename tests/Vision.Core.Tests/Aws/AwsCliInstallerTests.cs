@@ -72,7 +72,7 @@ public sealed class AwsCliInstallerTests
     /// <summary>An installer whose every outside effect is scripted and recorded.</summary>
     private sealed class Harness : IDisposable
     {
-        public TempDirectory Work { get; } = new("dsh-aws-install");
+        public TempDirectory Work { get; } = new("vision-aws-install");
         public List<Uri> Requested { get; } = [];
         public List<string> SignatureChecks { get; } = [];
         public List<MsiexecLaunch> Launches { get; } = [];
@@ -324,8 +324,8 @@ public sealed class AwsCliInstallerTests
     [Fact]
     public void TheSignatureScriptQuotesThePath()
     {
-        var script = AwsCliInstaller.SignatureScript(@"C:\Users\O'Brien [Work]\AppData\Local\Temp\dsh-aws-cli\AWSCLIV2.msi");
-        Assert.Contains(@"Escape('C:\Users\O''Brien [Work]\AppData\Local\Temp\dsh-aws-cli\AWSCLIV2.msi')", script);
+        var script = AwsCliInstaller.SignatureScript(@"C:\Users\O'Brien [Work]\AppData\Local\\Temp\\vision-aws-cli\\AWSCLIV2.msi");
+        Assert.Contains(@"Escape('C:\Users\O''Brien [Work]\AppData\Local\\Temp\\vision-aws-cli\\AWSCLIV2.msi')", script);
         Assert.Contains("Get-AuthenticodeSignature -FilePath", script);
         Assert.Contains("ConvertTo-Json -Compress", script);
     }

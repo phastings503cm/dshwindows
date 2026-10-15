@@ -5,7 +5,7 @@ public sealed class TempDirectory : IDisposable
 {
     public string Path { get; }
 
-    public TempDirectory(string prefix = "dsh-test")
+    public TempDirectory(string prefix = "vision-test")
     {
         Path = System.IO.Path.Combine(System.IO.Path.GetTempPath(), $"{prefix}-{Guid.NewGuid():N}");
         Directory.CreateDirectory(Path);

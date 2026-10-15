@@ -1,7 +1,7 @@
 namespace Vision.Core.Tests;
 
 /// <summary>Tests that mutate process-wide state (ReasoningEffortCache.Shared, SecretStore.UseMemoryOnly,
-/// environment variables such as DSH_HOME). xUnit runs non-parallel collections on their own, after
+/// environment variables such as VISION_HOME). xUnit runs non-parallel collections on their own, after
 /// every parallel collection has finished, so nothing else observes the temporary values.</summary>
 [CollectionDefinition(Name, DisableParallelization = true)]
 public sealed class SerialStaticState

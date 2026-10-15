@@ -62,8 +62,8 @@ public sealed partial class RemoteTranscript
         _secret = string.IsNullOrEmpty(secret) ? null : secret;
     }
 
-    public static string BeginMarker(string nonce) => $"__DSH_BEGIN_{nonce}__";
-    public static string EndMarker(string nonce) => $"__DSH_END_{nonce}__";
+    public static string BeginMarker(string nonce) => $"__VISION_BEGIN_{nonce}__";
+    public static string EndMarker(string nonce) => $"__VISION_END_{nonce}__";
 
     /// <summary>One shell line that prints the begin marker, runs <paramref name="command"/> (a
     /// pipeline fails if any part fails) and prints the end marker with its exit code. It must be a
@@ -221,10 +221,10 @@ public sealed class SparkInstaller(ISparkConnection connection, string password)
         Say($"Setting up the secure model address (HTTPS on port {ModelFrontPort})…");
         var script = Convert.ToBase64String(Encoding.UTF8.GetBytes(ModelFrontScript));
         var upload = await connection.RunAsync(
-            $"mkdir -p ~/.cache/dsh && echo '{script}' | base64 -d > ~/.cache/dsh/spark-model-front.sh && chmod 700 ~/.cache/dsh/spark-model-front.sh",
+            $"mkdir -p ~/.cache/vision && echo '{script}' | base64 -d > ~/.cache/vision/spark-model-front.sh && chmod 700 ~/.cache/vision/spark-model-front.sh",
             TimeSpan.FromSeconds(30), cancellationToken).ConfigureAwait(false);
         if (upload.ExitCode != 0) return new InstallOutcome(false, $"Couldn't copy the setup script to the Spark: {upload.Error.Trim()}", upload.ExitCode);
-        var (exit, problem, _) = await RunInShellAsync("sudo bash ~/.cache/dsh/spark-model-front.sh", cancellationToken).ConfigureAwait(false);
+        var (exit, problem, _) = await RunInShellAsync("sudo bash ~/.cache/vision/spark-model-front.sh", cancellationToken).ConfigureAwait(false);
         if (problem is { } p) return new InstallOutcome(false, Describe(p), exit, p);
         return exit == 0
             ? new InstallOutcome(true, $"The model API is reachable over HTTPS on port {ModelFrontPort}.", exit)
@@ -288,12 +288,12 @@ public sealed class SparkInstaller(ISparkConnection connection, string password)
         return (transcript.ExitCode, transcript.Problem, transcript.Lines);
     }
 
-    /// <summary>"__DSH_READY_…__", the prompt of the plain bash — written in two quoted halves on the
+    /// <summary>"__VISION_READY_…__", the prompt of the plain bash — written in two quoted halves on the
     /// command line so the login shell's echo of that line never contains it.</summary>
-    public static string ReadyMarker(string nonce) => $"__DSH_READY_{nonce}__";
+    public static string ReadyMarker(string nonce) => $"__VISION_READY_{nonce}__";
 
     public static string ReadyCommand(string nonce) =>
-        $"exec env PS1='__DSH_''READY_{nonce}__ ' bash --noprofile --norc --noediting\n";
+        $"exec env PS1='__VISION_''READY_{nonce}__ ' bash --noprofile --norc --noediting\n";
 
     private static async Task WaitForReadyAsync(ISparkShell shell, string nonce, CancellationToken cancellationToken)
     {
@@ -334,7 +334,7 @@ public sealed class SparkInstaller(ISparkConnection connection, string password)
     /// marks the file "Written by Spark Swapper" and enforces the API key at nginx).</summary>
     public const string ModelFrontScript = """
         #!/usr/bin/env bash
-        # Written by DSH for Windows: an HTTPS front on :11443 for the Spark's model API.
+        # Written by Vision for Windows: an HTTPS front on :11443 for the Spark's model API.
         set -euo pipefail
         CERT=/etc/spark-swapper/tls.crt
         KEY=/etc/spark-swapper/tls.key
@@ -368,8 +368,8 @@ public sealed class SparkInstaller(ISparkConnection connection, string password)
         fi
         say "Writing $CONF"
         cat > "$CONF" <<'NGINX'
-        # Written by DSH for Windows. HTTPS front for the Spark's model API and the OpenClaw gateway.
-        map $http_upgrade $dsh_connection_upgrade { default upgrade; '' close; }
+        # Written by Vision for Windows. HTTPS front for the Spark's model API and the OpenClaw gateway.
+        map $http_upgrade $vision_connection_upgrade { default upgrade; '' close; }
         server {
             listen 11443 ssl;
             server_name _;
@@ -392,7 +392,7 @@ public sealed class SparkInstaller(ISparkConnection connection, string password)
                 proxy_http_version 1.1;
                 proxy_set_header Host $host;
                 proxy_set_header Upgrade $http_upgrade;
-                proxy_set_header Connection $dsh_connection_upgrade;
+                proxy_set_header Connection $vision_connection_upgrade;
                 proxy_read_timeout 3600s;
             }
         }

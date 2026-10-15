@@ -41,7 +41,7 @@ public sealed partial class BedrockGuide : IWizardGuide
         if ((route ?? model.Config.ActiveProvider) is { Kind: ProviderKind.Bedrock } active)
         {
             if (active.AwsRegion is { Length: > 0 } activeRegion) _region = activeRegion;
-            if (active.AwsProfile is { Length: > 0 } activeProfile && activeProfile != AwsSignIn.DefaultProfile)
+            if (active.AwsProfile is { Length: > 0 } activeProfile && !AwsSignIn.IsOwnProfile(activeProfile))
             {
                 _useExisting = true;
                 _existingProfile = activeProfile;
@@ -567,7 +567,7 @@ public sealed partial class BedrockGuide : IWizardGuide
         // How to sign in
         panel.Children.Add(Subheading("How do you sign in to AWS?"));
         panel.Children.Add(Choice(Icons.Globe, "With my AWS account in the browser (recommended)",
-            "Your AWS email or IAM user and password, exactly as on the AWS website. DSH keeps this sign-in under the name \"dsh-bedrock\".",
+            $"Your AWS email or IAM user and password, exactly as on the AWS website. Vision keeps this sign-in under the name \"{AwsSignIn.DefaultProfile}\".",
             !_useExisting, () =>
             {
                 if (!_useExisting) return;

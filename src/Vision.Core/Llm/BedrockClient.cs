@@ -349,7 +349,7 @@ public sealed class BedrockClient : IProviderClient
     /// <summary>User agent + the profile's custom headers (before signing, so x-amz-* ones are signed).</summary>
     private void ApplyHeaders(HttpRequestMessage request)
     {
-        request.Headers.UserAgent.ParseAdd($"DSH-Windows/{AppInfo.Version}");
+        request.Headers.UserAgent.ParseAdd($"Vision-Windows/{AppInfo.Version}");
         foreach (var (key, value) in Profile.CustomHeaders ?? [])
         {
             if (string.IsNullOrWhiteSpace(key)) continue;

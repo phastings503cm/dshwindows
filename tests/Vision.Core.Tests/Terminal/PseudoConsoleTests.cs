@@ -17,7 +17,7 @@ public class PseudoConsoleTests
         PseudoConsoleSession? console = null;
         emulator.OnReply = reply => console?.Write(reply);
         // Handlers attached at Start: this command can finish before Start even returns.
-        using var session = console = PseudoConsoleSession.Start($"\"{cmd}\" /d /c echo dsh-conpty-ok & exit /b 7",
+        using var session = console = PseudoConsoleSession.Start($"\"{cmd}\" /d /c echo vision-conpty-ok & exit /b 7",
             Path.GetTempPath(), 100, 24,
             output: (buffer, count) =>
             {
@@ -32,7 +32,7 @@ public class PseudoConsoleTests
         var finished = await Task.WhenAny(exited.Task, Task.Delay(TimeSpan.FromSeconds(30)));
         Assert.Same(exited.Task, finished);
         Assert.Equal(7, await exited.Task);
-        lock (emulator) Assert.Contains("dsh-conpty-ok", emulator.Transcript);
+        lock (emulator) Assert.Contains("vision-conpty-ok", emulator.Transcript);
     }
 
     [WindowsFact]

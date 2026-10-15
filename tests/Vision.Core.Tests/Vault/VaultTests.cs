@@ -9,7 +9,7 @@ namespace Vision.Core.Tests;
 /// details (shell-specific examples, DPAPI).</summary>
 public sealed class VaultTests : IDisposable
 {
-    private readonly TempDirectory _dir = new("dsh-vault");
+    private readonly TempDirectory _dir = new("vision-vault");
 
     public void Dispose() => _dir.Dispose();
 
@@ -427,18 +427,18 @@ public sealed class VaultTests : IDisposable
     }
 }
 
-/// <summary>New: the vault lives in DSH's own folder (DSH_HOME redirects it, so serial).</summary>
+/// <summary>New: the vault lives in DSH's own folder (VISION_HOME redirects it, so serial).</summary>
 [Collection(SerialStaticState.Name)]
 public sealed class VaultLocationTests : IDisposable
 {
-    private readonly TempDirectory _home = new("dsh-home");
-    private readonly string? _previous = Environment.GetEnvironmentVariable("DSH_HOME");
+    private readonly TempDirectory _home = new("vision-home");
+    private readonly string? _previous = Environment.GetEnvironmentVariable("VISION_HOME");
 
-    public VaultLocationTests() => Environment.SetEnvironmentVariable("DSH_HOME", _home.Path);
+    public VaultLocationTests() => Environment.SetEnvironmentVariable("VISION_HOME", _home.Path);
 
     public void Dispose()
     {
-        Environment.SetEnvironmentVariable("DSH_HOME", _previous);
+        Environment.SetEnvironmentVariable("VISION_HOME", _previous);
         _home.Dispose();
     }
 

@@ -8,7 +8,9 @@ namespace Vision.App.Infrastructure;
 /// or installed without the user clicking through.</summary>
 public static class UpdateChecker
 {
-    public const string Repository = "phastings503cm/dshwindows";
+    /// <summary>The repository releases are published from. (It was renamed from DSH's; GitHub sends the old name's
+    /// API calls here, so builds from before the rename still find new releases.)</summary>
+    public const string Repository = "phastings503cm/vision-windows";
     public static string ReleasesPage => $"https://github.com/{Repository}/releases/latest";
 
     public sealed record Release(Version Version, string Tag, string Url);
@@ -28,7 +30,7 @@ public static class UpdateChecker
         try
         {
             using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(15) };
-            http.DefaultRequestHeaders.UserAgent.ParseAdd($"DSH-Windows/{Vision.Core.AppInfo.Version}");
+            http.DefaultRequestHeaders.UserAgent.ParseAdd($"Vision-Windows/{Vision.Core.AppInfo.Version}");
             http.DefaultRequestHeaders.Accept.ParseAdd("application/vnd.github+json");
             var json = await http.GetStringAsync($"https://api.github.com/repos/{Repository}/releases/latest", cancellationToken);
             if (JsonNode.Parse(json) is not JsonObject obj) return null;

@@ -5,7 +5,7 @@ namespace Vision.Core.Tests;
 /// circles.</summary>
 public sealed class EngineContinuationTests : IDisposable
 {
-    private readonly TempDirectory _root = new("dsh-continue");
+    private readonly TempDirectory _root = new("vision-continue");
 
     public void Dispose() => _root.Dispose();
 

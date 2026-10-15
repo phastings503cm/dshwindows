@@ -730,7 +730,7 @@ public static class RecoveryUsbWriter
     /// <summary>A fresh folder for one job's files (job, status, diskpart script).</summary>
     public static string NewJobFolder()
     {
-        var folder = Path.Combine(Path.GetTempPath(), "dsh-recovery-usb", DateTime.Now.ToString("yyyyMMdd-HHmmss", CultureInfo.InvariantCulture));
+        var folder = Path.Combine(Path.GetTempPath(), "vision-recovery-usb", DateTime.Now.ToString("yyyyMMdd-HHmmss", CultureInfo.InvariantCulture));
         Directory.CreateDirectory(folder);
         return folder;
     }

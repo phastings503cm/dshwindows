@@ -63,7 +63,7 @@ public enum AwsSignInOutcome
     /// <summary>The profile signs in with IAM Identity Center: use <see cref="AwsSignIn.SsoLoginAsync"/>.</summary>
     UseSsoLogin,
     /// <summary>The profile already uses keys, a role, a web identity or a credential program; `aws login`
-    /// won't touch it. Pick another profile name (DSH's own is "dsh-bedrock").</summary>
+    /// won't touch it. Pick another profile name (the app's own is "vision-bedrock").</summary>
     ProfileHasOtherCredentials,
     /// <summary>The profile isn't set up for IAM Identity Center (for <see cref="AwsSignIn.SsoLoginAsync"/>).</summary>
     NotSsoProfile,
@@ -114,8 +114,31 @@ public sealed record AwsSignInOptions
 /// <summary>Signs the AWS CLI in (`aws login` or `aws sso login`) and checks who is signed in.</summary>
 public sealed partial class AwsSignIn(AwsCli cli, Func<AwsProfiles>? loadProfiles = null)
 {
-    /// <summary>The profile DSH creates for itself, so it never disturbs profiles the user already has.</summary>
-    public const string DefaultProfile = "dsh-bedrock";
+    /// <summary>The profile the app creates for itself, so it never disturbs profiles the user already has.</summary>
+    public const string DefaultProfile = "vision-bedrock";
+
+    /// <summary>Legacy: the profile DSH (Vision's former name) created for itself. It is the user's AWS configuration
+    /// now — routes set up then name it and keep using it; only new setups get <see cref="DefaultProfile"/>.</summary>
+    public const string LegacyDefaultProfile = "dsh-bedrock";
+
+    /// <summary>Whether <paramref name="profile"/> is one the app made for itself (under either name), rather than one
+    /// the user had before.</summary>
+    public static bool IsOwnProfile(string? profile) => profile is DefaultProfile or LegacyDefaultProfile;
+
+    /// <summary>Legacy: a Bedrock route DSH saved with no profile and no Bedrock API key signed in with DSH's profile,
+    /// the default then. Name that profile on such routes, so the new default doesn't change which sign-in they use.
+    /// Run once, on settings DSH wrote. Returns how many routes changed.</summary>
+    public static int PinLegacyDefaultProfile(IEnumerable<ProviderProfile> routes, Func<ProviderProfile, bool> hasApiKey)
+    {
+        var changed = 0;
+        foreach (var route in routes)
+        {
+            if (route.Kind != ProviderKind.Bedrock || route.AwsProfile is not null || hasApiKey(route)) continue;
+            route.AwsProfile = LegacyDefaultProfile;
+            changed++;
+        }
+        return changed;
+    }
 
     private readonly Func<AwsProfiles> _loadProfiles = loadProfiles ?? (() => AwsProfiles.Load());
 

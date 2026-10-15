@@ -3,16 +3,16 @@ using System.Net.Sockets;
 
 namespace Vision.Core.Tests;
 
-/// <summary>Runs only when DSH_SWAPPER_SRC points at a Spark Swapper checkout (and python3 and
+/// <summary>Runs only when VISION_SWAPPER_SRC points at a Spark Swapper checkout (and python3 and
 /// openssl are on PATH): starts the real swapper/app.py on a spare port with throwaway config and
 /// state folders, and drives it with <see cref="SparkSwapperClient"/> the way the setup guide does.</summary>
 public sealed class SwapperLiveFactAttribute : FactAttribute
 {
     public SwapperLiveFactAttribute()
     {
-        var source = Environment.GetEnvironmentVariable("DSH_SWAPPER_SRC");
+        var source = Environment.GetEnvironmentVariable("VISION_SWAPPER_SRC");
         if (string.IsNullOrEmpty(source) || !File.Exists(Path.Combine(source, "swapper", "app.py")))
-            Skip = "Set DSH_SWAPPER_SRC to a Spark Swapper checkout to run.";
+            Skip = "Set VISION_SWAPPER_SRC to a Spark Swapper checkout to run.";
     }
 }
 
@@ -23,7 +23,7 @@ public sealed class SwapperLiveTests
     {
         using var temp = new TempDirectory("swapper-live");
         var port = FreePort.Get();
-        var info = new ProcessStartInfo("python3", Path.Combine(Environment.GetEnvironmentVariable("DSH_SWAPPER_SRC")!, "swapper", "app.py"))
+        var info = new ProcessStartInfo("python3", Path.Combine(Environment.GetEnvironmentVariable("VISION_SWAPPER_SRC")!, "swapper", "app.py"))
         {
             RedirectStandardOutput = true,
             RedirectStandardError = true,

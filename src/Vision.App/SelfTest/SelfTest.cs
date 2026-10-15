@@ -41,7 +41,7 @@ public sealed class SelfTest
         if (index < 0) return null;
         var output = index + 1 < args.Length && !args[index + 1].StartsWith("--", StringComparison.Ordinal)
             ? args[index + 1]
-            : Path.Combine(Path.GetTempPath(), "dsh-self-test");
+            : Path.Combine(Path.GetTempPath(), "vision-self-test");
         var themeIndex = Array.FindIndex(args, a => a.Equals("--theme", StringComparison.OrdinalIgnoreCase));
         var theme = themeIndex >= 0 && themeIndex + 1 < args.Length ? args[themeIndex + 1] : null;
         Current = new SelfTest { Output = Path.GetFullPath(output), Theme = theme };
@@ -59,7 +59,7 @@ public sealed class SelfTest
             providers = new object[]
             {
                 new { kind = "openAICompat", name = "DGX Spark / vLLM", baseUrl = "http://127.0.0.1:9/v1", model = "qwen3-coder-30b-a3b", contextWindow = 262144 },
-                new { kind = "bedrock", name = "Amazon Bedrock", baseUrl = "https://bedrock-runtime.us-east-1.amazonaws.com", model = "us.anthropic.claude-sonnet-4-5-20250929-v1:0", awsProfile = "dsh-bedrock", awsRegion = "us-east-1" },
+                new { kind = "bedrock", name = "Amazon Bedrock", baseUrl = "https://bedrock-runtime.us-east-1.amazonaws.com", model = "us.anthropic.claude-sonnet-4-5-20250929-v1:0", awsProfile = "vision-bedrock", awsRegion = "us-east-1" },
             },
             activeRoute = "DGX Spark / vLLM|qwen3-coder-30b-a3b",
             wizardCompleted = true,
@@ -390,7 +390,7 @@ public sealed class SelfTest
 
     private string MakeExternalProfile()
     {
-        var profile = Path.Combine(Path.GetTempPath(), "dsh-self-test-profile");
+        var profile = Path.Combine(Path.GetTempPath(), "vision-self-test-profile");
         if (Directory.Exists(profile)) Directory.Delete(profile, recursive: true);
         void Write(string relative, string text)
         {
@@ -483,7 +483,7 @@ public sealed class SelfTest
                               "install": {"size_gb": 65, "time": "15–30 minutes"}}}}
                 """, SwapperStatus.Json);
             var started = DateTimeOffset.UtcNow.AddMinutes(-3).ToUnixTimeMilliseconds() / 1000.0;
-            var install = new SwapperJob("i1", "install:model:tfflash", "dsh", "running", null, null, started, null,
+            var install = new SwapperJob("i1", "install:model:tfflash", "vision", "running", null, null, started, null,
                 [new SwapperStep("download", "Downloading the model", "running"), new SwapperStep("build", "Building the engine", "pending")]);
             model.Spark.ShowDemoBox(new SwapperConnection
             {

@@ -87,7 +87,7 @@ public sealed class MemoryStore
     private bool _backedUp;
     private List<LogLine>? _batch;
 
-    /// <param name="directory">Where <c>memories.jsonl</c> lives; <c>%APPDATA%\DSH\memory</c> by default.</param>
+    /// <param name="directory">Where <c>memories.jsonl</c> lives; <c>%APPDATA%\Vision\memory</c> by default.</param>
     public MemoryStore(string? directory = null, TimeProvider? clock = null, int maxItems = DefaultMaxItems)
     {
         Directory = directory ?? Path.Combine(AppPaths.Root, "memory");

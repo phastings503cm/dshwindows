@@ -13,7 +13,7 @@ namespace Vision.App.Tests;
 /// fake model server.</summary>
 public sealed class AutoContinueTests : IDisposable
 {
-    private readonly string _dir = Path.Combine(Path.GetTempPath(), $"dsh-auto-{Guid.NewGuid():N}");
+    private readonly string _dir = Path.Combine(Path.GetTempPath(), $"vision-auto-{Guid.NewGuid():N}");
     private readonly FakeModelServer _server = new();
 
     public AutoContinueTests()

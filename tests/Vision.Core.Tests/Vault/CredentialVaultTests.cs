@@ -7,7 +7,7 @@ namespace Vision.Core.Tests;
 /// rules) are ported with the engine tests.</summary>
 public sealed class CredentialVaultTests : IDisposable
 {
-    private readonly TempDirectory _dir = new("dsh-vault");
+    private readonly TempDirectory _dir = new("vision-vault");
 
     public void Dispose() => _dir.Dispose();
 

@@ -2,7 +2,7 @@ namespace Vision.Core.Tests;
 
 public sealed class MemoryRecallTests : IDisposable
 {
-    private readonly TempDirectory _dir = new("dsh-recall");
+    private readonly TempDirectory _dir = new("vision-recall");
 
     public void Dispose() => _dir.Dispose();
 

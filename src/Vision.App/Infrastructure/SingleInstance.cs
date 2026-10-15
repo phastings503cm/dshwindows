@@ -4,10 +4,17 @@ using System.Text;
 
 namespace Vision.App.Infrastructure;
 
-/// <summary>One DSH per user: a second launch (e.g. "Open with DSH" on a folder) hands its arguments
+/// <summary>One Vision per user: a second launch (e.g. "Open with Vision" on a folder) hands its arguments
 /// to the running instance over a named pipe and exits.</summary>
 public sealed class SingleInstance : IDisposable
 {
+    /// <summary>The id of this app's mutex and pipe (Local\Vision-Windows-&lt;user&gt;).</summary>
+    public const string AppId = "Vision-Windows";
+
+    /// <summary>Legacy: the id DSH (Vision's former name) used. Only ever probed — an old DSH still running would
+    /// keep writing to the data folder Vision brings over from it (see <see cref="IsRunning"/>).</summary>
+    public const string LegacyAppId = "DSH-Windows";
+
     private readonly Mutex _mutex;
     private readonly string _pipeName;
     private readonly CancellationTokenSource _cts = new();
@@ -16,10 +23,29 @@ public sealed class SingleInstance : IDisposable
 
     public SingleInstance(string id)
     {
-        var user = Environment.UserName.Replace('\\', '_');
-        _mutex = new Mutex(initiallyOwned: true, $"Local\\{id}-{user}", out var created);
+        _mutex = new Mutex(initiallyOwned: true, MutexName(id), out var created);
         IsFirst = created;
-        _pipeName = $"{id}-{user}-pipe";
+        _pipeName = $"{id}-{User}-pipe";
+    }
+
+    private static string User => Environment.UserName.Replace('\\', '_');
+
+    private static string MutexName(string id) => $"Local\\{id}-{User}";
+
+    /// <summary>Whether an app holding the mutex of <paramref name="id"/> is running for this user — without
+    /// taking it.</summary>
+    public static bool IsRunning(string id)
+    {
+        try
+        {
+            if (!Mutex.TryOpenExisting(MutexName(id), out var existing)) return false;
+            existing.Dispose();
+            return true;
+        }
+        catch (UnauthorizedAccessException)
+        {
+            return true; // it exists; we just may not open it
+        }
     }
 
     /// <summary>Send arguments to the running instance. True when it received them.</summary>

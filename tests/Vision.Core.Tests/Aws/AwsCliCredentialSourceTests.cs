@@ -39,7 +39,7 @@ public sealed class AwsCliCredentialSourceTests
     [Fact]
     public void UnusableOutputIsReported()
     {
-        Assert.Equal("dsh-bedrock", Assert.Throws<AwsSignInRequiredException>(() => AwsCliCredentialSource.ParseProcessOutput("{}", "dsh-bedrock")).Profile);
+        Assert.Equal("vision-bedrock", Assert.Throws<AwsSignInRequiredException>(() => AwsCliCredentialSource.ParseProcessOutput("{}", "vision-bedrock")).Profile);
         Assert.Throws<AwsSignInRequiredException>(() => AwsCliCredentialSource.ParseProcessOutput("not json"));
         Assert.Throws<AwsCliException>(() => AwsCliCredentialSource.ParseProcessOutput("""{"AccessKeyId":"A","SecretAccessKey":"S","Expiration":"soon"}"""));
     }
@@ -48,10 +48,10 @@ public sealed class AwsCliCredentialSourceTests
     public async Task RunsExportCredentialsForTheProfile()
     {
         var runner = new FakeAwsCliRunner().On(["configure", "export-credentials"], Process("ASIA1", Now.AddHours(1)));
-        var source = new AwsCliCredentialSource(runner, "dsh-bedrock", time: new ManualClock());
+        var source = new AwsCliCredentialSource(runner, "vision-bedrock", time: new ManualClock());
         var credentials = await source.GetAsync();
         Assert.Equal("ASIA1", credentials.AccessKeyId);
-        Assert.Equal(["configure", "export-credentials", "--format", "process", "--profile", "dsh-bedrock"], runner.Calls[0].Args);
+        Assert.Equal(["configure", "export-credentials", "--format", "process", "--profile", "vision-bedrock"], runner.Calls[0].Args);
         Assert.Equal(TimeSpan.FromMinutes(2), runner.Calls[0].Options!.Timeout);
         Assert.Equal(["configure", "export-credentials", "--format", "process", "--profile", "p", "--region", "eu-central-1"],
             new AwsCliCredentialSource(runner, "p", "eu-central-1").ExportArguments);
@@ -64,7 +64,7 @@ public sealed class AwsCliCredentialSourceTests
         var runner = new FakeAwsCliRunner().OnSequence(["configure", "export-credentials"],
             new AwsCliResult(0, Process("ASIA1", Now.AddMinutes(60)), ""),
             new AwsCliResult(0, Process("ASIA2", Now.AddMinutes(120)), ""));
-        var source = new AwsCliCredentialSource(runner, "dsh-bedrock", time: clock);
+        var source = new AwsCliCredentialSource(runner, "vision-bedrock", time: clock);
 
         Assert.Equal("ASIA1", (await source.GetAsync()).AccessKeyId);
         clock.Advance(TimeSpan.FromMinutes(54));
@@ -82,7 +82,7 @@ public sealed class AwsCliCredentialSourceTests
             new AwsCliResult(0, Process("ASIA1", Now.AddHours(1)), ""),
             new AwsCliResult(0, Process("ASIA2", Now.AddHours(1)), ""),
             new AwsCliResult(0, Process("ASIA3", Now.AddHours(1)), ""));
-        var source = new AwsCliCredentialSource(runner, "dsh-bedrock", time: new ManualClock());
+        var source = new AwsCliCredentialSource(runner, "vision-bedrock", time: new ManualClock());
         Assert.Equal("ASIA1", (await source.GetAsync()).AccessKeyId);
         Assert.Equal("ASIA2", (await source.GetAsync(forceRefresh: true)).AccessKeyId);
         Assert.Equal("ASIA2", (await source.GetAsync()).AccessKeyId);
@@ -108,13 +108,13 @@ public sealed class AwsCliCredentialSourceTests
     [InlineData("aws: [ERROR]: Unable to retrieve credentials: Your session has expired. Please reauthenticate using 'aws login'.", 253)]
     [InlineData("aws: [ERROR]: Error loading SSO Token: Token for corp does not exist", 255)]
     [InlineData("aws: [ERROR]: The SSO session associated with this profile has expired or is otherwise invalid. To refresh this SSO session run aws sso login with the corresponding profile.", 255)]
-    [InlineData("aws: [ERROR]: Unable to retrieve credentials: The config profile (dsh-bedrock) could not be found", 253)]
+    [InlineData("aws: [ERROR]: Unable to retrieve credentials: The config profile (vision-bedrock) could not be found", 253)]
     public async Task ExpiredSignInsAskToSignInAgain(string stderr, int exitCode)
     {
         var runner = new FakeAwsCliRunner().Fail(["configure", "export-credentials"], stderr, exitCode);
-        var source = new AwsCliCredentialSource(runner, "dsh-bedrock");
+        var source = new AwsCliCredentialSource(runner, "vision-bedrock");
         var ex = await Assert.ThrowsAsync<AwsSignInRequiredException>(() => source.GetAsync());
-        Assert.Equal("dsh-bedrock", ex.Profile);
+        Assert.Equal("vision-bedrock", ex.Profile);
         Assert.DoesNotContain("aws: [ERROR]", ex.Message);
     }
 
@@ -124,7 +124,7 @@ public sealed class AwsCliCredentialSourceTests
         var runner = new FakeAwsCliRunner().OnSequence(["configure", "export-credentials"],
             new AwsCliResult(255, "", "\naws: [ERROR]: Could not connect to the endpoint URL: \"https://us-east-1.signin.aws.amazon.com/v1/token\"\n"),
             new AwsCliResult(0, Process("ASIA1", Now.AddHours(1)), ""));
-        var source = new AwsCliCredentialSource(runner, "dsh-bedrock", time: new ManualClock());
+        var source = new AwsCliCredentialSource(runner, "vision-bedrock", time: new ManualClock());
         var ex = await Assert.ThrowsAsync<AwsCliException>(() => source.GetAsync());
         Assert.Equal(AwsCliFailure.Network, ex.Kind);
         Assert.Equal("ASIA1", (await source.GetAsync()).AccessKeyId);
@@ -139,7 +139,7 @@ public sealed class AwsCliCredentialSourceTests
             await release.Task;
             return new AwsCliResult(0, Process("ASIA1", Now.AddHours(1)), "");
         });
-        var source = new AwsCliCredentialSource(runner, "dsh-bedrock", time: new ManualClock());
+        var source = new AwsCliCredentialSource(runner, "vision-bedrock", time: new ManualClock());
         var callers = Enumerable.Range(0, 8).Select(i => source.GetAsync(forceRefresh: i % 2 == 0)).ToList();
         using var impatient = new CancellationTokenSource();
         var cancelled = source.GetAsync(cancellationToken: impatient.Token);
@@ -158,7 +158,7 @@ public sealed class AwsCliCredentialSourceTests
     public async Task ItIsTheBedrockClientsCredentialSource()
     {
         IAwsCredentialSource source = new AwsCliCredentialSource(new FakeAwsCliRunner()
-            .On(["configure", "export-credentials"], Process("ASIA1", Now.AddHours(1))), "dsh-bedrock", time: new ManualClock());
+            .On(["configure", "export-credentials"], Process("ASIA1", Now.AddHours(1))), "vision-bedrock", time: new ManualClock());
         var credentials = await source.GetAsync();
         Assert.DoesNotContain("wJalr", credentials.ToString());
     }

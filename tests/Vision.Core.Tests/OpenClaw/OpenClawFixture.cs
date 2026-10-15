@@ -15,7 +15,7 @@ internal sealed class OpenClawFixture : IDisposable
     public const string GithubToken = "ghp_abcdefghijklmnopqrstuvwxyz0123456789";
     public const string HuggingFaceToken = "hf_" + "abcdefghijklmnopqrstuvwxyzABCDEFGH";
 
-    public TempDirectory Root { get; } = new("dsh-openclaw");
+    public TempDirectory Root { get; } = new("vision-openclaw");
     public string Home { get; }
     public string State { get; }
     public string Workspace { get; }

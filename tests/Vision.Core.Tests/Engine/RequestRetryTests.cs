@@ -101,7 +101,7 @@ public sealed class ScriptedThenFailing(Exception error, params Turn[] turns) : 
 /// engine riding out outages without duplicating text or losing work.</summary>
 public sealed class RequestRetryTests : IDisposable
 {
-    private readonly TempDirectory _root = new("dsh-retry");
+    private readonly TempDirectory _root = new("vision-retry");
     private static readonly RetryPolicy Instant = new() { Delay = _ => TimeSpan.Zero };
 
     public void Dispose() => _root.Dispose();

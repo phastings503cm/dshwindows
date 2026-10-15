@@ -9,7 +9,8 @@ namespace Vision.Core;
 // by Claude Code, Cursor and the open Agent Skills convention, so this app reads all of their
 // layouts in place and can import/export between them:
 //
-//   DSH        .dsh\skills\<n>\SKILL.md        %APPDATA%\DSH\skills
+//   Vision     .vision\skills\<n>\SKILL.md     %APPDATA%\Vision\skills
+//              .dsh\skills\<n>\SKILL.md        (read too: Vision was called DSH, and projects keep that folder)
 //   Agents     .agents\skills\<n>\SKILL.md     ~\.agents\skills
 //   Qwen Code  .qwen\skills\<n>\SKILL.md
 //   Claude     .claude\skills\<n>\SKILL.md     ~\.claude\skills
@@ -17,7 +18,7 @@ namespace Vision.Core;
 //              .claude\rules\*.md              ~\.claude\rules         (always-on / path-scoped)
 //   Cursor     .cursor\skills\<n>\SKILL.md     ~\.cursor\skills
 //              .cursor\rules\*.mdc             (alwaysApply / globs / description)
-//   Built-in   shipped with the app, installed under %APPDATA%\DSH\skills-builtin
+//   Built-in   shipped with the app, installed under %APPDATA%\Vision\skills-builtin
 
 public enum SkillOrigin { Vision, Agents, Qwen, Claude, Cursor, Builtin }
 
@@ -221,7 +222,9 @@ public sealed record SkillLocations(string Home, string AppSupport)
     /// (<see cref="ClaudeProjectNames.Encode"/>), each with a MEMORY.md index and the notes it lists.</summary>
     public string ProjectNotes => Path.Combine(AppSupport, "project-notes");
 
-    public static string ProjectSkills(string project) => Path.Combine(project, ".dsh", "skills");
+    /// <summary>Where a new project skill is written: <c>.vision\skills</c>. (Skills in DSH's <c>.dsh\skills</c> are
+    /// read too, and edited where they are; see <see cref="ProjectFolders"/>.)</summary>
+    public static string ProjectSkills(string project) => ProjectFolders.Folder(project, "skills");
 }
 
 // MARK: - Discovery
@@ -246,7 +249,8 @@ public static class SkillCatalog
             output.Add(new SkillRoot(path, rank, origin, scope, layout, claude));
         if (project is not null)
         {
-            Add(Join(project, ".dsh/skills"), 100, SkillOrigin.Vision, SkillScope.Project, SkillRootLayout.SkillDirs);
+            Add(ProjectFolders.Folder(project, "skills"), 100, SkillOrigin.Vision, SkillScope.Project, SkillRootLayout.SkillDirs);
+            Add(ProjectFolders.LegacyFolder(project, "skills"), 101, SkillOrigin.Vision, SkillScope.Project, SkillRootLayout.SkillDirs);
             if (sources.HasFlag(SkillSources.Agents)) Add(Join(project, ".agents/skills"), 200, SkillOrigin.Agents, SkillScope.Project, SkillRootLayout.SkillDirs);
             if (sources.HasFlag(SkillSources.Qwen)) Add(Join(project, ".qwen/skills"), 300, SkillOrigin.Qwen, SkillScope.Project, SkillRootLayout.SkillDirs);
             if (sources.HasFlag(SkillSources.Claude))

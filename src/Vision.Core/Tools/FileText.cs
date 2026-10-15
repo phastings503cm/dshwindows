@@ -70,7 +70,7 @@ public static class FileText
         if (!string.IsNullOrEmpty(dir)) Directory.CreateDirectory(dir);
         // One temp name per path, reused by the next write if this one dies half-way (a file named at random would be left
         // behind for good): writers of one path take turns under LockFor.
-        var temp = path + ".dsh-tmp";
+        var temp = path + ".vision-tmp";
         lock (LockFor(path))
         {
             try

@@ -755,7 +755,7 @@ public static class BedrockPermissions
           "Version": "2012-10-17",
           "Statement": [
             {
-              "Sid": "DshCallBedrockModels",
+              "Sid": "VisionCallBedrockModels",
               "Effect": "Allow",
               "Action": [
                 "bedrock:InvokeModel",
@@ -767,7 +767,7 @@ public static class BedrockPermissions
               ]
             },
             {
-              "Sid": "DshSetUpModelAccess",
+              "Sid": "VisionSetUpModelAccess",
               "Effect": "Allow",
               "Action": [
                 "bedrock:ListFoundationModels",
@@ -783,13 +783,13 @@ public static class BedrockPermissions
               "Resource": "*"
             },
             {
-              "Sid": "DshBedrockApiKeys",
+              "Sid": "VisionBedrockApiKeys",
               "Effect": "Allow",
               "Action": "bedrock:CallWithBearerToken",
               "Resource": "*"
             },
             {
-              "Sid": "DshMarketplaceSubscriptionsThroughBedrock",
+              "Sid": "VisionMarketplaceSubscriptionsThroughBedrock",
               "Effect": "Allow",
               "Action": [
                 "aws-marketplace:Subscribe",
@@ -804,7 +804,7 @@ public static class BedrockPermissions
               }
             },
             {
-              "Sid": "DshSignInWithAwsLogin",
+              "Sid": "VisionSignInWithAwsLogin",
               "Effect": "Allow",
               "Action": [
                 "signin:AuthorizeOAuth2Access",
