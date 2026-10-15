@@ -560,7 +560,8 @@ public sealed partial class AppConfig : ObservableObject
         public string? ProtectedTerms { get; set; }
     }
 
-    private static readonly byte[] TermsEntropy = Encoding.UTF8.GetBytes("DSH for Windows · privacy terms · v1");
+    /// <summary>A frozen constant (<see cref="FrozenEntropy"/>): changing it would make every user's saved terms unreadable.</summary>
+    private static readonly byte[] TermsEntropy = FrozenEntropy.PrivacyTerms;
 
     /// <summary>Encrypted terms this account can't read (settings copied from another account or PC): kept as they are
     /// until the user writes new terms, rather than lost.</summary>

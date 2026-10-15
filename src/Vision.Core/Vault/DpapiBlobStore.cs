@@ -1,5 +1,4 @@
 using System.Security.Cryptography;
-using System.Text;
 
 namespace Vision.Core;
 
@@ -17,7 +16,8 @@ public sealed class DpapiBlobStore : ISecretBlobStore
     /// <summary>The file's name beside vault.json.</summary>
     public const string DefaultFileName = "vault.bin";
 
-    private static readonly byte[] DefaultEntropy = Encoding.UTF8.GetBytes("DSH for Windows · credential vault · v1");
+    /// <summary>The app's own entropy: a frozen constant (<see cref="FrozenEntropy"/>) — never change it.</summary>
+    private static readonly byte[] DefaultEntropy = FrozenEntropy.Vault;
 
     private readonly byte[] _entropy;
 
