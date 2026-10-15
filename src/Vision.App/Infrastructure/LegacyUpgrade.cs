@@ -136,9 +136,15 @@ public static class LegacyUpgrade
         var sessions = log.List();
         readBack.Conversations = sessions.Count;
         readBack.ConversationItems = sessions.Sum(s => log.LoadItems(s.Id).Count);
-        readBack.QueueTasks = new TaskQueue().Count;
-
         var ok = true;
+        var queue = new TaskQueue(TaskQueue.DefaultFilePath);
+        readBack.QueueTasks = queue.Count;
+        if (queue.LoadProblem is { } queueProblem)
+        {
+            readBack.QueueProblem = queueProblem;
+            ok = false;
+        }
+
         var vault = new CredentialVault();
         var entries = vault.All;
         readBack.VaultEntries = entries.Count;
@@ -222,6 +228,8 @@ public sealed class MigrateOnlyReadBack
     public int Conversations { get; set; }
     public int ConversationItems { get; set; }
     public int QueueTasks { get; set; }
+    /// <summary>Why the task queue file couldn't be read (it was set aside, and the queue starts empty).</summary>
+    public string? QueueProblem { get; set; }
     public int VaultEntries { get; set; }
     /// <summary>Vault values that decrypt (the vault's encryption is tied to constants that must never change).</summary>
     public int VaultValuesReadable { get; set; }

@@ -176,6 +176,9 @@ public static class InstallerTestCredentials
 # A path as it appears inside a JSON string (backslashes escaped).
 function ConvertTo-JsonText([string] $Text) { return (ConvertTo-Json $Text).Trim('"') }
 
+# How many items a JSON array has (0 when it is missing: @($null) would count 1).
+function Get-Count($Items) { if ($null -eq $Items) { return 0 } return @($Items).Count }
+
 # The data folders a chat recorded as its working folder, from the app's conversation files.
 function Get-ChatFolders([string] $Root) {
     return @(Get-ChildItem (Join-Path $Root 'conversations') -Filter '*.json' | ForEach-Object {
@@ -219,8 +222,37 @@ if ($upgrade) {
         $text = [IO.File]::ReadAllText($_.FullName)
         if ($text.Contains($fromJson)) { [IO.File]::WriteAllText($_.FullName, $text.Replace($fromJson, $toJson)) }
     }
+
+    # Its self-test never talks to a model, so its chats have no transcript, and nothing in its data names a path
+    # inside the data folder. Add what real use leaves, in the same files: a chat without a project (its working
+    # folder is a scratch folder inside the data folder) with a transcript, and a skill of the user's own that
+    # they turned off (settings name it by its path).
+    $scratchId = [Guid]::NewGuid().ToString()
+    $scratchFolder = Join-Path $legacyData "Chats\$scratchId"
+    New-Item -ItemType Directory -Force -Path $scratchFolder | Out-Null
+    Set-Content -Path (Join-Path $scratchFolder 'agenda.md') -Value "# Monday standup`n`n- Release status`n- Open bugs" -Encoding utf8
+    $at = [DateTimeOffset]::Now.AddDays(-2).ToString('o')
+    $scratchChat = [ordered] @{
+        session = [ordered] @{ id = $scratchId; title = 'Plan the Monday standup'; cwd = $scratchFolder; updatedAt = $at }
+        items = @(
+            [ordered] @{ seq = 0; kind = 'user'; text = 'Draft an agenda for Monday''s standup and save it.'; isError = $false; at = $at },
+            [ordered] @{ seq = 1; kind = 'tool'; text = 'Wrote 4 lines'; toolName = 'write_file'; argSummary = 'agenda.md'; isError = $false; at = $at },
+            [ordered] @{ seq = 2; kind = 'assistant'; text = 'Saved the agenda to agenda.md: release status, then open bugs.'; isError = $false; at = $at }
+        )
+    }
+    [IO.File]::WriteAllText((Join-Path $legacyData "conversations\$scratchId.json"), (ConvertTo-Json $scratchChat -Depth 5 -Compress))
+    $skillFile = Join-Path $legacyData 'skills\standup-notes\SKILL.md'
+    New-Item -ItemType Directory -Force -Path (Split-Path $skillFile) | Out-Null
+    Set-Content -Path $skillFile -Value "---`nname: standup-notes`ndescription: Use when writing standup notes.`n---`n`nKeep it to three bullets.`n" -Encoding utf8
+    $settingsPath = Join-Path $legacyData 'settings.json'
+    $settingsNode = [System.Text.Json.Nodes.JsonNode]::Parse([IO.File]::ReadAllText($settingsPath))
+    $settingsNode['disabledSkills'] = [System.Text.Json.Nodes.JsonNode]::Parse("[$(ConvertTo-Json $skillFile)]")
+    [IO.File]::WriteAllText($settingsPath, $settingsNode.ToJsonString())
+
     $legacyChats = @(Get-ChildItem (Join-Path $legacyData 'conversations') -Filter '*.json').Count
-    $legacyTasks = @((Get-Content (Join-Path $legacyData 'task-queue.json') -Raw | ConvertFrom-Json).tasks).Count
+    $legacyItems = (Get-ChildItem (Join-Path $legacyData 'conversations') -Filter '*.json' | ForEach-Object {
+        Get-Count (Get-Content $_.FullName -Raw -Encoding utf8 | ConvertFrom-Json).items } | Measure-Object -Sum).Sum
+    $legacyTasks = Get-Count (Get-Content (Join-Path $legacyData 'task-queue.json') -Raw | ConvertFrom-Json).tasks
     $legacyVault = @(Get-Content (Join-Path $legacyData 'vault.json') -Raw | ConvertFrom-Json).Count
     $legacySettings = Get-Content (Join-Path $legacyData 'settings.json') -Raw | ConvertFrom-Json
     $legacyRoutes = @($legacySettings.providers).Count
@@ -228,7 +260,8 @@ if ($upgrade) {
     if ($legacyChats -lt 1 -or $legacyTasks -lt 1 -or $legacyVault -lt 1 -or $legacyRoutes -lt 1) {
         throw "The former version's data is missing something: $legacyChats chats, $legacyTasks tasks, $legacyVault vault entries, $legacyRoutes routes."
     }
-    Write-Host "  %APPDATA%\DSH: $legacyChats chats ($scratchChats without a project), $legacyTasks tasks, $legacyVault vault entries, $legacyRoutes routes"
+    if ($scratchChats -lt 1 -or $legacyItems -lt 3) { throw "The seeded chat without a project is missing ($scratchChats scratch chats, $legacyItems items)." }
+    Write-Host "  %APPDATA%\DSH: $legacyChats chats ($scratchChats without a project, $legacyItems transcript items), $legacyTasks tasks, $legacyVault vault entries, $legacyRoutes routes, 1 disabled skill"
 
     # Legacy: a provider key under the former version's Credential Manager name (DSH/provider/<route>), stored as it stored them.
     $route = "$($legacySettings.providers[0].name)|$($legacySettings.providers[0].model)"
@@ -314,12 +347,23 @@ if ($upgrade) {
     if ($stale) { throw "Chats still record working folders in $legacyData`: $($stale -join ', ')" }
     $moved = @($folders | Where-Object { $_.StartsWith($data + '\', [StringComparison]::OrdinalIgnoreCase) }).Count
     if ($moved -ne $scratchChats) { throw "$moved chats work in $data; $scratchChats worked in DSH's folder." }
+    $scratchNow = Join-Path $data "Chats\$scratchId"
+    if ((Get-ChatFolders $data) -notcontains $scratchNow -or -not (Test-Path (Join-Path $scratchNow 'agenda.md'))) {
+        throw "The chat without a project doesn't work in $scratchNow, or its file didn't come along."
+    }
+    $skillNow = Join-Path $data 'skills\standup-notes\SKILL.md'
+    if ($settingsText.IndexOf((ConvertTo-JsonText $skillNow), [StringComparison]::OrdinalIgnoreCase) -lt 0 -or -not (Test-Path $skillNow)) {
+        throw "The turned-off skill isn't named by its new path $skillNow in settings.json."
+    }
+    if ($result.rewrittenFiles -lt 2) { throw "Only $($result.rewrittenFiles) files had their paths rewritten; settings.json and the chat without a project both name paths in the data folder." }
 
     # What Vision reads back with its own code: every chat, task, route and vault value (the vault's encryption
     # constants carry the former name and must never change).
     $read = $result.readBack
-    if ($read.conversations -ne $legacyChats -or $read.conversationItems -lt $legacyChats) { throw "Vision reads $($read.conversations) chats ($($read.conversationItems) items); there are $legacyChats." }
-    if ($read.queueTasks -ne $legacyTasks) { throw "Vision reads $($read.queueTasks) tasks; there are $legacyTasks." }
+    if ($read.conversations -ne $legacyChats -or $read.conversationItems -ne $legacyItems) {
+        throw "Vision reads $($read.conversations) chats with $($read.conversationItems) transcript items; there are $legacyChats with $legacyItems."
+    }
+    if ($read.queueTasks -ne $legacyTasks) { throw "Vision reads $($read.queueTasks) tasks; there are $legacyTasks ($($read.queueProblem))." }
     if ($read.routes -ne $legacyRoutes) { throw "Vision reads $($read.routes) routes; there are $legacyRoutes." }
     if ($read.vaultEntries -ne $legacyVault -or $read.vaultValuesReadable -ne $legacyVault) {
         throw "Vision decrypts $($read.vaultValuesReadable) of $($read.vaultEntries) vault values; there are $legacyVault ($($read.vaultProblem))."
@@ -330,7 +374,7 @@ if ($upgrade) {
     if (-not [InstallerTestCredentials]::Matches($keyTarget, $keySecret, $keyUser)) { throw "$keyTarget is missing or doesn't hold the key that was under $legacyKeyTarget." }
     if ([InstallerTestCredentials]::Exists($legacyKeyTarget)) { throw "$legacyKeyTarget is still there after the key was brought over." }
     if ($read.routesWithKeys -lt 1) { throw 'Vision finds no route key under its own names.' }
-    Write-Host "  Moved to $data with $chats chats ($moved working folders rewritten), $($read.queueTasks) tasks, $($read.vaultValuesReadable) vault values that decrypt; the key is now $keyTarget"
+    Write-Host "  Moved to $data ($($result.rewrittenFiles) files' paths rewritten): $chats chats with $($read.conversationItems) items, $($read.queueTasks) tasks, $($read.vaultValuesReadable) vault values that decrypt; the key is now $keyTarget"
 
     # Once only: a second run finds it done and changes nothing.
     $again = Join-Path $Output 'migrate-only-again.json'
@@ -339,7 +383,8 @@ if ($upgrade) {
     if ($code -ne 0 -or $second.result -ne 'AlreadyDone' -or $second.keysBroughtOver -ne 0) {
         throw "A second --migrate-only run exited with $code, $($second.result), $($second.keysBroughtOver) keys."
     }
-    if ($second.readBack.conversations -ne $legacyChats -or $second.readBack.vaultValuesReadable -ne $legacyVault -or (Test-Path $legacyData)) {
+    if ($second.readBack.conversations -ne $legacyChats -or $second.readBack.conversationItems -ne $legacyItems -or
+        $second.readBack.queueTasks -ne $legacyTasks -or $second.readBack.vaultValuesReadable -ne $legacyVault -or (Test-Path $legacyData)) {
         throw 'A second --migrate-only run changed the data.'
     }
     if (-not [InstallerTestCredentials]::Matches($keyTarget, $keySecret, $keyUser)) { throw "A second run changed $keyTarget." }
