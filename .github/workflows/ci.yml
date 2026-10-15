@@ -75,6 +75,11 @@ jobs:
         shell: pwsh
         run: ./scripts/package.ps1 -Arch x64 -SkipReadyToRun
 
+      # The runner's screen is 1024x768, which caps every window there; the screenshots are taken larger.
+      - name: Screen size for the screenshots
+        shell: pwsh
+        run: ./scripts/set-screen-size.ps1 -Width 1920 -Height 1080
+
       - name: UI self-test
         shell: pwsh
         run: ./scripts/self-test.ps1 -Exe artifacts/publish/win-x64/Vision/Vision.exe -Output "$env:RUNNER_TEMP/selftest"

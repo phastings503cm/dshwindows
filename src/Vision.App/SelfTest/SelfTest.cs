@@ -167,6 +167,17 @@ public sealed class SelfTest
             window.ShowPlanPanel(false);
             chat.Running = false;
 
+            // The README's pictures: one task worked step by step — mid-way with its plan beside it, then done.
+            var showcase = FillShowcase(model);
+            model.Select(showcase.Id);
+            window.ShowPlanPanel(true);
+            await Settle(1000);
+            Capture(window, "showcase");
+            window.ShowPlanPanel(false);
+            FinishShowcase(showcase);
+            await Settle(1000);
+            Capture(window, "showcase-done");
+
             // Remembered notes, and the OpenClaw import's first page (nothing is scanned until you press the button).
             FillMemories(model);
             await ShowAndCapture(new MemoriesWindow(model) { Owner = window }, "memories");
@@ -461,6 +472,82 @@ public sealed class SelfTest
         return chat;
     }
 
+    /// <summary>One ordinary task, worked the way the agent works: a plan, reading, edits, a review subagent on a
+    /// second server, the tests running — everything has gone right so far.</summary>
+    private static SessionVM FillShowcase(AppModel model)
+    {
+        var chat = model.NewChat();
+        chat.Title = "Low-stock warnings in the report";
+        var start = DateTimeOffset.Now.AddMinutes(-6);
+        chat.AppendMessage(MessageRole.User,
+            "Add a low-stock warning to the stock report: anything under its reorder level should come first, marked. Cover it with tests.", start);
+        chat.AppendMessage(MessageRole.Assistant,
+            "I'll check how stock levels are kept, add reorder levels, then put the warnings at the top of the report and test it.\n\n" +
+            "Levels live in a dictionary in **src/Stock.cs** and nothing knows about a reorder level yet, so that comes first.",
+            start.AddSeconds(9));
+        chat.AddFinishedTool("s1", "read_file", "src/Stock.cs", "22 lines", "namespace Inventory;\n...", true, start.AddSeconds(12));
+        chat.AddFinishedTool("s2", "grep", "_levels|Remove\\(", "4 matches in 2 files", "src/Stock.cs:9\nsrc/Stock.cs:13\ntests/StockTests.cs:1", true, start.AddSeconds(14));
+        chat.AddFinishedTool("s3", "read_file", "tests/StockTests.cs", "1 line", "public class StockTests { }", true, start.AddSeconds(16));
+        chat.SetTodos(
+        [
+            new TodoItem("1", "Read how stock levels are stored", TodoStatus.Completed),
+            new TodoItem("2", "Add reorder levels and BelowReorderLevel()", TodoStatus.Completed),
+            new TodoItem("3", "Put low-stock items first in the report", TodoStatus.Completed),
+            new TodoItem("4", "Add tests and run the whole suite", TodoStatus.InProgress),
+        ]);
+        chat.AddFinishedTool("s4", "edit", "src/Stock.cs", "+19 −1", null, true, start.AddMinutes(2));
+        chat.AddFinishedTool("s5", "write_file", "src/StockReport.cs", "Created · 46 lines", null, true, start.AddMinutes(3));
+        chat.AddFinishedTool("s6", "edit", "tests/StockTests.cs", "+38", null, true, start.AddMinutes(4));
+        chat.AppendMessage(MessageRole.Assistant,
+            "The report now asks `Stock.BelowReorderLevel()` first and marks those lines `LOW`. A reviewer is checking the change " +
+            "on the second server while I run the suite.", start.AddMinutes(4).AddSeconds(20));
+        chat.StartTool("s7", "run_shell_command", "dotnet test", start.AddMinutes(4).AddSeconds(25));
+        chat.RecordFileChanges([new FileChange(Path.Combine(model.Project!, "tests", "StockTests.cs"), FileChangeKind.Modified),
+                                new FileChange(Path.Combine(model.Project!, "src", "StockReport.cs"), FileChangeKind.Created),
+                                new FileChange(Path.Combine(model.Project!, "src", "Stock.cs"), FileChangeKind.Modified)]);
+        var now = DateTimeOffset.Now;
+        chat.UpsertAgent(new AgentRunInfo("r1", "Find every place the report is printed", "explore", false, now.AddMinutes(-4))
+        {
+            Server = "Spark 2", Status = AgentRunStatus.Done, FinishedAt = now.AddMinutes(-3).AddSeconds(-10), Steps = 7,
+            Report = "Two: the console report and the nightly CSV export. Both build their lines through Stock.",
+        });
+        chat.UpsertAgent(new AgentRunInfo("r2", "Review the reorder-level change", "review", true, now.AddSeconds(-25))
+            { Server = "Spark 2", Activity = "read_file: src/StockReport.cs", Steps = 3 });
+        chat.Goal = new GoalState("Low-stock warnings first in the report, with tests", 2, start);
+        chat.LastUsage = new LlmUsage(24_310, 2_045);
+        chat.Running = true;
+        return chat;
+    }
+
+    /// <summary>The same task, finished: the tests passed, the review came back, and the agent says what it did.</summary>
+    private static void FinishShowcase(SessionVM chat)
+    {
+        var now = DateTimeOffset.Now;
+        chat.FinishTool("s7", true, "exit 0 — 14 passed", "Passed!  - Failed: 0, Passed: 14, Skipped: 0, Total: 14");
+        chat.SetTodos(
+        [
+            new TodoItem("1", "Read how stock levels are stored", TodoStatus.Completed),
+            new TodoItem("2", "Add reorder levels and BelowReorderLevel()", TodoStatus.Completed),
+            new TodoItem("3", "Put low-stock items first in the report", TodoStatus.Completed),
+            new TodoItem("4", "Add tests and run the whole suite", TodoStatus.Completed),
+        ]);
+        chat.UpsertAgent(new AgentRunInfo("r2", "Review the reorder-level change", "review", true, now.AddSeconds(-70))
+        {
+            Server = "Spark 2", Status = AgentRunStatus.Done, FinishedAt = now.AddSeconds(-20), Steps = 5,
+            Report = "No problems found. SKUs without a reorder level never warn, so nothing changes for them.",
+        });
+        chat.AppendMessage(MessageRole.Assistant,
+            "Done — low-stock items now lead the report.\n\n## What changed\n\n" +
+            "- **src/Stock.cs** — each SKU can have a reorder level; `BelowReorderLevel()` lists the ones under it.\n" +
+            "- **src/StockReport.cs** — new: warnings first, marked `LOW`, then everything else by SKU.\n" +
+            "- **tests/StockTests.cs** — five new tests.\n\n" +
+            "| Check | Result |\n|---|---|\n| `dotnet test` | 14 passed, 0 failed |\n| Review subagent | no problems found |\n\n" +
+            "SKUs without a reorder level never warn, so today's report only changes for the ones you give a level to.", now);
+        chat.Goal = null;
+        chat.LastUsage = new LlmUsage(31_874, 2_912);
+        chat.Running = false;
+    }
+
     /// <summary>Two Spark Swapper boxes for Settings › Model servers: a DGX Spark serving one model while it installs
     /// another (with one more it doesn't have), and a Strix Halo that isn't answering.</summary>
     private void ShowDemoBoxes(AppModel model)
@@ -593,8 +680,14 @@ public sealed class SelfTest
         {
             window.UpdateLayout();
             var dpi = VisualTreeHelper.GetDpi(window);
-            var width = (int)Math.Ceiling(window.ActualWidth * dpi.DpiScaleX);
-            var height = (int)Math.Ceiling(window.ActualHeight * dpi.DpiScaleY);
+            // The client area only: the window's own size includes its frame, which renders as an empty band
+            // along the right and bottom edges.
+            var client = VisualTreeHelper.GetChildrenCount(window) > 0 && VisualTreeHelper.GetChild(window, 0) is FrameworkElement root
+                         && root.ActualWidth > 0 && root.ActualHeight > 0
+                ? new Size(root.ActualWidth, root.ActualHeight)
+                : new Size(window.ActualWidth, window.ActualHeight);
+            var width = (int)Math.Ceiling(client.Width * dpi.DpiScaleX);
+            var height = (int)Math.Ceiling(client.Height * dpi.DpiScaleY);
             if (width <= 0 || height <= 0) throw new InvalidOperationException("The window has no size.");
             var bitmap = new RenderTargetBitmap(width, height, dpi.PixelsPerInchX, dpi.PixelsPerInchY, PixelFormats.Pbgra32);
             bitmap.Render(window);
