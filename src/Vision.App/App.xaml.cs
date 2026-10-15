@@ -39,6 +39,14 @@ public partial class App : Application
             return;
         }
 
+        // Vision.exe --migrate-only [<report.json>]: bring DSH's data and keys over as the first start would, report
+        // what reads back, and exit without a window (scripts that upgrade many PCs; the CI upgrade test).
+        if (LegacyUpgrade.ParseMigrateOnly(args) is { } migrateReport)
+        {
+            Shutdown(LegacyUpgrade.RunMigrateOnly(migrateReport));
+            return;
+        }
+
         var selfTest = SelfTest.Parse(args);
 
         // One Vision per user: a second launch ("Open with Vision" on a folder) hands its folder over.
@@ -112,21 +120,8 @@ public partial class App : Application
     /// stopped half-way and the data must not be split across two folders).</summary>
     private bool BringLegacyDataOver(bool firstInstance)
     {
-        // VISION_HOME (or DSH_HOME) set: the user chose the folder, and it isn't moved.
-        if (AppPaths.Overridden is not null) return true;
-        var program = AppContext.BaseDirectory;
-        DataFolderMigration migration;
-        if (AppPaths.PortableRootFor(program) is { } portable)
-        {
-            // A portable copy unpacked beside a portable DSH copies DSH's data (that copy keeps its own).
-            if (AppPaths.LegacyPortableRootFor(program) is not { } legacyPortable) return true;
-            migration = new DataFolderMigration(legacyPortable, portable, allowMove: false);
-        }
-        else
-        {
-            migration = new DataFolderMigration(AppPaths.LegacyDefaultRoot, AppPaths.DefaultRoot);
-        }
-        if (!migration.IsPending) return true;
+        // Nothing to bring: VISION_HOME (or DSH_HOME) names the folder, or it was brought over already.
+        if (LegacyUpgrade.Pending() is not { } migration) return true;
         // Another Vision is starting up and is bringing it over right now; the user will see that one.
         if (!firstInstance) return false;
 
@@ -144,11 +139,7 @@ public partial class App : Application
                 if (choice != 1) return false;
             }
 
-            var outcome = migration.Run();
-            if (outcome.BroughtOver)
-            {
-                try { ShellIntegration.ReplaceLegacyFolderMenu(); } catch (Exception) { }
-            }
+            var outcome = LegacyUpgrade.Run(migration);
             if (outcome.Result != DataMigrationResult.Failed) return true;
             if (outcome.DataFolder is null)
             {

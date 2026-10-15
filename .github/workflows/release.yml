@@ -109,7 +109,7 @@ jobs:
           gh release download v0.8.85 --repo "${{ github.repository }}" --pattern 'DSH-0.8.85-win-x64-setup.exe' --dir "$env:RUNNER_TEMP/legacy"
           if ($LASTEXITCODE -ne 0) { throw 'Downloading the former version for the upgrade test failed.' }
 
-      - name: "Installer test: upgrade from the former name, launch, uninstall"
+      - name: "Installer test: upgrade from the former name, bring its data over, launch, uninstall"
         shell: pwsh
         run: ./scripts/installer-test.ps1 -Installer "artifacts/Vision-${{ steps.version.outputs.version }}-win-x64-setup.exe" -LegacyInstaller "$env:RUNNER_TEMP/legacy/DSH-0.8.85-win-x64-setup.exe" -Output "$env:RUNNER_TEMP/installer-test"
 
@@ -122,7 +122,9 @@ jobs:
             ${{ runner.temp }}/selftest/*.png
             ${{ runner.temp }}/selftest/*.txt
             ${{ runner.temp }}/installer-test/*.log
+            ${{ runner.temp }}/installer-test/*.json
             ${{ runner.temp }}/installer-test/selftest/*.txt
+            ${{ runner.temp }}/installer-test/legacy-selftest/*.txt
           if-no-files-found: ignore
 
       - name: Release notes

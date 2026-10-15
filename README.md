@@ -635,6 +635,14 @@ To produce the release files locally (installers need [Inno Setup](https://jrsof
 `Vision.exe --self-test <folder> [--theme light|dark]` renders every main view and window to PNGs using
 a throwaway data folder and a demo project, and exits non-zero on any error. CI runs it on Windows.
 
+`Vision.exe --migrate-only [report.json]` does only what the first start after an upgrade from the app's
+former name does — move its data folder to `%APPDATA%\Vision` and its Credential Manager entries to
+`Vision/…` — without opening a window, then writes what it moved and read back (counts only, never a key).
+Exit code 0 means done or nothing to do, 1 something couldn't be moved or doesn't read back (the report says
+what; a move that fails leaves the old folder as it was, and the next start tries again), 2 the old app is still
+open, 3 Vision is already running. Useful for upgrading many PCs by
+script; CI's upgrade test uses it.
+
 ### Layout
 
 | Path | What |
@@ -655,9 +663,12 @@ a throwaway data folder and a demo project, and exits non-zero on any error. CI 
   on Linux; on Windows a Release build, the full test suite (including the ConPTY, path and
   PowerShell tests, the app tests and the computer-use tests), the x64 zip and installer, the UI self-test (screenshots are uploaded as an
   artifact), and an installer test: a silent upgrade of the last release under the app's former name, which
-  must leave one app in Settings › Apps and none of the old folder, shortcuts or folder-menu entries; then
-  launch the installed app, check the Start menu and folder-menu entries, uninstall, and check nothing is
-  left behind.
+  must leave one app in Settings › Apps and none of the old folder, shortcuts or folder-menu entries. That
+  release's own self-test first fills its data folder (chats, a task list, a credential vault) and a provider
+  key is stored under its Credential Manager name; `Vision.exe --migrate-only` must then move the folder to
+  `%APPDATA%\Vision`, move the key to its `Vision/…` name, read every chat, task and vault value back, and
+  change nothing when run again. Then it launches the installed app, checks the Start menu and folder-menu
+  entries, uninstalls, and checks nothing is left behind but your data.
 - **`release.yml`** runs on every push to the default branch, whatever it is named: tests, packages
   x64 and ARM64 (ReadyToRun, self-contained) into installers and portable zips, runs the self-test
   and the installer test on the packaged x64 build, and publishes a GitHub release tagged

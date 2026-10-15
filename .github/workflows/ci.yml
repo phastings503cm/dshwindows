@@ -79,8 +79,9 @@ jobs:
         shell: pwsh
         run: ./scripts/self-test.ps1 -Exe artifacts/publish/win-x64/Vision/Vision.exe -Output "$env:RUNNER_TEMP/selftest"
 
-      # Legacy: the last release under the app's former name (DSH). The installer test installs it first, so
-      # it checks the upgrade users get: the old folder, shortcuts and folder menu replaced, data untouched.
+      # Legacy: the last release under the app's former name (DSH). The installer test installs it first and fills
+      # its data folder and a Credential Manager key, so it checks the upgrade users get: the old folder, shortcuts
+      # and folder menu replaced, then Vision.exe --migrate-only bringing the data and key over and reading them back.
       - name: Download the last release under the former name
         shell: pwsh
         env:
@@ -89,7 +90,7 @@ jobs:
           gh release download v0.8.85 --repo "${{ github.repository }}" --pattern 'DSH-0.8.85-win-x64-setup.exe' --dir "$env:RUNNER_TEMP/legacy"
           if ($LASTEXITCODE -ne 0) { throw 'Downloading the former version for the upgrade test failed.' }
 
-      - name: "Installer test: upgrade from the former name, launch, uninstall"
+      - name: "Installer test: upgrade from the former name, bring its data over, launch, uninstall"
         shell: pwsh
         run: ./scripts/installer-test.ps1 -Installer "artifacts/Vision-${{ steps.package.outputs.version }}-win-x64-setup.exe" -LegacyInstaller "$env:RUNNER_TEMP/legacy/DSH-0.8.85-win-x64-setup.exe" -Output "$env:RUNNER_TEMP/installer-test"
 
@@ -102,7 +103,9 @@ jobs:
             ${{ runner.temp }}/selftest/*.png
             ${{ runner.temp }}/selftest/*.txt
             ${{ runner.temp }}/installer-test/*.log
+            ${{ runner.temp }}/installer-test/*.json
             ${{ runner.temp }}/installer-test/selftest/*.txt
+            ${{ runner.temp }}/installer-test/legacy-selftest/*.txt
           if-no-files-found: ignore
 
       - name: Print screenshot previews
