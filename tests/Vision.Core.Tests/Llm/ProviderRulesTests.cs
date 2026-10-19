@@ -563,5 +563,10 @@ public sealed class ProviderRulesTests
         Assert.Equal("only the basic settings", store.Adaptation(RequestAdaptationStore.Key("https://api.z.ai/api/paas/v4", "glm-5"))!.Summary);
         store.Forget("https://api.moonshot.ai/v1/");
         Assert.Single(new RequestAdaptationStore(file).All);
+        store.Learn(new RequestChange.Drop("thinking"), RequestAdaptationStore.Key("https://api.moonshot.ai/v1", "kimi-k2.6-x"));
+        store.Learn(new RequestChange.Drop("thinking"), RequestAdaptationStore.Key("https://api.moonshot.ai/v1", "kimi-k2.6"));
+        store.ForgetKey(RequestAdaptationStore.Key("https://api.moonshot.ai/v1", "kimi-k2.6"));
+        Assert.NotNull(new RequestAdaptationStore(file).Adaptation(RequestAdaptationStore.Key("https://api.moonshot.ai/v1", "kimi-k2.6-x")));
+        Assert.Null(new RequestAdaptationStore(file).Adaptation(RequestAdaptationStore.Key("https://api.moonshot.ai/v1", "kimi-k2.6")));
     }
 }

@@ -105,7 +105,7 @@ public static class Menus
             && config.Providers.FirstOrDefault(p => p.RouteId == chosen) is { } chatRoute)
         {
             menu.Items.Add(new Separator());
-            var primary = Item($"Make {chatRoute.Name} the primary", () =>
+            var primary = Item("Make this the primary (for new projects and the fleet)", () =>
             {
                 config.MakePrimary(chatRoute.RouteId);
                 model.Host.ResetRouteCache();
@@ -130,14 +130,14 @@ public static class Menus
         var offered = rules?.ThinkingLevels ?? ThinkingLevels.All;
         string Name(ThinkingLevel level) => rules?.Label(level) ?? level.Label();
         var shownDefault = fallback is { } f && rules?.NearestLevel(f) is { } nearDefault ? Name(nearDefault) : fallback?.Label();
-        menu.Items.Add(Item($"Model default ({shownDefault ?? "server default"})", () => model.Host.SetChatThinking(session, null),
+        menu.Items.Add(Item($"Provider default ({shownDefault ?? "server default"})", () => model.Host.SetChatThinking(session, null),
             isChecked: session.Thinking is null));
         menu.Items.Add(new Separator());
         if (offered.Count == 0)
         {
             menu.Items.Add(new MenuItem
             {
-                Header = rules?.AlwaysThinks == true ? "This model always thinks — it takes no thinking setting" : "This model has no thinking setting",
+                Header = rules?.AlwaysThinks == true ? "This model always thinks and takes no thinking setting." : "This model has no thinking setting.",
                 IsEnabled = false,
             });
             return menu;

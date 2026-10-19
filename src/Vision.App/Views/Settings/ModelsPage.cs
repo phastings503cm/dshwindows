@@ -245,6 +245,19 @@ public sealed class ModelsPage : UserControl
         if (primary && !enabled)
             controls.Children.Add(WithMargin(Ui.Status("Switched off, but it's the primary: switch it on, or make another model primary.", "SystemFillColorCautionBrush"),
                 new Thickness(0, 4, 16, 4)));
+        // What the server refused before (and Vision stopped sending), with a way to try those settings again.
+        if (provider.Kind != ProviderKind.Bedrock
+            && RequestAdaptationStore.Shared.Adaptation(RequestAdaptationStore.Key(provider.BaseUrl, provider.Model)) is { IsEmpty: false } learned)
+        {
+            var text = Ui.Secondary($"Learned: {learned.Summary.Replace("`", "")}", 12);
+            text.ToolTip = "The server refused these settings for this model, so Vision stopped sending them (it said so in the chat). Forget it to send them again.";
+            var forget = Ui.LinkButton("Forget", () =>
+            {
+                RequestAdaptationStore.Shared.ForgetKey(RequestAdaptationStore.Key(provider.BaseUrl, provider.Model));
+                Rebuild();
+            });
+            controls.Children.Add(WithMargin(Ui.Stack(Orientation.Horizontal, text, WithMargin(forget, new Thickness(6, 0, 0, 0))), new Thickness(0, 4, 16, 4)));
+        }
         if (_model.RouteChecks.TryGetValue(provider.RouteId, out var check))
         {
             var dot = new System.Windows.Shapes.Ellipse { Width = 8, Height = 8, Margin = new Thickness(0, 0, 5, 0), VerticalAlignment = VerticalAlignment.Center };
@@ -522,6 +535,7 @@ public sealed class ProviderEditorWindow : Window
     private readonly TextBlock _endpointDetail = Ui.Secondary("", 11.5);
     private readonly StackPanel _endpointRow;
     private readonly TextBlock _thinkingHint = Ui.Secondary("", 11.5);
+    private readonly TextBlock _temperatureHint = Ui.Secondary("", 11.5);
     /// <summary>What the Test button found, in plain words, and a switch to the endpoint the key belongs to.</summary>
     private readonly TextBlock _testResult = Ui.Text("", 12.5);
     private readonly Button _switchEndpoint = Ui.Button("Switch", () => { }, accent: true);
@@ -599,7 +613,7 @@ public sealed class ProviderEditorWindow : Window
             ClearTest();
         }));
         _modelName.SelectionChanged += (_, _) => Dispatcher.BeginInvoke(UpdateThinkingChoices);
-        _vision.IsChecked = profile.Vision ?? true;
+        _vision.IsChecked = profile.Vision ?? ModelRequestRules.For(profile).AcceptsImages ?? true;
         _interactiveOnly.IsChecked = profile.IsInteractiveOnly;
         _interactiveOnly.ToolTip = "The plan's terms allow only interactive use (the Qwen Coding Plan): task lists and other unattended work won't run on it as the primary.";
         _pin = profile.PinnedCertificate;
@@ -651,7 +665,7 @@ public sealed class ProviderEditorWindow : Window
             Labeled("Context window", Ui.Stack(Orientation.Horizontal, _context, detect),
                 "Leave blank to auto-detect from the server (vLLM/SGLang report max_model_len). Only set it to force a smaller window."),
             WithHint(Labeled("Default thinking", _thinking, "Only the levels this model takes are offered. Each chat can override it (/think)."), _thinkingHint),
-            Labeled("Temperature", _temperature),
+            WithHint(Labeled("Temperature", _temperature), _temperatureHint),
             Labeled("Max output tokens", _maxTokens),
             _vision)));
         form.Children.Add(Ui.Section("Use"));
@@ -759,6 +773,10 @@ public sealed class ProviderEditorWindow : Window
             ? rules.AlwaysThinks ? "This model always thinks and takes no thinking setting." : "This model has no thinking setting."
             : rules.AlwaysThinks ? "This model always thinks; the setting picks how much." : "";
         _thinkingHint.Visibility = _thinkingHint.Text.Length == 0 ? Visibility.Collapsed : Visibility.Visible;
+        _temperatureHint.Text = !rules.SendsTemperature
+            ? "This model fixes its own temperature, so Vision doesn't send one."
+            : rules.TemperatureRange is var (min, max) ? $"This model takes {min:0.#}–{max:0.#}; a higher setting is sent as {max:0.#}." : "";
+        _temperatureHint.Visibility = _temperatureHint.Text.Length == 0 ? Visibility.Collapsed : Visibility.Visible;
     }
 
     private void ClearTest()
@@ -896,7 +914,10 @@ public sealed class ProviderEditorWindow : Window
             MaxOutputTokens = int.TryParse(_maxTokens.Text, out var m) && m > 0 ? m : null,
             ContextWindow = int.TryParse(_context.Text.Replace(",", "").Replace("_", ""), out var c) && c > 0 ? c : null,
             ReasoningEffort = _thinking.SelectedItem is ComboBoxItem { Tag: string raw } && raw.Length > 0 ? raw : null,
-            Vision = _vision.IsChecked == true ? null : false,
+            // Unticked: no images. Ticked: the default — unless the model is known not to read them (Z.ai's text models), when
+            // ticking it is the user's own say-so.
+            Vision = _vision.IsChecked != true ? false
+                : ModelRequestRules.For(_original with { Kind = SelectedKind, BaseUrl = _url.Text.Trim(), Model = _modelName.Text.Trim() }).AcceptsImages == false ? true : null,
             CustomHeaders = headers.Count == 0 ? null : headers,
             AwsProfile = SelectedKind == ProviderKind.Bedrock ? _original.AwsProfile : null,
             AwsRegion = SelectedKind == ProviderKind.Bedrock ? _original.AwsRegion : null,

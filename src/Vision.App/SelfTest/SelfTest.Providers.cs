@@ -33,6 +33,12 @@ public sealed partial class SelfTest
                 await Settle(900);
                 Capture(zaiGuide, $"subscription-zai-{page.ToString().ToLowerInvariant()}");
             }
+            // The endpoint picker, under the plans.
+            zaiGuide.ShowZaiDemo(PlanPage.Choose);
+            await Settle(400);
+            zaiGuide.ScrollGuide(1.0);
+            await Settle(400);
+            Capture(zaiGuide, "subscription-zai-choose-more");
         }
         catch (Exception error)
         {
@@ -83,6 +89,10 @@ public sealed partial class SelfTest
             model.Select(spark.Id);
             await Settle(600);
             Capture(window, "chat-own-model-other");
+
+            // A setting the Z.ai route's server refused, as Settings › AI Models shows it (with Forget).
+            RequestAdaptationStore.Shared.Learn(new RequestChange.Drop("temperature"), RequestAdaptationStore.Key(zaiRoute.BaseUrl, zaiRoute.Model));
+            await ShowAndCapture(new SettingsWindow(model, SettingsTab.Models, null) { Owner = window, Width = 1000, Height = 720 }, "settings-models-learned");
         }
         catch (Exception error)
         {

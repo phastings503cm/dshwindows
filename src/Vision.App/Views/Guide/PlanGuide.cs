@@ -370,7 +370,7 @@ public sealed class PlanGuide : IWizardGuide
         var plan = _plan!;
         var panel = Ui.Stack(
             Heading("Checking your key"),
-            Lead(plan.ListsModels ? "Vision asks the plan which models your key can use." : "Vision sends a one-word request to check the key works."));
+            Lead(plan.ListsModels && !plan.ChecksWithChat ? "Vision asks the plan which models your key can use." : "Vision sends a one-word request to check the key works."));
         if (_checking) panel.Children.Add(Busy($"Asking {new Uri(Region.BaseUrl).Host}…"));
         else if (_checkError is { } error)
         {

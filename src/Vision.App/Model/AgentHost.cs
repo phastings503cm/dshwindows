@@ -1180,7 +1180,8 @@ public sealed partial class AgentHost : ObservableObject
     {
         if (profile is null) return true;
         if (_noVisionRoutes.Contains(profile.RouteId)) return false;
-        return profile.Vision ?? true;
+        // Unset: what the model is known to take (Z.ai's text models read no images), else assume it can.
+        return profile.Vision ?? ModelRequestRules.For(profile).AcceptsImages ?? true;
     }
 
     // MARK: - Skills

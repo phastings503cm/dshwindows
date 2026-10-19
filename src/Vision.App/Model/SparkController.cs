@@ -428,11 +428,12 @@ public sealed partial class SparkController : ObservableObject, IDisposable
                 });
                 return $"**{box.Name}**{(box.PlatformLabel is { } label && !box.Name.Contains(label) ? $" ({label})" : "")}:\n" + string.Join("\n", lines);
             });
-            var how = Boxes.Count > 1 ? "Switch with `/swap <model>` (the primary model's box) or `/swap <box> <model>`." : "Switch with `/swap <name>` or the model menu under the composer.";
+            var how = Boxes.Count > 1 ? "Switch with `/swap <model>` (the box this chat's model is on) or `/swap <box> <model>`." : "Switch with `/swap <name>` or the model menu under the composer.";
             vm.Note(string.Join("\n\n", sections) + "\n" + how);
             return;
         }
-        var current = PrimaryBox is { } primary ? Boxes.IndexOf(primary) : (int?)null;
+        // A bare model name goes to the box this chat's model is on (each chat has its own), else the primary's.
+        var current = (BoxFor(_host.ChatRoute(vm)) ?? PrimaryBox) is { } home ? Boxes.IndexOf(home) : (int?)null;
         var target = SwapTargets.Resolve(arg, Boxes.Select(b => (b.Name, b.Connection.Hostname)).ToList(), current);
         if (target.Box is not { } index)
         {

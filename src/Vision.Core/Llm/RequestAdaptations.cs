@@ -416,6 +416,20 @@ public sealed class RequestAdaptationStore
         if (path is not null) Write(snapshot, path);
     }
 
+    /// <summary>Forget what was learned for one server and model (Settings › AI Models › Forget).</summary>
+    public void ForgetKey(string key)
+    {
+        Dictionary<string, RequestAdaptation> snapshot;
+        string? path;
+        lock (_lock)
+        {
+            if (!_map.Remove(key)) return;
+            snapshot = _map.ToDictionary(e => e.Key, e => e.Value.Copy(), StringComparer.Ordinal);
+            path = _path;
+        }
+        if (path is not null) Write(snapshot, path);
+    }
+
     private void Load(string path)
     {
         Dictionary<string, RequestAdaptation> loaded;
