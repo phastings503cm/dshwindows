@@ -118,6 +118,8 @@ public sealed partial class SelfTest
             await Settle();
             Capture(window, "new-chat");
 
+            // Settings › MCP Servers shows three servers: connected, failed, off (10-19 #20).
+            await PrepareMcp(model);
             foreach (var tab in Enum.GetValues<SettingsTab>())
             {
                 var settings = new SettingsWindow(model, tab, null) { Owner = window, Width = 1000, Height = 720 };
@@ -218,6 +220,9 @@ public sealed partial class SelfTest
             await CaptureProviders(window, model);
 
             await CaptureMachineGlow(window, model, chat);
+
+            // A turn's checkpoint and its rewind, the Rewind window, the MCP import and a Sensitive chat (10-19 #20).
+            await CapturePower(window, model);
 
             // What the composer says it will send for a PDF, a Markdown file, a Word file, a scan and a large paste.
             await CaptureAttachments(window, model);
