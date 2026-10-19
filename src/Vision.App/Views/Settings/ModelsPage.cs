@@ -65,7 +65,7 @@ public sealed class ModelsPage : UserControl
             menu.Items.Add(Menus.Item("Subscription plan…", () => model.ShowPlanGuide(), Icons.Key));
             menu.Items.Add(Menus.Item("Z.ai (GLM)…", () => Edit(new ProviderProfile(ProviderKind.OpenAICompat, ZaiEndpoint.Coding.RouteName(),
                 ZaiEndpoint.Coding.BaseUrl(), "glm-5.3") { ContextWindow = 1_000_000 }), Icons.Key));
-            menu.Items.Add(Menus.Item("DeepSeek API…", () => model.ShowPlanGuide(SubscriptionPlans.DeepSeek), Icons.Key));
+            menu.Items.Add(Menus.Item("DeepSeek…", () => model.ShowPlanGuide(SubscriptionPlans.DeepSeek), Icons.Key));
             menu.Items.Add(Menus.Item("Anthropic API (key)…", () => model.ShowPlanGuide(SubscriptionPlans.Anthropic), Icons.Key));
             menu.Items.Add(Menus.Item("Amazon Bedrock…", () => model.ShowBedrockGuide(), Icons.Cloud));
             menu.Items.Add(Menus.Item("Other OpenAI-compatible server…",
@@ -601,7 +601,7 @@ public sealed class ProviderEditorWindow : Window
                 && KnownProviders.Of(_url.Text) != KnownProvider.Anthropic && _original.Kind != ProviderKind.Anthropic)
             {
                 _url.Text = AnthropicClient.DefaultBaseUrl;
-                if (_name.Text.Trim().Length == 0 || _name.Text.Trim() == "New server") _name.Text = "Anthropic API (key)";
+                if (_name.Text.Trim().Length == 0 || _name.Text.Trim() == "New server") _name.Text = "Anthropic";
                 if (_modelName.Text.Trim().Length == 0) _modelName.Text = "claude-opus-5-5";
             }
             if (IsZai && ZaiEndpoints.Of(_url.Text) is null)

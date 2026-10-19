@@ -132,27 +132,23 @@ public static class Menus
         var config = model.Config;
         if (session is not null && model.Host.GuardianSignInNeeded(session))
         {
+            // Vision for macOS: one line naming the model and what to do; it opens Settings › Guardian.
             menu.Items.Add(Header("Guardian"));
-            var waiting = new MenuItem
-            {
-                Header = $"{GuardianRoutes.ModelOfRouteId(session.RouteId) ?? session.RouteId} — {GuardianRoutes.SignInNeeded}",
-                IsEnabled = false, IsChecked = true,
-            };
+            var id = GuardianRoutes.ModelOfRouteId(session.RouteId) ?? session.RouteId ?? "";
+            var title = guardian.Models.FirstOrDefault(m => m.Id == id) is { } known ? GuardianRoutes.MenuTitle(known) : id;
+            var waiting = Item($"{title} — {GuardianRoutes.SignInNeeded}", model.ShowGuardian, Icons.Shield, isChecked: true);
+            waiting.ToolTip = "Opens Settings › Guardian. Or pick another model for this chat.";
             menu.Items.Add(waiting);
-            menu.Items.Add(Item("Sign in to Guardian…", model.ShowGuardian, Icons.Shield));
             return;
         }
         var models = guardian.MenuModels.Where(m => config.Providers.All(p => p.RouteId != GuardianRoutes.LiveRouteId(m.Id))).ToList();
         if (models.Count == 0) return;
-        var org = guardian.Account?.OrgName;
-        menu.Items.Add(Header(org is { Length: > 0 } ? $"Guardian — {org}" : "Guardian"));
+        menu.Items.Add(Header("Guardian"));
         foreach (var guardianModel in models)
         {
             var routeId = GuardianRoutes.LiveRouteId(guardianModel.Id);
-            var facts = new List<string>();
-            if (guardianModel.ContextWindow is > 0 and var window) facts.Add(ShortTokens(window));
-            if (guardianModel.InteractiveOnly == true) facts.Add("interactive only");
-            var title = GuardianRoutes.MenuTitle(guardianModel) + (facts.Count > 0 ? $" — {string.Join(" · ", facts)}" : "");
+            // Guardian's label with the id when they differ, as on the Mac: "Claude Opus 5.5 (claude-opus-5-5)".
+            var title = GuardianRoutes.MenuTitle(guardianModel);
             var picked = guardianModel;
             var item = Item(title, () =>
             {
@@ -163,7 +159,8 @@ public static class Menus
                 }
                 guardian.UseModel(picked, RouteUse.Primary);
             }, Icons.Shield, isChecked: routeId == chosen);
-            item.ToolTip = $"{guardianModel.Id} through your Guardian account. " +
+            item.ToolTip = $"{guardianModel.Id} through your Guardian account" +
+                           (guardianModel.ContextWindow is > 0 and var window ? $" ({ShortTokens(window)} context{(guardianModel.InteractiveOnly == true ? ", interactive use only" : "")}). " : ". ") +
                            (session is not null
                                ? routeId == chosen ? "This chat's model. " : "Use this model in this chat (other chats keep theirs; new chats in this project start with it). "
                                : "Make this the primary model. ") +

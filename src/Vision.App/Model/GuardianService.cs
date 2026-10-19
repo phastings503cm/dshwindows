@@ -55,6 +55,9 @@ public sealed partial class GuardianService : ObservableObject
                     saved.Account.SignedInAt) { OrgId = saved.Account.OrgId };
                 _client = new GuardianClient(saved.Account.Address, session, _handler()) { OrgId = saved.Account.OrgId };
                 _account = saved.Account;
+                // The list Guardian last gave, for the menus until it answers again (a chat on any Guardian model keeps it
+                // meanwhile: _modelsKnown stays false).
+                _models = saved.Account.Models ?? [];
             }
             catch (GuardianError)
             {
@@ -112,10 +115,18 @@ public sealed partial class GuardianService : ObservableObject
             if (!ReferenceEquals(Client, client)) return; // signed out or in again meanwhile
             Models = models;
             _modelsKnown = true;
+            RememberModels(models);
         }
         catch (Exception error) when (error is GuardianError or HttpRequestException or OperationCanceledException or IOException)
         {
         }
+    }
+
+    /// <summary>Keep the list for the next launch (in guardian.json, beside the account; no token in it).</summary>
+    private void RememberModels(IReadOnlyList<GuardianModel> models)
+    {
+        if (Account is not { } account || (account.Models ?? []).SequenceEqual(models)) return;
+        SaveAccount(account with { Models = models.ToList() });
     }
 
     /// <summary>A chat on a Guardian model was sent a message while signed out: the sign-in dialog (with Sign in again…).</summary>
@@ -281,6 +292,8 @@ public sealed partial class GuardianService : ObservableObject
         _browser?.Cancel();
         CancelTwoFactor();
         _accounts.SignOut();
+        // The models go too: the menus have none until the next sign-in.
+        if (Account is { Models: not null } signedOut) SaveAccount(signedOut with { Models = null });
         var address = Client?.Address ?? Account?.Address;
         foreach (var route in GuardianRoutesHere(address)) _config.SetApiKey("", route);
         _host.ResetRouteCache();
@@ -314,6 +327,7 @@ public sealed partial class GuardianService : ObservableObject
             }
             Models = await client.ModelsAsync().ConfigureAwait(true);
             _modelsKnown = true;
+            RememberModels(Models);
             return true;
         }, quiet: true).ConfigureAwait(true);
     }

@@ -93,9 +93,9 @@ public static class GuardianRoutes
         return route;
     }
 
-    /// <summary>The menu's name for a Guardian model: its label ("Claude Sonnet 5.5"), else its id.</summary>
-    public static string MenuTitle(GuardianModel model) =>
-        string.IsNullOrWhiteSpace(model.Label) ? model.Id : model.Label!;
+    /// <summary>The menu's name for a Guardian model: its label with the id when they differ ("Claude Opus 5.5
+    /// (claude-opus-5-5)"), else its id — as Vision for macOS names it.</summary>
+    public static string MenuTitle(GuardianModel model) => model.Title;
 }
 
 /// <summary>Refusals from Guardian's model proxy, said in Guardian's words. The chat shows the sentence (never "HTTP 402"),

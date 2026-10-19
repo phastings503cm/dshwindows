@@ -21,6 +21,9 @@ public sealed record GuardianAccount
     /// <summary>"password" or "browser".</summary>
     public string Method { get; init; } = "password";
     public DateTimeOffset SignedInAt { get; init; } = DateTimeOffset.Now;
+    /// <summary>The models Guardian last listed for this account (no token in them): every chat's model menu has them at launch,
+    /// before Guardian answers again. Gone on sign-out.</summary>
+    public IReadOnlyList<GuardianModel>? Models { get; init; }
 
     [JsonIgnore] public string Label => string.IsNullOrWhiteSpace(Name) ? Email : $"{Name} ({Email})";
 }

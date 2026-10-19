@@ -296,12 +296,19 @@ public sealed class GuardianPage : UserControl
     private UIElement ModelsCard()
     {
         var panel = new StackPanel();
+        // Guardian's models are in every chat's model menu while signed in — nothing to add (Vision for macOS's words).
+        var count = Guardian.Models.Count;
+        var inMenus = Ui.Text(count == 0
+            ? "Guardian's models appear in every chat's model menu, under Guardian, as soon as Guardian lists them."
+            : $"Guardian's {count} model{(count == 1 ? "" : "s")} {(count == 1 ? "is" : "are")} in every chat's model menu, under Guardian.", 13.5);
+        inMenus.Margin = new Thickness(0, 0, 0, 6);
+        panel.Children.Add(inMenus);
         var routes = Guardian.GuardianRoutesHere(Guardian.Client?.Address);
         if (routes.Count > 0)
         {
             var active = _model.Config.ActiveRoute;
             panel.Children.Add(Ui.Text("In use: " + string.Join(", ", routes.Select(r => r.Model + (r.RouteId == active ? " (primary)" : r.SubagentWorker ? " (subagents)" : r.IsBackup ? " (backup)" : ""))), 13.5));
-            panel.Children.Add(Ui.Secondary("Each is a route in Settings › AI Models with your Guardian token as its key; pick it per chat from the model menu."));
+            panel.Children.Add(Ui.Secondary("Each is a route in Settings › AI Models with your Guardian token as its key."));
         }
         if (Guardian.Models.Count == 0)
         {
@@ -330,8 +337,7 @@ public sealed class GuardianPage : UserControl
         panel.Children.Add(new ScrollViewer { Content = list, MaxHeight = 220, VerticalScrollBarVisibility = ScrollBarVisibility.Auto });
         var buttons = Ui.Buttons(
             Ui.Button("Use as my primary model", () => Use(RouteUse.Primary), accent: true),
-            Ui.Button("Use for subagents", () => Use(RouteUse.Subagent)),
-            Ui.Button("Just add it", () => Use(RouteUse.JustAdd)));
+            Ui.Button("Use for subagents", () => Use(RouteUse.Subagent)));
         buttons.Margin = new Thickness(0, 10, 0, 0);
         panel.Children.Add(buttons);
         return Ui.Card(panel);

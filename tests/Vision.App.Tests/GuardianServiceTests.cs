@@ -365,9 +365,11 @@ public sealed class GuardianServiceTests : IDisposable
             Assert.Equal("o1", turn.Headers["x-guardian-org"]);
             Assert.Equal("guardian/default", JsonNode.Parse(turn.Body)!["model"]!.GetValue<string>());
 
-            // Signed out: the chat keeps its model and waits for the sign-in.
+            // Signed out: the chat keeps its model and waits for the sign-in; the list kept for the next launch goes too.
+            Assert.Contains("guardian/default", File.ReadAllText(Path.Combine(_dir, "guardian.json")));
             guardian.SignOut();
             Assert.Empty(guardian.MenuModels);
+            Assert.DoesNotContain("\"models\"", File.ReadAllText(Path.Combine(_dir, "guardian.json")));
             Assert.True(host.GuardianSignInNeeded(vm));
             Assert.Null(host.ChatRoute(vm));
             host.Send("again", vm.Id);
@@ -382,6 +384,11 @@ public sealed class GuardianServiceTests : IDisposable
             Assert.True(await guardian.SignInAsync("https://guardian.example.test", "pat@503cm.com", "pw"));
             Assert.False(host.GuardianSignInNeeded(vm));
             Assert.Equal("tok-2", host.ChatRoute(vm)!.ApiKey);
+
+            // The next launch has the list in the menus before Guardian answers (no token in the file).
+            var again = new GuardianService(config, null!, () => null, _dir, () => fake);
+            Assert.Equal("guardian/default", Assert.Single(again.MenuModels).Id);
+            Assert.DoesNotContain("tok-2", File.ReadAllText(Path.Combine(_dir, "guardian.json")));
         }
         finally
         {

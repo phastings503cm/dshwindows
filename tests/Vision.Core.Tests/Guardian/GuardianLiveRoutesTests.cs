@@ -55,7 +55,7 @@ public sealed class GuardianLiveRoutesTests
     [Fact]
     public void TheMenuNamesAModelByItsLabel()
     {
-        Assert.Equal("Claude Opus 5.5", GuardianRoutes.MenuTitle(Models[1]));
+        Assert.Equal("Claude Opus 5.5 (us.anthropic.claude-opus-5-5)", GuardianRoutes.MenuTitle(Models[1]));
         Assert.Equal("guardian/fast", GuardianRoutes.MenuTitle(new GuardianModel("guardian/fast")));
         Assert.Equal("Sign in to Guardian to use this model.", GuardianRoutes.SignInNeeded);
     }
