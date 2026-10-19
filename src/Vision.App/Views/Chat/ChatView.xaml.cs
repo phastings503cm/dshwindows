@@ -678,63 +678,9 @@ public partial class ChatView : UserControl
         FocusComposer();
     }
 
-    /// <summary>Scroll the transcript to an entry and flash it (the Prompts timeline's "Jump to it"). False when the chat no
-    /// longer has it.</summary>
-    public bool ScrollToEntry(string entryId)
-    {
-        if (_session is not { } session || session.Entries.FirstOrDefault(e => e.Id == entryId) is not { } entry) return false;
-        _pinned = false;
-        Transcript.UpdateLayout();
-        var container = Transcript.ItemContainerGenerator.ContainerFromItem(entry) as FrameworkElement;
-        if (container is null)
-        {
-            // Virtualized out of view: bring it into existence first.
-            if (FindPanel(Transcript) is VirtualizingStackPanel panel)
-            {
-                var index = session.Entries.IndexOf(entry);
-                panel.BringIndexIntoViewPublic(index);
-                Transcript.UpdateLayout();
-            }
-            container = Transcript.ItemContainerGenerator.ContainerFromItem(entry) as FrameworkElement;
-        }
-        if (container is null) return false;
-        container.BringIntoView(new Rect(0, 0, container.ActualWidth, Math.Min(container.ActualHeight, 400)));
-        Dispatcher.BeginInvoke(DispatcherPriority.Loaded, () => Flash(container));
-        return true;
-    }
-
-    private static VirtualizingStackPanel? FindPanel(DependencyObject root)
-    {
-        for (var i = 0; i < VisualTreeHelper.GetChildrenCount(root); i++)
-        {
-            var child = VisualTreeHelper.GetChild(root, i);
-            if (child is VirtualizingStackPanel panel) return panel;
-            if (FindPanel(child) is { } found) return found;
-        }
-        return null;
-    }
-
-    /// <summary>A brief accent wash over a row the timeline jumped to.</summary>
-    private static void Flash(FrameworkElement container)
-    {
-        var brush = new SolidColorBrush(ThemeService.Brush("AccentFillColorDefaultBrush", Colors.SteelBlue) is SolidColorBrush accent ? accent.Color : Colors.SteelBlue)
-        {
-            Opacity = 0,
-        };
-        var adorner = System.Windows.Documents.AdornerLayer.GetAdornerLayer(container);
-        if (adorner is null) return;
-        var wash = new HighlightAdorner(container, brush);
-        adorner.Add(wash);
-        var animation = new System.Windows.Media.Animation.DoubleAnimation(0.28, 0, TimeSpan.FromSeconds(1.6)) { BeginTime = TimeSpan.FromMilliseconds(150) };
-        animation.Completed += (_, _) => adorner.Remove(wash);
-        brush.BeginAnimation(Brush.OpacityProperty, animation);
-    }
-
-    private sealed class HighlightAdorner(UIElement element, Brush brush) : System.Windows.Documents.Adorner(element)
-    {
-        protected override void OnRender(DrawingContext context) =>
-            context.DrawRoundedRectangle(brush, null, new Rect(AdornedElement.RenderSize), 8, 8);
-    }
+    /// <summary>Scroll the transcript to an entry and flash it (the Prompts timeline's "Jump to it"): the windowed transcript
+    /// moves its window to the entry when it is outside (see <see cref="ShowEntry"/>). False when the chat no longer has it.</summary>
+    public bool ScrollToEntry(string entryId) => ShowEntry(entryId);
 
     private void Suggestion_Click(object sender, RoutedEventArgs e)
     {

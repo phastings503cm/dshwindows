@@ -16,20 +16,38 @@ public partial class ChatView
     private void InitCopy() =>
         Transcript.CommandBindings.Add(new CommandBinding(TranscriptCommands.CopyMessage, OnCopyMessage, (_, e) => e.CanExecute = true));
 
-    /// <summary>What Copy puts on the clipboard for a row: a prompt as it was sent, a reply or notice as written, a tool's output.</summary>
-    internal static string? CopyText(object? row) => row switch
+    /// <summary>What Copy puts on the clipboard for a row: a prompt as it was sent, a reply or notice as written, a tool's output.
+    /// <paramref name="storedText"/> reads an attachment saved with the chat by its stored name, so a prompt whose large paste
+    /// went as an attachment copies with the paste's text after what was typed.</summary>
+    internal static string? CopyText(object? row, Func<string, string?>? storedText = null) => row switch
     {
-        MessageEntryVM { IsUser: true } message => TranscriptCopy.Prompt(message.Text),
+        MessageEntryVM { IsUser: true } message => PromptText(message, storedText),
         MessageEntryVM message => message.Text,
         ToolEntryVM tool => tool.Output ?? tool.Summary ?? tool.Preview,
         CompactionEntryVM compaction => compaction.Summary,
         _ => null,
     };
 
+    private static string PromptText(MessageEntryVM message, Func<string, string?>? storedText)
+    {
+        var typed = TranscriptCopy.Prompt(message.Text);
+        if (storedText is null) return typed;
+        var pastes = message.Attachments.Where(a => a.IsPasted && a.Stored is not null).Select(a => storedText(a.Stored!)).OfType<string>().ToList();
+        return pastes.Count == 0 ? typed : TranscriptCopy.WithPastes(typed, pastes);
+    }
+
+    /// <summary>The text of an attachment saved with the open chat (a large paste), by the name it is stored under.</summary>
+    private string? StoredAttachmentText(string name)
+    {
+        if (_session is not { } session) return null;
+        var store = _model.Host.AttachmentStoreFor(session.Id);
+        return store.EntryNamed(name) is { } entry ? store.TextOf(entry) : null;
+    }
+
     private void OnCopyMessage(object sender, ExecutedRoutedEventArgs e)
     {
         var row = e.Parameter ?? (e.OriginalSource as FrameworkElement)?.DataContext;
-        if (CopyText(row) is not { Length: > 0 } text) return;
+        if (CopyText(row, StoredAttachmentText) is not { Length: > 0 } text) return;
         var ok = SetClipboard(text);
         var source = e.OriginalSource as DependencyObject;
         (source as CopyButton ?? (source is null ? null : CopyButton.InRow(source)))?.ShowCopied(ok);

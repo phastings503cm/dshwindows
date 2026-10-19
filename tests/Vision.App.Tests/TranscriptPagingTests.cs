@@ -146,6 +146,22 @@ public sealed class TranscriptPagingTests
     }
 
     [Fact]
+    public void CopyPutsALargePasteBackAfterWhatWasTyped()
+    {
+        var paste = Lines(10_214);
+        var saved = new Dictionary<string, string> { ["Pasted text.txt"] = paste };
+        var pasted = new AttachmentBadge("Pasted text.txt", DigestFormat.Pasted.Label() + " · 10,214 lines · 412 KB · sent as text", stored: "Pasted text.txt");
+        var file = new AttachmentBadge("notes.md", "Markdown · 2 KB · sent as text", stored: "notes.md");
+        var message = new MessageEntryVM(MessageRole.User, "why is this slow?") { Attachments = [pasted, file] };
+
+        Assert.Equal("why is this slow?\n\n" + paste, ChatView.CopyText(message, name => saved.GetValueOrDefault(name)));
+        Assert.Equal(paste, ChatView.CopyText(new MessageEntryVM(MessageRole.User, "") { Attachments = [pasted] }, name => saved.GetValueOrDefault(name)));
+        // Not saved (or no store to read): the prompt as typed.
+        Assert.Equal("why is this slow?", ChatView.CopyText(message, _ => null));
+        Assert.Equal("why is this slow?", ChatView.CopyText(message));
+    }
+
+    [Fact]
     public void FindSearchesEveryRowOfTheChat()
     {
         var rows = new List<ChatEntryVM>
