@@ -180,19 +180,15 @@ public sealed class TranscriptWindow<T> : IDisposable where T : class
 
     private void Inserted(int index, System.Collections.IList added)
     {
-        var end = End;
-        var live = end == _source.Count - added.Count; // the window reached the end before this insert
         if (index < Start)
         {
             Start += added.Count;
             return;
         }
-        // At the window's first row or inside it: shown. At its end: shown while the window reaches the end of the chat.
-        if (index < end || (index == end && live))
-        {
-            for (var i = 0; i < added.Count; i++) Items.Insert(index - Start + i, (T)added[i]!);
-        }
-        // After the window (it stops short of the end): counted in Later, not shown.
+        // At the window's first row, inside it, or right at its end (a window that reaches the end of the chat takes the rows
+        // added there, the newest): shown. Further on — after a window that stops short of the end — counted in Later.
+        if (index > End) return;
+        for (var i = 0; i < added.Count; i++) Items.Insert(index - Start + i, (T)added[i]!);
     }
 
     private void Removed(int index, int count)
