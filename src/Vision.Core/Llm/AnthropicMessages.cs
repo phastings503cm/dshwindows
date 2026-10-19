@@ -144,8 +144,17 @@ public static class AnthropicMessages
             }
             case ClaudeThinking.Adaptive:
             {
-                // No level: the model's own default, which is thinking for Claude 5 and later.
-                if (level is null) return ThinkingPlan.None with { Active = traits.Off != ThinkingOff.Omit };
+                var adaptive = new JsonObject { ["type"] = "adaptive" };
+                // From Claude 4.7 on the reasoning text is omitted unless asked for: the live reasoning pane wants the summary.
+                if (traits.SummarizedThinking) adaptive["display"] = "summarized";
+                if (level is null)
+                {
+                    // No level: the model's default — no thinking on 4.6 – 4.8, adaptive from Claude 5 on. Said anyway (as
+                    // Vision for macOS does), so the summary is asked for: left out, Claude 5's thinking comes back empty.
+                    if (traits.Off == ThinkingOff.Omit) return ThinkingPlan.None;
+                    return new ThinkingPlan(adaptive, null, true,
+                                            BedrockConverse.ThinkingBudget(ThinkingLevel.High) + BedrockConverse.ReplyTokens);
+                }
                 if (level == ThinkingLevel.Off)
                 {
                     return traits.Off switch
@@ -160,10 +169,7 @@ public static class AnthropicMessages
                         _ => ThinkingPlan.None,
                     };
                 }
-                var config = new JsonObject { ["type"] = "adaptive" };
-                // From Claude 4.7 on the reasoning text is omitted unless asked for: the live reasoning pane wants the summary.
-                if (traits.SummarizedThinking) config["display"] = "summarized";
-                return new ThinkingPlan(config, BedrockConverse.Effort(level.Value), true,
+                return new ThinkingPlan(adaptive, BedrockConverse.Effort(level.Value), true,
                                         BedrockConverse.ThinkingBudget(level.Value) + BedrockConverse.ReplyTokens);
             }
             default:

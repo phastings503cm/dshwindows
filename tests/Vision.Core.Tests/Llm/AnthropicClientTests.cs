@@ -263,7 +263,16 @@ public sealed class AnthropicClientTests
         Assert.Null(haiku["temperature"]); // not while thinking
         Assert.Equal(0.4, Body(Route("claude-haiku-4-5", temperature: 0.4))["temperature"]!.GetValue<double>());
 
-        Assert.Null(Body(Route())["thinking"]); // no level: the model's own default
+        // No level (every new chat's "Thinking: Default"): adaptive, with the summary asked for — left out, Claude 5's
+        // thinking comes back empty — and no effort (the model's own default), as Vision for macOS sends it.
+        var opusDefault = Body(Route(temperature: 0.4));
+        Assert.Equal("adaptive", opusDefault["thinking"]!["type"]!.GetValue<string>());
+        Assert.Equal("summarized", opusDefault["thinking"]!["display"]!.GetValue<string>());
+        Assert.Null(opusDefault["output_config"]);
+        Assert.Null(opusDefault["temperature"]);
+        Assert.Equal("adaptive", Body(Route("claude-sonnet-5-5"))["thinking"]!["type"]!.GetValue<string>());
+        var shortDefault = AnthropicMessages.Request(new LlmRequest("", [LlmMessage.User("hi")], [], "claude-opus-5-5", MaxTokens: 200), Route());
+        Assert.True(shortDefault["max_tokens"]!.GetValue<int>() > 200); // room to think before the reply
         Assert.Equal(128_000, Body(Route() with { MaxOutputTokens = 500_000 })["max_tokens"]!.GetValue<int>());
     }
 
