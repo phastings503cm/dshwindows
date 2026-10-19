@@ -59,7 +59,9 @@ Every push to the default branch builds, tests and publishes a release. Get the 
   `%LOCALAPPDATA%\Programs\Vision`), adds a Start menu entry, and optionally **Open with Vision** on the
   folder right-click menu. Uninstall from *Settings › Apps*; your chats and settings stay.
 - **Portable** — unzip anywhere and run `Vision\Vision.exe`. Put an empty file named `portable` next to
-  `Vision.exe` to keep settings and chats in a `data` folder beside it instead of `%APPDATA%\Vision`.
+  `Vision.exe` to keep settings and chats in a `data` folder beside it instead of `%APPDATA%\Vision`. To upgrade a
+  portable copy made under the app's former name, unzip Vision next to its folder (not into it) and add the
+  `portable` file: the first start copies the old copy's data and leaves the old copy as it was.
 
 Requires Windows 10 1809 or later, or Windows 11. Builds are self-contained (no .NET install
 needed). They aren't code-signed yet, so SmartScreen may show *Windows protected your PC* — choose

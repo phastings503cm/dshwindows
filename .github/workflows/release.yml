@@ -143,6 +143,9 @@ jobs:
           if ($previousVersion -and $previousVersion -lt [version] '0.9.0') {
             $lines += "Vision was previously called DSH: installing it upgrades DSH in place and keeps your chats, settings and keys."
             $lines += ""
+            # Legacy: the rename's own commits name the former name, which the sentence above says once; they are left out
+            # of the list below (the full diff link still has every commit).
+            $changes = @($changes | Where-Object { $_ -notmatch '\bdsh\b' })
           }
           $lines += @(
             "## Download"

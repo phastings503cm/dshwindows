@@ -324,8 +324,8 @@ public sealed class AwsCliInstallerTests
     [Fact]
     public void TheSignatureScriptQuotesThePath()
     {
-        var script = AwsCliInstaller.SignatureScript(@"C:\Users\O'Brien [Work]\AppData\Local\\Temp\\vision-aws-cli\\AWSCLIV2.msi");
-        Assert.Contains(@"Escape('C:\Users\O''Brien [Work]\AppData\Local\\Temp\\vision-aws-cli\\AWSCLIV2.msi')", script);
+        var script = AwsCliInstaller.SignatureScript(@"C:\Users\O'Brien [Work]\AppData\Local\Temp\vision-aws-cli\AWSCLIV2.msi");
+        Assert.Contains(@"Escape('C:\Users\O''Brien [Work]\AppData\Local\Temp\vision-aws-cli\AWSCLIV2.msi')", script);
         Assert.Contains("Get-AuthenticodeSignature -FilePath", script);
         Assert.Contains("ConvertTo-Json -Compress", script);
     }
