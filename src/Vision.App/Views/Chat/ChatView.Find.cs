@@ -161,7 +161,8 @@ public partial class ChatView
         // _findAt counts from the newest (0) to the oldest.
         _findAt = _findAt < 0 ? 0 : (_findAt + direction + _findMatches.Count) % _findMatches.Count;
         var row = _findMatches[_findMatches.Count - 1 - _findAt];
-        ShowEntry(row.Id);
+        // Below the find bar, which sits over the top of the transcript.
+        ShowEntry(row.Id, below: 64);
         UpdateFindCount();
     }
 
