@@ -105,6 +105,21 @@ public sealed class SettingsWindow : Window
         };
     }
 
+    /// <summary>Self-test: scroll the page to <paramref name="fraction"/> of its height (0 top, 1 bottom).</summary>
+    internal void SelfTestScroll(double fraction)
+    {
+        static System.Windows.Controls.ScrollViewer? Find(System.Windows.DependencyObject node)
+        {
+            if (node is System.Windows.Controls.ScrollViewer viewer) return viewer;
+            for (var i = 0; i < System.Windows.Media.VisualTreeHelper.GetChildrenCount(node); i++)
+            {
+                if (Find(System.Windows.Media.VisualTreeHelper.GetChild(node, i)) is { } found) return found;
+            }
+            return null;
+        }
+        if (Find(_page) is { } scroller) scroller.ScrollToVerticalOffset(scroller.ScrollableHeight * Math.Clamp(fraction, 0, 1));
+    }
+
     private SkillsAction? TakeAction()
     {
         var action = _pendingAction;

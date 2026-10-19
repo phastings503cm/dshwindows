@@ -123,6 +123,26 @@ public sealed class SelfTest
                 await ShowAndCapture(settings, $"settings-{tab.ToString().ToLowerInvariant()}");
             }
 
+            // Settings › General scrolled to Computer use: the switches for the agent's mouse and keyboard.
+            var general = new SettingsWindow(model, SettingsTab.General, null) { Owner = window, Width = 1000, Height = 720 };
+            try
+            {
+                general.WindowStartupLocation = WindowStartupLocation.CenterOwner;
+                general.Show();
+                await Settle(600);
+                general.SelfTestScroll(1);
+                await Settle(500);
+                Capture(general, "settings-general-computer-use");
+            }
+            catch (Exception error)
+            {
+                Fail("settings-general-computer-use", error);
+            }
+            finally
+            {
+                try { general.Close(); } catch (Exception) { }
+            }
+
             // Settings › Model servers with two made-up boxes (nothing is contacted or saved).
             ShowDemoBoxes(model);
             await ShowAndCapture(new SettingsWindow(model, SettingsTab.Spark, null) { Owner = window, Width = 1000, Height = 720 }, "settings-model-servers");
