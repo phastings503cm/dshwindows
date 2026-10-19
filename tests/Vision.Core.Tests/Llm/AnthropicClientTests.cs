@@ -101,7 +101,7 @@ public sealed class AnthropicClientTests
     }
 
     /// <summary>A declined request handed to another model: one line in the chat, and the declined model's unrun tool call and
-    /// thinking before the hand-over are dropped — only what the fallback model wrote is kept.</summary>
+    /// thinking before the hand-over are dropped — its text stays, then what the fallback model wrote (as on the Mac).</summary>
     [Fact]
     public async Task AHandOverIsSaidAndWhatCameBeforeItIsDropped()
     {
@@ -109,23 +109,40 @@ public sealed class AnthropicClientTests
         var client = new AnthropicClient(Route("claude-fable-5-1"), new FakeHttpHandler(_ => Stream(
             """{"type":"message_start","message":{"id":"msg_3","type":"message","role":"assistant","model":"claude-fable-5-1","content":[],"usage":{"input_tokens":40,"output_tokens":1}}}""",
             """{"type":"content_block_start","index":0,"content_block":{"type":"thinking","thinking":"","signature":""}}""",
+            """{"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":"Declined thought."}}""",
             """{"type":"content_block_delta","index":0,"delta":{"type":"signature_delta","signature":"sig-declined"}}""",
             """{"type":"content_block_stop","index":0}""",
-            """{"type":"content_block_start","index":1,"content_block":{"type":"tool_use","id":"toolu_declined","name":"shell","input":{}}}""",
-            """{"type":"content_block_delta","index":1,"delta":{"type":"input_json_delta","partial_json":"{\"command\":\"nmap\"}"}}""",
+            """{"type":"content_block_start","index":1,"content_block":{"type":"text","text":""}}""",
+            """{"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"Let me look. "}}""",
             """{"type":"content_block_stop","index":1}""",
-            """{"type":"content_block_start","index":2,"content_block":{"type":"fallback","from":{"model":"claude-fable-5-1"},"to":{"model":"claude-opus-5-5"}}}""",
+            """{"type":"content_block_start","index":2,"content_block":{"type":"tool_use","id":"toolu_declined","name":"shell","input":{}}}""",
+            """{"type":"content_block_delta","index":2,"delta":{"type":"input_json_delta","partial_json":"{\"command\":\"nmap\"}"}}""",
             """{"type":"content_block_stop","index":2}""",
-            """{"type":"content_block_start","index":3,"content_block":{"type":"text","text":""}}""",
-            """{"type":"content_block_delta","index":3,"delta":{"type":"text_delta","text":"Here is a safer way."}}""",
+            """{"type":"content_block_start","index":3,"content_block":{"type":"fallback","from":{"model":"claude-fable-5-1"},"to":{"model":"claude-opus-5-5"}}}""",
             """{"type":"content_block_stop","index":3}""",
+            """{"type":"content_block_start","index":4,"content_block":{"type":"thinking","thinking":"","signature":""}}""",
+            """{"type":"content_block_delta","index":4,"delta":{"type":"thinking_delta","thinking":"Carrying on."}}""",
+            """{"type":"content_block_delta","index":4,"delta":{"type":"signature_delta","signature":"sig-fallback"}}""",
+            """{"type":"content_block_stop","index":4}""",
+            """{"type":"content_block_start","index":5,"content_block":{"type":"text","text":""}}""",
+            """{"type":"content_block_delta","index":5,"delta":{"type":"text_delta","text":"Here is a safer way."}}""",
+            """{"type":"content_block_stop","index":5}""",
             """{"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"output_tokens":30}}""",
             """{"type":"message_stop"}""")), notices.Add);
         var done = (await Collect(client, Hi("claude-fable-5-1"))).OfType<LlmStreamEvent.Done>().Single();
-        Assert.Empty(done.Calls);
+        Assert.Empty(done.Calls); // the declined model's call never ran
         Assert.Equal("stop", done.Finish);
-        Assert.Null(done.ProviderState); // the declined model's signed thinking isn't this reply's
         Assert.Equal("claude-fable-5-1 declined this request — claude-opus-5-5 carried on (Anthropic's server-side fallback).", Assert.Single(notices));
+        // What goes back next turn: the text from before the hand-over, then the fallback model's turn as it was (Anthropic:
+        // text before the last fallback block echoes normally; its thinking and tool calls are left out).
+        var state = done.ProviderState!;
+        var blocks = JsonNode.Parse(state[AnthropicMessages.StatePrefix.Length..])!.AsArray();
+        Assert.Equal(["text", "thinking", "text"], blocks.Select(b => b!["type"]!.GetValue<string>()));
+        Assert.Equal("Let me look. ", blocks[0]!["text"]!.GetValue<string>());
+        Assert.Equal("sig-fallback", blocks[1]!["signature"]!.GetValue<string>());
+        Assert.Equal("Here is a safer way.", blocks[2]!["text"]!.GetValue<string>());
+        Assert.DoesNotContain("toolu_declined", state);
+        Assert.DoesNotContain("sig-declined", state);
     }
 
     /// <summary>A key that isn't enabled for the fallback beta: the turn goes again without it, said once, and later turns don't

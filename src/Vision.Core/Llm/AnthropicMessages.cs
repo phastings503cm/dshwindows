@@ -25,7 +25,8 @@ namespace Vision.Core;
 //   - no temperature for Claude 4.7 and later (sampling parameters were removed), nor while thinking;
 //   - Fable 5.1, Opus 5.5, Opus 5 and Sonnet 5.5 ask for Anthropic's server-side fallback (fallbacks: "default"): a request
 //     their safety checks decline re-runs on the model Anthropic recommends, in the same call. A fallback block marks the
-//     hand-over; the declined model's tool calls and thinking before it never ran and are dropped.
+//     hand-over; the declined model's tool calls and thinking before it never ran and are dropped (its text goes back
+//     with the turn, as Anthropic's rules for echoing a fallback turn say).
 // Wire reference: platform.claude.com/docs — Messages, streaming, extended thinking, prompt caching, errors (2026-10-19).
 
 public static class AnthropicMessages
@@ -468,7 +469,7 @@ internal sealed class AnthropicReply
     /// <summary>Each hand-over, for a line in the chat: the model that declined and the one that carried on.</summary>
     public List<(string From, string To)> Handovers { get; } = [];
 
-    /// <summary>The index of the last hand-over block (-1 when none): what came before it isn't this reply's.</summary>
+    /// <summary>The index of the last hand-over block (-1 when none): the calls and thinking before it aren't this reply's.</summary>
     private int Boundary => _blocks.Where(b => b.Value.Type == "fallback").Select(b => b.Key).DefaultIfEmpty(-1).Max();
 
     private Block At(int index)
@@ -647,10 +648,11 @@ internal sealed class AnthropicReply
         block.Text.Length > 0 ? block.Text.ToString() : block.StartInput ?? "{}";
 
     /// <summary>The reply's content blocks in order, when it holds signed (or redacted) thinking that must go back with it; null
-    /// otherwise.</summary>
+    /// otherwise. Before the last hand-over (<paramref name="from"/>) only the text stays — the declined model's thinking and
+    /// tool calls are left out, as Anthropic's rules for echoing a fallback turn say; text echoes normally.</summary>
     private string? State(int from)
     {
-        var kept = _blocks.Where(b => b.Key >= from).Select(b => b.Value).ToList();
+        var kept = _blocks.OrderBy(b => b.Key).Where(b => b.Key >= from || b.Value.Type == "text").Select(b => b.Value).ToList();
         if (!kept.Any(b => (b.Type == "redacted_thinking" && b.Data is not null) || (b.Type == "thinking" && b.Signature is not null)))
             return null;
         var blocks = new JsonArray();
