@@ -407,10 +407,18 @@ Code** puts *Claude Code · Opus*, *Sonnet* and *Haiku* in every chat's model me
   the chat so far. Its replies, thinking, tool calls, file changes, todo lists and plans show as rows and in the
   plan panel, each with its time;
 - the chat's permission setting decides: *Workspace write* lets edits inside the project and commands that only
-  read go ahead and asks you on the chat's card for the rest; *Plan only* runs Claude Code in plan mode and shows
-  its plan; *Full access* lets everything go ahead (a safety check Claude Code says needs a person still asks);
+  read go ahead and asks you on the chat's card for the rest — including reading a file outside the project, or a
+  command that names one in your home folder (`.ssh`, `.aws`); *Plan only* runs Claude Code in plan mode and shows
+  its plan; *Full access* lets everything go ahead (a safety check Claude Code says needs a person still asks). A
+  card whose answer can no longer reach Claude Code comes down by itself;
+- the project's own Claude Code settings (its hooks, `.mcp.json` servers, `CLAUDE.md`) load only if you trusted the
+  folder in Claude Code (run `claude` there once and accept its question) — headless, Claude Code would otherwise
+  run a cloned repository's hooks without asking; the chat says when they are left out;
+- with the sensitive-data shield on, what Vision hands Claude Code is masked — the recap of the chat so far, and
+  secrets in your message — though not what Claude Code reads or runs itself;
 - `/goal` (one Claude Code turn per round), the task list, run phases, time estimates and the Prompts timeline
-  work as with any model; Stop interrupts Claude Code's turn; `/compact` compacts its session;
+  work as with any model; Stop interrupts Claude Code's turn; `/compact` compacts its session; closing Vision
+  stops every `claude` it started;
 - after each turn the chat says what it used: steps, tokens and Claude Code's own cost estimate — covered by
   your plan, unless Claude Code is set up with an API key (`ANTHROPIC_API_KEY`), which the chat then says it bills.
 

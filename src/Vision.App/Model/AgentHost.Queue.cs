@@ -721,10 +721,9 @@ public sealed partial class AgentHost
                 catch (Exception error)
                 {
                     if (ct.IsCancellationRequested) throw new OperationCanceledException(ct);
-                    // Retrying can't fix these: a Sensitive chat on a model it may not use, Claude Code signed out or out of
-                    // its plan's allowance. Say so once.
-                    if (error is SensitivityRefusalException
-                        or ClaudeCodeException { Failure.Kind: ClaudeCodeFailureKind.NotSignedIn or ClaudeCodeFailureKind.RateLimited }) throw;
+                    // Retrying can't fix these: a Sensitive chat on a model it may not use, Claude Code missing, signed out, out
+                    // of its plan's allowance, or in a folder whose own settings it can't leave out. Say so once.
+                    if (error is SensitivityRefusalException or ClaudeCodeException { Failure.Permanent: true }) throw;
                     // The failed kickoff may still have reached the transcript (work was salvaged):
                     // carry on with continuations, not a restart.
                     if (!kickedOff && ReachedModel(vm.Id, modelText)) kickedOff = true;

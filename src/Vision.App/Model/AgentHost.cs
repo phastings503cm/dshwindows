@@ -545,9 +545,10 @@ public sealed partial class AgentHost : ObservableObject
     /// Queue tasks run unattended — a gate nobody answers would stall the whole queue. So for queue
     /// sessions the decision times out (auto-deny) after a few minutes, and the stall is surfaced in
     /// the chat.</summary>
-    private async Task<bool> AskGateAsync(string sessionId, string callId, string name, string detail)
+    private async Task<bool> AskGateAsync(string sessionId, string callId, string name, string detail, CancellationToken cancel = default)
     {
         if (Session(sessionId) is not { } vm) return false;
+        if (cancel.IsCancellationRequested) return false;
         // Tool-call ids repeat ("call-0" every turn, in every chat): key the question by a token of its
         // own, so two chats can't overwrite each other's answer and an old timer can't answer a newer
         // question.
@@ -557,6 +558,11 @@ public sealed partial class AgentHost : ObservableObject
         _gates[gateId] = (tcs, sessionId);
         vm.NotifyContentChanged();
         if (_queueSessions.ContainsKey(sessionId)) _ = AutoDenyAsync();
+        // The asker can't use the answer any more (a Claude Code turn whose process ended): no, and the card comes down.
+        using var withdrawn = cancel.Register(() => _dispatcher.BeginInvoke(DispatcherPriority.Normal, () =>
+        {
+            if (_gates.Remove(gateId, out var entry)) entry.Tcs.TrySetResult(false);
+        }));
         var decision = await tcs.Task;
         _gates.Remove(gateId);
         foreach (var answered in vm.PendingGates.Where(g => g.Id == gateId).ToList()) vm.PendingGates.Remove(answered);
@@ -1628,6 +1634,8 @@ public sealed partial class AgentHost : ObservableObject
     {
         _shuttingDown = true;
         foreach (var id in _runs.Keys.Concat(_backgroundPools.Keys).Distinct().ToList()) StopSession(id);
+        // Claude Code turns run in their own process: interrupted, a moment to end, then killed — none outlives Vision.
+        ClaudeCodeRunner.StopAll();
     }
 
     private bool _shuttingDown;

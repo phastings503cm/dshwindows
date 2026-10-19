@@ -472,7 +472,8 @@ public partial class ChatView : UserControl
             ModelMenuButton.ToolTip = $"This chat's model{(route is null ? "" : $" ({route.DisplayName})")} and its context window. Pick another model for this chat " +
                                       "(other chats keep theirs; new chats in this project start with it), or a Spark Swapper model to switch what that box serves (also /swap)." +
                                       (masked ? "\nNot private: sensitive details are masked before anything is sent to it." : "") +
-                                      (claudeCode ? "\nClaude Code on this computer, on your Claude plan: it reads your files itself, so nothing is masked." : "");
+                                      (claudeCode ? "\nClaude Code on this computer, on your Claude plan: it reads your files itself, so what it reads isn't masked" +
+                                                    (_model.Config.Privacy.Mask ? " (what Vision hands it — the chat so far, secrets in your messages — is)." : ".") : "");
         }
 
         ThinkingText.Text = Menus.ThinkingLabel(_model, session);

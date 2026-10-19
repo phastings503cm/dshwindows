@@ -55,8 +55,22 @@ public sealed class ClaudeCodeTurnTests : IDisposable
             GoalErrorBackoff = _ => TimeSpan.FromMilliseconds(50),
             ClaudeCodeLaunchForTesting = ClaudeCodeLaunch.Direct("claude"),
             ClaudeCodeStarterForTesting = ScriptedClaudeProcess.Starter(processes),
+            // Claude Code's own config (which folders the person trusted): a scratch one, absent until a test writes it.
+            ClaudeCodeConfigForTesting = ClaudeConfig,
         };
     }
+
+    private string ClaudeConfig => Path.Combine(_dir, "claude.json");
+
+    /// <summary>Claude Code's config saying <paramref name="folder"/> is trusted (or not) and which session it last ran there.</summary>
+    private void WriteClaudeConfig(string folder, bool trusted, string? lastSession = null) =>
+        File.WriteAllText(ClaudeConfig, new JsonObject
+        {
+            ["projects"] = new JsonObject
+            {
+                [folder.Replace('\\', '/')] = new JsonObject { ["hasTrustDialogAccepted"] = trusted, ["lastSessionId"] = lastSession },
+            },
+        }.ToJsonString());
 
     private SessionVM ClaudeChat(AgentHost host)
     {
@@ -273,6 +287,82 @@ public sealed class ClaudeCodeTurnTests : IDisposable
         Assert.Contains("isn't signed in", error);
         Assert.Contains("claude auth login", error);
         Assert.Contains(Texts(vm, MessageRole.Notice), n => n == AgentHost.UndeliveredPrefix + "hello");
+    });
+
+    [Fact]
+    public void AFolderThePersonNeverTrustedInClaudeCodeRunsWithoutItsOwnHooksAndServers() => UiThread.Run(async () =>
+    {
+        var untrusted = Reply("s-trust", "ok");
+        var trusted = Reply("s-trust", "ok again");
+        var host = MakeHost(PermissionPreset.WorkspaceWrite, untrusted, trusted);
+        var vm = ClaudeChat(host);
+        File.WriteAllText(Path.Combine(vm.WorkingFolder, ".mcp.json"), "{}");
+        host.Send("hello", vm.Id);
+        await Finish(vm);
+        Assert.Equal("user", ArgAfter(untrusted, "--setting-sources"));
+        Assert.Contains(Texts(vm, MessageRole.Notice), n => n.StartsWith("Claude Code isn't using this folder's own settings (.mcp.json)", StringComparison.Ordinal));
+
+        WriteClaudeConfig(vm.WorkingFolder, trusted: true);
+        host.Send("again", vm.Id);
+        await Finish(vm);
+        Assert.DoesNotContain("--setting-sources", trusted.Args);
+        Assert.Single(Texts(vm, MessageRole.Notice), n => n.StartsWith("Claude Code isn't using", StringComparison.Ordinal));
+    });
+
+    [Fact]
+    public void AQuestionNobodyCanAnswerAnyMoreLeavesNoCardBehind() => UiThread.Run(async () =>
+    {
+        // Claude Code asks, then ends the turn without waiting (its own hook decided, say).
+        var process = new ScriptedClaudeProcess(
+        [
+            new("""{"type":"system","subtype":"init","session_id":"s-q","model":"claude-sonnet-5-5","apiKeySource":"none"}"""),
+            new("""{"type":"control_request","request_id":"req-1","request":{"subtype":"can_use_tool","tool_name":"Bash","input":{"command":"rm -rf build"},"tool_use_id":"toolu_1"}}"""),
+            new("""{"type":"result","subtype":"success","is_error":false,"result":"stopped","session_id":"s-q","num_turns":1,"usage":{"input_tokens":1,"output_tokens":1}}""",
+                Unanswered: true),
+        ]);
+        var host = MakeHost(PermissionPreset.WorkspaceWrite, process);
+        var vm = ClaudeChat(host);
+        host.Send("clean up", vm.Id);
+        await Finish(vm);
+        await WaitUntil("the card to come down", () => vm.PendingGates.Count == 0);
+        Assert.DoesNotContain(process.Written, w => w.Contains("req-1", StringComparison.Ordinal));
+    });
+
+    [Fact]
+    public void WhenAnotherSessionRanInTheFolderSinceTheTurnCostsWhatTheCliSaysNotTheDifference() => UiThread.Run(async () =>
+    {
+        var first = ScriptedClaudeProcess.Replay(ClaudeFixtures.Lines("write-partial.jsonl"));
+        var second = ScriptedClaudeProcess.Replay(ClaudeFixtures.Lines("resume.jsonl"));
+        var host = MakeHost(PermissionPreset.FullAccess, first, second);
+        var vm = ClaudeChat(host);
+        host.Send("write hello.txt", vm.Id);
+        await Finish(vm);
+        // Another chat (or the person's terminal) ran Claude Code in this folder since: the CLI doesn't restore this session's
+        // running cost on --resume, so its total (0.01191) is this turn's alone.
+        WriteClaudeConfig(vm.WorkingFolder, trusted: false, lastSession: "someone-else");
+        host.Send("and now say hello", vm.Id);
+        await Finish(vm);
+        Assert.Contains(Texts(vm, MessageRole.Notice), n => n.StartsWith("Claude Code: 1 step", StringComparison.Ordinal) && n.Contains("about $0.01 at API prices"));
+    });
+
+    [Fact]
+    public void WithTheShieldOnTheRecapClaudeCodeHearsIsMasked() => UiThread.Run(async () =>
+    {
+        var process = Reply("s-shield", "ok");
+        var host = MakeHost(PermissionPreset.FullAccess, process);
+        var project = Path.Combine(_dir, "proj");
+        Directory.CreateDirectory(project);
+        var vm = host.NewSession(project, PermissionPreset.FullAccess);
+        host.Send("my address is pat@example.com", vm.Id); // on the Spark
+        await Finish(vm);
+        host.SetChatRoute(vm, Sonnet.RouteId);
+        host.Send("carry on", vm.Id);
+        await Finish(vm);
+        var prompt = PromptOf(process);
+        Assert.StartsWith(Vision.Core.ClaudeCodeRecap.Header + "\n" + ClaudeCodeShield.RecapNote, prompt);
+        Assert.DoesNotContain("pat@example.com", prompt);
+        Assert.EndsWith("carry on", prompt);
+        Assert.Contains(ClaudeCodeShield.Notice, Texts(vm, MessageRole.Notice));
     });
 
     [Fact]
