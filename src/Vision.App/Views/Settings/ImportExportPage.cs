@@ -144,13 +144,16 @@ public sealed class ImportExportPage : UserControl
     {
         _openClaw.Children.Clear();
         var panel = new StackPanel();
+        // OpenClaw's Windows guide recommends WSL2: the scan looks in each WSL distro's homes too.
+        var wsl = SelfTest.Current is null ? WslDistros.OnThisPc() : [];
+        var inWsl = wsl.Count == 0 ? "" : " and in WSL (" + string.Join(", ", wsl.Select(d => d.Name)) + ")";
         if (_looking)
         {
-            panel.Children.Add(Ui.Buttons(new Spinner { Width = 14, Height = 14 }, Ui.Secondary("Looking for OpenClaw in your home folder…")));
+            panel.Children.Add(Ui.Buttons(new Spinner { Width = 14, Height = 14 }, Ui.Secondary($"Looking for OpenClaw in your home folder{inWsl}…")));
         }
         else if (_installs.Count == 0)
         {
-            panel.Children.Add(Ui.Secondary("No OpenClaw found in your home folder (.openclaw or a profile like .openclaw-work). If it lives somewhere else, choose its folder."));
+            panel.Children.Add(Ui.Secondary($"No OpenClaw found in your home folder (.openclaw or a profile like .openclaw-work){inWsl}. If it lives somewhere else, choose its folder."));
         }
         else
         {

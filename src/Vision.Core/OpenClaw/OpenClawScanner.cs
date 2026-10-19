@@ -19,8 +19,56 @@ public sealed record OpenClawInstall
     public string Flavor { get; init; } = "openclaw";
     /// <summary>How it was found ("~/.openclaw", "OPENCLAW_STATE_DIR", "search").</summary>
     public string FoundBy { get; init; } = "";
+    /// <summary>"in WSL (Ubuntu)" for one inside a WSL distro of this PC (OpenClaw's own Windows guide recommends WSL2);
+    /// null elsewhere.</summary>
+    public string? Where { get; init; }
 
-    public string Title => $"{StateDir}" + (Flavor == "openclaw" ? "" : $" ({Flavor})");
+    public string Title => $"{StateDir}" + (Flavor == "openclaw" ? "" : $" ({Flavor})") + (Where is null ? "" : $" — {Where}");
+}
+
+/// <summary>A WSL distro of this PC and where Windows shows its files (<c>\\wsl.localhost\Ubuntu</c>).</summary>
+public sealed record WslDistro(string Name, string Root)
+{
+    /// <summary>The older share name for the same files (<c>\\wsl$\Ubuntu</c>, before Windows 10 21H2).</summary>
+    public string? OlderRoot { get; init; }
+
+    public string Where => $"in WSL ({Name})";
+}
+
+/// <summary>The WSL distros installed for this user, from the registry WSL itself keeps
+/// (HKCU\Software\Microsoft\Windows\CurrentVersion\Lxss\{id}\DistributionName). Docker Desktop's own distros are
+/// left out: nobody runs OpenClaw in them.</summary>
+public static class WslDistros
+{
+    public static IReadOnlyList<WslDistro> OnThisPc()
+    {
+        if (!OperatingSystem.IsWindows()) return [];
+        try
+        {
+            using var lxss = Microsoft.Win32.Registry.CurrentUser.OpenSubKey(@"Software\Microsoft\Windows\CurrentVersion\Lxss");
+            if (lxss is null) return [];
+            var names = new List<string>();
+            foreach (var id in lxss.GetSubKeyNames())
+            {
+                using var distro = lxss.OpenSubKey(id);
+                if (distro?.GetValue("DistributionName") is string name) names.Add(name);
+            }
+            return Usable(names).Select(For).ToList();
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or System.Security.SecurityException)
+        {
+            return [];
+        }
+    }
+
+    /// <summary>The distros worth looking in: named, not Docker Desktop's, each once.</summary>
+    public static IReadOnlyList<string> Usable(IEnumerable<string> names) =>
+        names.Select(n => n.Trim())
+            .Where(n => n.Length > 0 && !n.StartsWith("docker-desktop", StringComparison.OrdinalIgnoreCase) && n.IndexOfAny(['\\', '/']) < 0)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+    public static WslDistro For(string name) => new(name, @"\\wsl.localhost\" + name) { OlderRoot = @"\\wsl$\" + name };
 }
 
 /// <summary>Where the scanner looks besides the user's own home. Tests narrow these so a run never wanders
@@ -34,6 +82,9 @@ public sealed record OpenClawScanOptions
     /// <summary>Roots searched for the config file (remote machines only; this PC searches its home).</summary>
     public IReadOnlyList<string> SearchRoots { get; init; } = OpenClawScanner.DefaultSearchRoots;
     public int SearchDepth { get; init; } = 6;
+    /// <summary>WSL distros to look in on this PC (each user's home and /root); null = the ones installed here (Windows
+    /// only). Tests pass folders standing in for them.</summary>
+    public IReadOnlyList<WslDistro>? Wsl { get; init; }
 }
 
 public static class OpenClawScanner
@@ -89,6 +140,42 @@ public static class OpenClawScanner
         // 2. The usual names in this user's home, and profile folders (.openclaw-work).
         await AddHomeAsync(source, home, "~", Add, cancellationToken).ConfigureAwait(false);
 
+        // 2b. On this PC: inside WSL, which OpenClaw's Windows guide recommends (\\wsl.localhost\<distro>\home\<user>\.openclaw).
+        var wslWhere = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        if (!source.IsRemote)
+        {
+            // (A source with a home of its own — a test's folder — stands for no real PC: no WSL unless given.)
+            foreach (var distro in options.Wsl ?? (source is LocalFileSource { UsesRealHome: true } ? WslDistros.OnThisPc() : []))
+            {
+                progress?.Report($"Checking WSL ({distro.Name})…");
+                void AddIn(string? path, string foundBy)
+                {
+                    if (string.IsNullOrWhiteSpace(path)) return;
+                    wslWhere[path.Trim().TrimEnd('/', '\\')] = distro.Where;
+                    Add(path, foundBy);
+                }
+                try
+                {
+                    var root = distro.Root;
+                    var homes = await source.ListAsync(source.Combine(root, "home"), cancellationToken).ConfigureAwait(false);
+                    if (homes is null && distro.OlderRoot is { } older
+                        && await source.ListAsync(source.Combine(older, "home"), cancellationToken).ConfigureAwait(false) is { } olderHomes)
+                    {
+                        (root, homes) = (older, olderHomes);
+                    }
+                    foreach (var entry in homes?.Where(e => e.IsDirectory).Take(20) ?? [])
+                        await AddHomeAsync(source, entry.FullPath, $"{distro.Where} ~{entry.Name}", AddIn, cancellationToken).ConfigureAwait(false);
+                    await AddHomeAsync(source, source.Combine(root, "root"), $"{distro.Where} /root", AddIn, cancellationToken).ConfigureAwait(false);
+                    finished++;
+                }
+                catch (Exception ex) when (Recoverable(ex))
+                {
+                    lastFailure = ex;
+                    progress?.Report($"Couldn't look in WSL ({distro.Name}): {ex.Message}");
+                }
+            }
+        }
+
         // 3. Other users' homes on the same machine.
         if (source.IsRemote)
         {
@@ -132,8 +219,9 @@ public static class OpenClawScanner
                 if (!seen.Add(path)) continue;
                 try
                 {
-                    if (await InspectAsync(source, path, foundBy, cancellationToken).ConfigureAwait(false) is { } install)
+                    if (await InspectAsync(source, path, foundBy, cancellationToken).ConfigureAwait(false) is { } found)
                     {
+                        var install = wslWhere.TryGetValue(path, out var where) ? found with { Where = where } : found;
                         progress?.Report($"Found OpenClaw in {install.StateDir}");
                         installs.Add(install);
                     }

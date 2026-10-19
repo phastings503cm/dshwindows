@@ -83,6 +83,8 @@ public sealed class LocalFileSource : IFileSource
 
     public string Label => "This PC";
     public bool IsRemote => false;
+    /// <summary>The real user's home (no override): the PC's own WSL distros are looked in too.</summary>
+    public bool UsesRealHome => _home is null;
     public string? NetworkHost => null;
 
     public Task<string> HomeAsync(CancellationToken cancellationToken) =>

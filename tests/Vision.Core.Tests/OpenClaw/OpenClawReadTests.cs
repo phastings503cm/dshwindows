@@ -159,6 +159,39 @@ public sealed class OpenClawScannerTests : IDisposable
     }
 
     [Fact]
+    public async Task FindsOpenClawInsideWsl()
+    {
+        // OpenClaw's Windows guide recommends WSL2: \\wsl.localhost\<distro>\home\<user>\.openclaw. Folders stand in for two
+        // distros (one only at the older \\wsl$ name), each with a user's install, and /root in one.
+        var ubuntu = Path.Combine(_fx.Root.Path, "wsl.localhost", "Ubuntu");
+        var debianOld = Path.Combine(_fx.Root.Path, "wsl$", "Debian");
+        OpenClawFixture.Write(Path.Combine(ubuntu, "home", "sam", ".openclaw", "openclaw.json"), "{}");
+        OpenClawFixture.Write(Path.Combine(ubuntu, "root", ".openclaw-ops", "openclaw.json"), "{}");
+        OpenClawFixture.Write(Path.Combine(debianOld, "home", "pat", ".clawdbot", "clawdbot.json"), "{}");
+        var options = new OpenClawScanOptions
+        {
+            Wsl = [new WslDistro("Ubuntu", ubuntu), new WslDistro("Debian", Path.Combine(_fx.Root.Path, "wsl.localhost", "Debian")) { OlderRoot = debianOld }],
+        };
+        var messages = new List<string>();
+        var installs = await OpenClawScanner.FindAsync(_fx.Local(), new Reporting(messages.Add), options: options);
+        Assert.Equal(_fx.State, installs[0].StateDir); // the Windows home first
+        Assert.Null(installs[0].Where);
+        var sam = Assert.Single(installs, i => i.StateDir == Path.Combine(ubuntu, "home", "sam", ".openclaw"));
+        Assert.Equal("in WSL (Ubuntu)", sam.Where);
+        Assert.Equal($"{sam.StateDir} — in WSL (Ubuntu)", sam.Title);
+        Assert.Contains(installs, i => i.StateDir == Path.Combine(ubuntu, "root", ".openclaw-ops") && i.Where == "in WSL (Ubuntu)");
+        Assert.Contains(installs, i => i.StateDir == Path.Combine(debianOld, "home", "pat", ".clawdbot") && i.Where == "in WSL (Debian)" && i.Flavor == "clawdbot");
+        Assert.Contains("Checking WSL (Ubuntu)…", messages);
+        // The registry's names: Docker Desktop's own distros are not looked in.
+        Assert.Equal(["Ubuntu-24.04", "kali-linux"], WslDistros.Usable(["Ubuntu-24.04", "docker-desktop", "docker-desktop-data", " ", "kali-linux", "ubuntu-24.04"]));
+        Assert.Equal(@"\\wsl.localhost\Ubuntu", WslDistros.For("Ubuntu").Root);
+        Assert.Equal(@"\\wsl$\Ubuntu", WslDistros.For("Ubuntu").OlderRoot);
+        // A test's own home never wanders into the PC's real WSL.
+        Assert.False(_fx.Local().UsesRealHome);
+        Assert.True(new LocalFileSource().UsesRealHome);
+    }
+
+    [Fact]
     public async Task ReportsProgress()
     {
         // (Reported straight to the list: Progress<T> hands its messages over on the thread pool, a moment later.)
