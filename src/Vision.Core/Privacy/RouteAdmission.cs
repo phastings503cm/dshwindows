@@ -17,7 +17,7 @@ namespace Vision.Core;
 //
 // Pure functions, with the words and machine codes of Vision for macOS's SensitivityPolicy.swift.
 
-/// How a Sensitive chat may use a route: <see cref="Code"/> is "private", "masked" or "refused".
+/// <summary>How a Sensitive chat may use a route: <see cref="Code"/> is "private", "masked" or "refused".</summary>
 public sealed record RouteAdmission(string Code, string? Why = null, string? Refusal = null)
 {
     public static RouteAdmission Private(string why) => new("private", Why: why);
@@ -31,20 +31,25 @@ public sealed record RouteAdmission(string Code, string? Why = null, string? Ref
 
 public static class SensitivityPolicy
 {
-    /// Route kinds (by name) whose engine reads the project's files itself and sends them to its own service — the Claude Code
-    /// CLI, the Codex CLI. Kept as names so a kind added later (by another lane) is covered without a change here.
+    /// <summary>Route kinds (by name) whose engine reads the project's files itself and sends them to its own service — the Claude Code
+    /// CLI, the Codex CLI. Kept as names so a kind added later (by another lane) is covered without a change here.</summary>
     public static readonly IReadOnlySet<string> DirectFileEngineKinds = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
     {
         "claudeCode", "claude_code", "claude-code", "claudeCodeCLI", "codex", "codexCLI", "codex_cli",
     };
 
-    /// How a route is named in the policy's sentences: its name, else its model (as the model menu names it).
+    /// <summary>How a route is named in the policy's sentences: its name, else its model (as the model menu names it).</summary>
     public static string Label(ProviderProfile route) => route.Name.Length > 0 ? route.Name : route.Model;
 
-    /// Whether a route's engine reads files directly (see <see cref="DirectFileEngineKinds"/>).
-    public static bool ReadsFilesDirectly(ProviderProfile route) => DirectFileEngineKinds.Contains(route.Kind.ToString());
+    /// <summary>The address Windows' Claude Code routes have (an OpenAI-compatible kind with a claude-code:// address — see the
+    /// Claude Code lane's ClaudeCodeRoutes).</summary>
+    public const string ClaudeCodeScheme = "claude-code:";
 
-    /// Whether a route goes through Guardian (its model proxy, or a Guardian route kind if this build has one).
+    /// <summary>Whether a route's engine reads files directly (see <see cref="DirectFileEngineKinds"/>, and Claude Code's address).</summary>
+    public static bool ReadsFilesDirectly(ProviderProfile route) =>
+        DirectFileEngineKinds.Contains(route.Kind.ToString()) || route.BaseUrl.StartsWith(ClaudeCodeScheme, StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>Whether a route goes through Guardian (its model proxy, or a Guardian route kind if this build has one).</summary>
     public static bool IsGuardian(ProviderProfile route) =>
         route.Kind.ToString().Equals("guardian", StringComparison.OrdinalIgnoreCase)
         || route.BaseUrl.Contains(GuardianEndpoint.HarnessPath, StringComparison.OrdinalIgnoreCase);
@@ -53,15 +58,15 @@ public static class SensitivityPolicy
     /// Sensitive data). A chat that isn't Sensitive may use every route — this is only asked for Sensitive ones.
     public static RouteAdmission Admission(ProviderProfile route, bool shieldOn)
     {
-        var kind = ReadsFilesDirectly(route) ? route.Kind.ToString()
+        var kind = ReadsFilesDirectly(route) ? "claudeCode"
             : IsGuardian(route) ? "guardian"
             : route.Kind == ProviderKind.Bedrock ? "bedrock"
             : route.Kind.ToString();
         return Admission(kind, Label(route), route.IsPrivateRoute, shieldOn);
     }
 
-    /// The rule itself, on a route's kind (by name), name and Private switch — so the tests can ask about kinds this build
-    /// doesn't have.
+    /// <summary>The rule itself, on a route's kind (by name), name and Private switch — so the tests can ask about kinds this build
+    /// doesn't have.</summary>
     public static RouteAdmission Admission(string kind, string name, bool isPrivate, bool shieldOn)
     {
         if (DirectFileEngineKinds.Contains(kind))
@@ -79,7 +84,7 @@ public static class SensitivityPolicy
         return RouteAdmission.Masked;
     }
 
-    /// The error a Sensitive chat shows when its model is refused (also what a turn throws); null when it is allowed.
+    /// <summary>The error a Sensitive chat shows when its model is refused (also what a turn throws); null when it is allowed.</summary>
     public static string? RefusalMessage(ProviderProfile route, bool shieldOn) =>
         Admission(route, shieldOn).Refusal is { } reason ? "This chat is Sensitive. " + reason : null;
 
@@ -96,21 +101,21 @@ public static class SensitivityPolicy
         };
     }
 
-    /// What the header's help (and the toggle's explanation) says the policy is.
+    /// <summary>What the header's help (and the toggle's explanation) says the policy is.</summary>
     public const string Explanation =
         "A Sensitive chat uses only private models — your own hardware (Spark, Strix Halo, Ollama, LM Studio), " +
         "Guardian, or Amazon Bedrock in your AWS account — or other models only through the sensitive-data shield, " +
         "which masks what it detects before sending and puts it back in the answer. Engines that read your files " +
         "themselves, like Claude Code, are refused.";
 
-    /// The backups a Sensitive chat may fall over to: only routes it may use.
+    /// <summary>The backups a Sensitive chat may fall over to: only routes it may use.</summary>
     public static IReadOnlyList<ProviderProfile> AdmittedBackups(IEnumerable<ProviderProfile> routes, bool shieldOn) =>
         routes.Where(r => Admission(r, shieldOn).IsAllowed).ToList();
 
-    /// Whether a Sensitive chat's subagents must stay on private servers: when the shield is off, a server that isn't private
-    /// would get the data as it is. (With the shield on, a subagent on such a server is masked like any request to it.)
+    /// <summary>Whether a Sensitive chat's subagents must stay on private servers: when the shield is off, a server that isn't private
+    /// would get the data as it is. (With the shield on, a subagent on such a server is masked like any request to it.)</summary>
     public static bool SubagentsPrivateOnly(bool shieldOn) => !shieldOn;
 
-    /// The chip's label: "Sensitive" or "Not sensitive".
+    /// <summary>The chip's label: "Sensitive" or "Not sensitive".</summary>
     public static string Label(bool sensitive) => sensitive ? "Sensitive" : "Not sensitive";
 }

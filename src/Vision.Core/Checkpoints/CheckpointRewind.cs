@@ -8,7 +8,7 @@ namespace Vision.Core;
 // alone. The rewind is itself recorded as a turn of its own, so it can be rewound in turn. The words and the rules are
 // Vision for macOS's (Rewind.swift).
 
-/// What rewinding does to one file.
+/// <summary>What rewinding does to one file.</summary>
 /// <param name="Restore">The content to put back (null = remove the file: the turn created it).</param>
 /// <param name="Conflict">Why it would throw away a later change ("changed since this turn"); null = safe.</param>
 /// <param name="Skipped">Why it can't be rewound at all; null = it can.</param>
@@ -20,26 +20,26 @@ public sealed record RewindItem(CheckpointFile File, string? Restore, string? Co
 
 public sealed record RewindPlan(TurnCheckpoint Turn, IReadOnlyList<RewindItem> Items)
 {
-    /// The files a rewind changes without a question.
+    /// <summary>The files a rewind changes without a question.</summary>
     public IReadOnlyList<RewindItem> Safe => Items.Where(i => i.Conflict is null && i.Skipped is null && !i.AlreadyThere).ToList();
-    /// The files that changed since the turn.
+    /// <summary>The files that changed since the turn.</summary>
     public IReadOnlyList<RewindItem> Conflicts => Items.Where(i => i.Conflict is not null && i.Skipped is null && !i.AlreadyThere).ToList();
-    /// The files that can't be rewound.
+    /// <summary>The files that can't be rewound.</summary>
     public IReadOnlyList<RewindItem> Skipped => Items.Where(i => i.Skipped is not null).ToList();
-    /// Nothing left to put back.
+    /// <summary>Nothing left to put back.</summary>
     public bool IsEmpty => Safe.Count == 0 && Conflicts.Count == 0;
 }
 
-/// What a rewind did.
+/// <summary>What a rewind did.</summary>
 public sealed class RewindResult
 {
-    /// Files put back to their earlier content.
+    /// <summary>Files put back to their earlier content.</summary>
     public List<string> Restored { get; } = [];
-    /// Files the turn created, removed.
+    /// <summary>Files the turn created, removed.</summary>
     public List<string> Removed { get; } = [];
-    /// Files left as they are (changed since and kept, or not rewindable).
+    /// <summary>Files left as they are (changed since and kept, or not rewindable).</summary>
     public List<string> Left { get; } = [];
-    /// Files that couldn't be written, and why.
+    /// <summary>Files that couldn't be written, and why.</summary>
     public Dictionary<string, string> Failed { get; } = new(StringComparer.Ordinal);
 
     public int ChangedCount => Restored.Count + Removed.Count;
@@ -122,8 +122,8 @@ public static class CheckpointRewind
         return result;
     }
 
-    /// What the chat says after a rewind: "↺ Rewound “Fix the build”: put back 2 files (a.cs, b.cs) and removed 1 file it
-    /// created (c.cs). Left 1 file as they are (d.cs)."
+    /// <summary>What the chat says after a rewind: "↺ Rewound “Fix the build”: put back 2 files (a.cs, b.cs) and removed 1 file it
+    /// created (c.cs). Left 1 file as they are (d.cs)."</summary>
     public static string Summary(RewindResult result, string title, string? root)
     {
         string Names(List<string> paths) =>
@@ -140,7 +140,7 @@ public static class CheckpointRewind
         return text;
     }
 
-    /// What the model is told with the next message, so it doesn't trust what it remembers of those files.
+    /// <summary>What the model is told with the next message, so it doesn't trust what it remembers of those files.</summary>
     public static string ModelNote(RewindResult result, string title, string? root)
     {
         var paths = result.Restored.Concat(result.Removed).Select(p => Display(p, root));
@@ -149,7 +149,7 @@ public static class CheckpointRewind
                "Re-read them before relying on what you remember of their contents.]";
     }
 
-    /// The confirmation's words: what goes back, what was created and goes, what changed since, what can't.
+    /// <summary>The confirmation's words: what goes back, what was created and goes, what changed since, what can't.</summary>
     public static string Confirmation(RewindPlan plan, string? root)
     {
         string Names(IReadOnlyList<RewindItem> items) =>
@@ -167,7 +167,7 @@ public static class CheckpointRewind
         return string.Join("\n\n", parts);
     }
 
-    /// The unified diff of one file across the turn, or a sentence saying why there is none.
+    /// <summary>The unified diff of one file across the turn, or a sentence saying why there is none.</summary>
     public static string Diff(CheckpointStore store, CheckpointFile file, string? root = null)
     {
         var name = Display(file.Path, root);
@@ -186,7 +186,7 @@ public static class CheckpointRewind
         return diff.Length == 0 ? "No line changes." : diff;
     }
 
-    /// A path shown relative to the project when it is inside it (forward slashes), else as it is.
+    /// <summary>A path shown relative to the project when it is inside it (forward slashes), else as it is.</summary>
     public static string Display(string path, string? root)
     {
         if (string.IsNullOrEmpty(root)) return path;

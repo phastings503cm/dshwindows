@@ -64,6 +64,10 @@ public sealed class RouteAdmissionTests
             Assert.False(SensitivityPolicy.Admission(kind, "Claude Code", isPrivate: true, shieldOn: true).IsAllowed);
         }
         Assert.False(SensitivityPolicy.ReadsFilesDirectly(Route(ProviderKind.OpenAI, "OpenAI", "https://api.openai.com/v1")));
+        // Windows' Claude Code route: an OpenAI-compatible kind at a claude-code:// address.
+        var claude = Route(ProviderKind.OpenAICompat, "Claude Code", "claude-code://local");
+        Assert.True(SensitivityPolicy.ReadsFilesDirectly(claude));
+        Assert.StartsWith("Claude Code reads your files itself", SensitivityPolicy.Admission(claude, shieldOn: true).Refusal);
     }
 
     [Fact]

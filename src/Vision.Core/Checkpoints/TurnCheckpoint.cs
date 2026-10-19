@@ -13,30 +13,30 @@ namespace Vision.Core;
 // version, id, chatID, title, startedAt, updatedAt, files[path, before, after, by, skipped], rewoundAt), with a few
 // fields of Windows' own that the Mac ignores (added, removed, binary, late, workspace).
 
-/// How a turn changed one file.
+/// <summary>How a turn changed one file.</summary>
 public enum CheckpointChange { Created, Modified, Deleted }
 
-/// One file a turn changed.
+/// <summary>One file a turn changed.</summary>
 public sealed class CheckpointFile
 {
-    /// The file's full path.
+    /// <summary>The file's full path.</summary>
     public string Path { get; set; } = "";
-    /// SHA-256 (lowercase hex) of its content before the turn first changed it; null = it didn't exist.
+    /// <summary>SHA-256 (lowercase hex) of its content before the turn first changed it; null = it didn't exist.</summary>
     public string? Before { get; set; }
-    /// SHA-256 of what the turn left; null = the turn deleted it.
+    /// <summary>SHA-256 of what the turn left; null = the turn deleted it.</summary>
     public string? After { get; set; }
-    /// What changed it: the tool ("edit", "write_file", "run_shell_command" — a shell command's change found through git — an
-    /// MCP tool, "rewind").
+    /// <summary>What changed it: the tool ("edit", "write_file", "run_shell_command" — a shell command's change found through git — an
+    /// MCP tool, "rewind").</summary>
     public string By { get; set; } = "";
-    /// Why it can't be rewound (its content wasn't kept: too large, unreadable); null = it can.
+    /// <summary>Why it can't be rewound (its content wasn't kept: too large, unreadable); null = it can.</summary>
     public string? Skipped { get; set; }
-    /// Lines added and removed (text files; 0 for a binary one). Windows only.
+    /// <summary>Lines added and removed (text files; 0 for a binary one). Windows only.</summary>
     public int Added { get; set; }
     public int Removed { get; set; }
-    /// Not text: no line diff. Windows only.
+    /// <summary>Not text: no line diff. Windows only.</summary>
     public bool Binary { get; set; }
-    /// Changed after its turn had ended (a background agent of that turn): what it left can't be told apart from a later
-    /// edit, so rewinding it asks first. Windows only.
+    /// <summary>Changed after its turn had ended (a background agent of that turn): what it left can't be told apart from a later
+    /// edit, so rewinding it asks first. Windows only.</summary>
     public bool? Late { get; set; }
 
     [JsonIgnore] public bool IsLate => Late == true;
@@ -46,39 +46,39 @@ public sealed class CheckpointFile
         : After is null && !IsLate ? CheckpointChange.Deleted
         : CheckpointChange.Modified;
 
-    /// The file ended the turn holding what it began it with (changed and put back): no change.
+    /// <summary>The file ended the turn holding what it began it with (changed and put back): no change.</summary>
     [JsonIgnore] public bool Unchanged => !IsLate && Before == After;
 
     public CheckpointFile Clone() => (CheckpointFile)MemberwiseClone();
 }
 
-/// Everything one turn changed.
+/// <summary>Everything one turn changed.</summary>
 public sealed class TurnCheckpoint
 {
     public int Version { get; set; } = 1;
-    /// The turn: its prompt's id in the Prompts timeline (every round of a /goal is one turn); "auto-…" for a turn the harness
-    /// started by itself, "rewind-…" for a rewind (which is recorded as a turn of its own, so it can be rewound in turn).
+    /// <summary>The turn: its prompt's id in the Prompts timeline (every round of a /goal is one turn); "auto-…" for a turn the harness
+    /// started by itself, "rewind-…" for a rewind (which is recorded as a turn of its own, so it can be rewound in turn).</summary>
     public string Id { get; set; } = "";
     [JsonPropertyName("chatID")] public string ChatId { get; set; } = "";
-    /// What was asked, short: the prompt's first line, up to 80 characters ("Rewind of “…”" for a rewind).
+    /// <summary>What was asked, short: the prompt's first line, up to 80 characters ("Rewind of “…”" for a rewind).</summary>
     public string Title { get; set; } = "";
     public DateTimeOffset StartedAt { get; set; } = DateTimeOffset.Now;
     public DateTimeOffset UpdatedAt { get; set; } = DateTimeOffset.Now;
     public List<CheckpointFile> Files { get; set; } = [];
-    /// When it was rewound (null = not).
+    /// <summary>When it was rewound (null = not).</summary>
     public DateTimeOffset? RewoundAt { get; set; }
-    /// The folder the agent worked in (paths are shown relative to it). Windows only.
+    /// <summary>The folder the agent worked in (paths are shown relative to it). Windows only.</summary>
     public string? Workspace { get; set; }
 
-    /// The files that changed (a file edited and then put back is no change).
+    /// <summary>The files that changed (a file edited and then put back is no change).</summary>
     [JsonIgnore] public IReadOnlyList<CheckpointFile> Changed => Files.Where(f => !f.Unchanged).ToList();
 
     [JsonIgnore] public bool IsRewound => RewoundAt is not null;
 
-    /// "Files changed (3)" — the same words on every harness.
+    /// <summary>"Files changed (3)" — the same words on every harness.</summary>
     [JsonIgnore] public string Heading => $"Files changed ({Changed.Count})";
 
-    /// "+12 −3" over every text file.
+    /// <summary>"+12 −3" over every text file.</summary>
     [JsonIgnore] public string LineSummary => $"+{Changed.Sum(f => f.Added)} −{Changed.Sum(f => f.Removed)}";
 
     /// The first line of <paramref name="prompt"/>, up to 80 characters — a turn's title.
@@ -96,7 +96,7 @@ public sealed class TurnCheckpoint
     }
 }
 
-/// Dates as Vision for macOS writes and reads them (Swift's ISO 8601: UTC, whole seconds, "Z").
+/// <summary>Dates as Vision for macOS writes and reads them (Swift's ISO 8601: UTC, whole seconds, "Z").</summary>
 public sealed class Iso8601SecondsConverter : JsonConverter<DateTimeOffset>
 {
     public override DateTimeOffset Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options) =>

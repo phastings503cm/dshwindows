@@ -13,15 +13,15 @@ namespace Vision.Core;
 // keep take more than 1 GB (never the newest), then every content no record — and no turn still recording — names.
 // Contents written in the last hour are never removed: they may belong to a turn whose record isn't saved yet.
 
-/// Where checkpoints live, and the pruning of them. Thread-safe.
+/// <summary>Where checkpoints live, and the pruning of them. Thread-safe.</summary>
 public sealed class CheckpointStore
 {
     public const string FolderName = "checkpoints";
-    /// A file larger than this isn't kept: a turn that changes it can't rewind it.
+    /// <summary>A file larger than this isn't kept: a turn that changes it can't rewind it.</summary>
     public const long MaxFileBytes = 16L * 1024 * 1024;
     public static readonly TimeSpan DefaultMaxAge = TimeSpan.FromDays(30);
     public const long DefaultMaxBytes = 1024L * 1024 * 1024;
-    /// Contents and empty records younger than this are left alone by pruning.
+    /// <summary>Contents and empty records younger than this are left alone by pruning.</summary>
     public static readonly TimeSpan Grace = TimeSpan.FromHours(1);
 
     public static readonly JsonSerializerOptions Json = new()
@@ -33,7 +33,7 @@ public sealed class CheckpointStore
     };
 
     private readonly Lock _lock = new();
-    /// Turns still recording: their contents are in use even before their record is saved.
+    /// <summary>Turns still recording: their contents are in use even before their record is saved.</summary>
     private readonly HashSet<TurnRecorder> _live = [];
 
     public string Root { get; }
@@ -91,7 +91,7 @@ public sealed class CheckpointStore
 
     // MARK: Records
 
-    /// A file name for an id (ids are GUIDs; anything else is reduced to letters, digits, '-', '_' and '.').
+    /// <summary>A file name for an id (ids are GUIDs; anything else is reduced to letters, digits, '-', '_' and '.').</summary>
     private static string Safe(string id)
     {
         var safe = new string(id.Select(c => char.IsAsciiLetterOrDigit(c) || c is '-' or '_' or '.' ? c : '_').ToArray());
@@ -127,7 +127,7 @@ public sealed class CheckpointStore
         }
     }
 
-    /// A chat's turns that changed files, newest first.
+    /// <summary>A chat's turns that changed files, newest first.</summary>
     public IReadOnlyList<TurnCheckpoint> List(string chatId)
     {
         var folder = Path.Combine(Turns, Safe(chatId));
@@ -138,7 +138,7 @@ public sealed class CheckpointStore
         return output.OrderByDescending(t => t.StartedAt).ToList();
     }
 
-    /// A deleted chat's records go with it (their contents go at the next prune).
+    /// <summary>A deleted chat's records go with it (their contents go at the next prune).</summary>
     public void DeleteChat(string chatId)
     {
         var folder = Path.Combine(Turns, Safe(chatId));
@@ -157,7 +157,7 @@ public sealed class CheckpointStore
 
     // MARK: Pruning
 
-    /// What a prune removed, and what the contents still kept take.
+    /// <summary>What a prune removed, and what the contents still kept take.</summary>
     public sealed record PruneResult(int Records, int Objects, long BytesKept);
 
     /// See the top of the file. <paramref name="now"/> is for tests.

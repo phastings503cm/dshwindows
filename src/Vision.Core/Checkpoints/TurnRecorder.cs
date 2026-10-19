@@ -9,7 +9,7 @@ namespace Vision.Core;
 // turn's recorder, so their edits rewind with it; a background agent still writing after the turn ended adds to it, marked
 // as changed after the turn.
 
-/// Where a chat's engine finds the recorder of the turn running now (the engine is built once and reused).
+/// <summary>Where a chat's engine finds the recorder of the turn running now (the engine is built once and reused).</summary>
 public sealed class CheckpointSlot
 {
     private TurnRecorder? _current;
@@ -21,7 +21,7 @@ public sealed class CheckpointSlot
     }
 }
 
-/// Records the files one turn changes. Thread-safe: subagents running side by side share it.
+/// <summary>Records the files one turn changes. Thread-safe: subagents running side by side share it.</summary>
 public sealed class TurnRecorder
 {
     private readonly CheckpointStore _store;
@@ -47,7 +47,7 @@ public sealed class TurnRecorder
     public string TurnId => _turn.Id;
     public CheckpointStore Store => _store;
 
-    /// How many files the turn has touched so far.
+    /// <summary>How many files the turn has touched so far.</summary>
     public int Count
     {
         get
@@ -77,8 +77,8 @@ public sealed class TurnRecorder
         Add(new CheckpointFile { Path = full, Before = hash, After = hash, By = by, Skipped = skipped });
     }
 
-    /// Before a shell command: the repository's changed tracked files as they are now. Null when the folder isn't in a git
-    /// repository (or git isn't there, or too much is already changed to keep).
+    /// <summary>Before a shell command: the repository's changed tracked files as they are now. Null when the folder isn't in a git
+    /// repository (or git isn't there, or too much is already changed to keep).</summary>
     public ShellSnapshot? BeforeShell(string workspace)
     {
         var root = RepoRoot(workspace);
@@ -146,8 +146,8 @@ public sealed class TurnRecorder
         return found;
     }
 
-    /// The turn is over: take each file's state now, count the lines, save the record. Null when the turn changed nothing
-    /// (a file changed and put back counts as nothing).
+    /// <summary>The turn is over: take each file's state now, count the lines, save the record. Null when the turn changed nothing
+    /// (a file changed and put back counts as nothing).</summary>
     public TurnCheckpoint? Finish(DateTimeOffset? at = null)
     {
         List<CheckpointFile> files;
@@ -170,7 +170,7 @@ public sealed class TurnRecorder
         return snapshot;
     }
 
-    /// The turn as recorded so far.
+    /// <summary>The turn as recorded so far.</summary>
     public TurnCheckpoint Snapshot
     {
         get
