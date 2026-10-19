@@ -214,13 +214,23 @@ public static class AnthropicMessages
             Add("user", stubs);
         }
 
-        foreach (var m in messages)
+        // Pictures and documents share the request's total (32 MB on the wire), the newest message first: the one being sent
+        // keeps its attachments, older ones past the total go back as their text.
+        var mediaRoom = route.MaxRequestMediaBytes ?? long.MaxValue;
+        var userContent = new Dictionary<int, JsonArray>();
+        for (var index = messages.Count - 1; index >= 0; index--)
         {
+            if (messages[index].Role == MessageRole.User) userContent[index] = UserBlocks(messages[index], route, ref mediaRoom);
+        }
+
+        for (var index = 0; index < messages.Count; index++)
+        {
+            var m = messages[index];
             switch (m.Role)
             {
                 case MessageRole.User:
                     CloseOpenCalls();
-                    Add("user", UserBlocks(m, route));
+                    Add("user", userContent[index]);
                     break;
                 case MessageRole.Tool:
                 {
@@ -269,11 +279,11 @@ public static class AnthropicMessages
 
     /// <summary>The user's text, then each attachment as <see cref="AttachmentWire"/> sends it on this route: images as base64
     /// image blocks, PDFs as document blocks where the model reads them, everything else as the text Vision read out of it.</summary>
-    private static JsonArray UserBlocks(LlmMessage m, AttachmentRoute route)
+    private static JsonArray UserBlocks(LlmMessage m, AttachmentRoute route, ref long mediaRoom)
     {
         var blocks = new JsonArray();
         if (!string.IsNullOrWhiteSpace(m.Content)) blocks.Add(Text(m.Content));
-        foreach (var part in AttachmentWire.Parts(m.Attachments ?? [], route))
+        foreach (var part in AttachmentWire.Parts(m.Attachments ?? [], route, ref mediaRoom))
         {
             switch (part)
             {

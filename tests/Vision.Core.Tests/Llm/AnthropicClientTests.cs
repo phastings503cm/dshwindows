@@ -232,6 +232,43 @@ public sealed class AnthropicClientTests
         Assert.True(AttachmentRoute.Of(Route()).Documents);
     }
 
+    /// <summary>The Messages API takes 32 MB a request, and base64 is a third larger: a request's pictures and PDFs share 20 MB,
+    /// the message being sent first. Past it they go as their text (no 413 that would compact the chat for nothing), and the
+    /// badge says so. (The Mac's case, with Windows' 10 MB per-PDF limit.)</summary>
+    [Fact]
+    public void ARequestsPicturesAndPdfsStayUnderTheMessagesApisTotal()
+    {
+        static MessageAttachment Pdf(string name, int megabytes)
+        {
+            var data = new byte[megabytes * 1_000_000];
+            Array.Fill(data, (byte)' ');
+            "%PDF-1.7\n"u8.CopyTo(data);
+            return new MessageAttachment(AttachmentKind.File, name, data)
+            {
+                Digest = new AttachmentDigest { Format = DigestFormat.Pdf, Pages = 2, Lines = 2, Bytes = data.Length, Text = $"Text of {name}" },
+                Text = $"[Attached file: {name}]\nText of {name}",
+            };
+        }
+        var older = LlmMessage.User("last week's", [Pdf("old.pdf", 9)]);
+        var current = LlmMessage.User("compare", [Pdf("a.pdf", 9), Pdf("b.pdf", 9)]);
+        var request = Body(Route(), [older, LlmMessage.Assistant("Read it."), current]);
+        var messages = request["messages"]!.AsArray();
+        Assert.Equal(3, messages.Count);
+        // The message being sent keeps its PDFs; the older one's goes back as its text.
+        Assert.Equal(["text", "document", "document"], messages[2]!["content"]!.AsArray().Select(b => b!["type"]!.GetValue<string>()));
+        Assert.Equal(["text", "text"], messages[0]!["content"]!.AsArray().Select(b => b!["type"]!.GetValue<string>()));
+        Assert.Equal("[Attached file: old.pdf]\nText of old.pdf", messages[0]!["content"]![1]!["text"]!.GetValue<string>());
+        Assert.True(Encoding.UTF8.GetByteCount(request.ToJsonString()) < 32_000_000); // under the Messages API's 32 MB
+
+        // Three 8 MB PDFs in one message: two go as documents, the third as its text — and its badge says that.
+        var anthropic = AttachmentRoute.Of(Route());
+        Assert.Equal(20_000_000L, anthropic.MaxRequestMediaBytes);
+        Assert.Equal(["sent as PDF document", "sent as PDF document", "sent as text"],
+            AttachmentWire.Deliveries([Pdf("1.pdf", 8), Pdf("2.pdf", 8), Pdf("3.pdf", 8)], anthropic).Select(d => d.Label()));
+        // Only the Anthropic route has a request total.
+        Assert.Null(AttachmentRoute.Of(new ProviderProfile(ProviderKind.Bedrock, "Bedrock", "", "claude-opus-5-5")).MaxRequestMediaBytes);
+    }
+
     /// <summary>Each Claude gets thinking the way it takes it: Opus 5.5 can't switch it off (Off is the lowest effort), Sonnet
     /// 5.5's Off is between_tools, Haiku 4.5 thinks on a budget, Claude 4.7 and later take no temperature.</summary>
     [Fact]

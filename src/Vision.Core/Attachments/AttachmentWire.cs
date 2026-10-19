@@ -16,6 +16,9 @@ public sealed record AttachmentRoute
     public long? MaxImageBytes { get; init; }
     public int? MaxDocuments { get; init; }
     public long? MaxDocumentBytes { get; init; }
+    /// <summary>The most bytes of pictures and documents, together, one whole request may carry (the newest message has the
+    /// first claim); past it, they go as their text. Null = no total.</summary>
+    public long? MaxRequestMediaBytes { get; init; }
 
     public static AttachmentRoute TextOnly { get; } = new() { Vision = false };
 
@@ -42,8 +45,10 @@ public sealed record AttachmentRoute
         MaxDocumentBytes = 4_500_000,
     };
 
-    /// <summary>Anthropic's Messages API: base64 images in its four formats, and PDFs as document blocks. Limits kept under
-    /// the API's (5 MB an image, 32 MB a request once base64 has grown it by a third).</summary>
+    /// <summary>Anthropic's Messages API: base64 images in its four formats, and PDFs as document blocks, within the API's
+    /// limits (5 MB an image, a 32 MB request). Base64 is a third larger, so a request carries at most
+    /// <see cref="AnthropicRequestMediaBytes"/> of pictures and documents (about 27 MB on the wire), leaving room for the
+    /// conversation's text — past it they go as their text, never as a 413 that would compact the chat for nothing.</summary>
     public static AttachmentRoute Anthropic(ProviderProfile profile) => new()
     {
         Vision = profile.Vision ?? true,
@@ -53,7 +58,12 @@ public sealed record AttachmentRoute
         MaxImageBytes = 3_750_000,
         MaxDocuments = 5,
         MaxDocumentBytes = 10_000_000,
+        MaxRequestMediaBytes = AnthropicRequestMediaBytes,
     };
+
+    /// <summary>Raw bytes of pictures and documents one Anthropic request may carry, shared by its messages (newest first) —
+    /// the same number as Vision for macOS.</summary>
+    public const long AnthropicRequestMediaBytes = 20_000_000;
 
     /// <summary>The route a profile is served on.</summary>
     public static AttachmentRoute Of(ProviderProfile profile) => profile.Kind switch
@@ -130,64 +140,100 @@ public static class AttachmentWire
         return count > 1 ? new AttachmentDelivery.TextInParts(count) : new AttachmentDelivery.Text();
     }
 
-    /// <summary>The wire pieces for a user message's attachments, in order, within the route's per-message limits (past
-    /// them, a picture or document goes as its text instead).</summary>
+    /// <summary>The wire pieces for a user message's attachments, in order, within the route's per-message limits and its
+    /// request total (past them, a picture or document goes as its text instead).</summary>
     public static IReadOnlyList<AttachmentWirePart> Parts(IReadOnlyList<MessageAttachment> attachments, AttachmentRoute route)
     {
-        var output = new List<AttachmentWirePart>();
+        var room = route.MaxRequestMediaBytes ?? long.MaxValue;
+        return Parts(attachments, route, ref room);
+    }
+
+    /// <summary>The same, drawing pictures and documents from <paramref name="mediaRoom"/> — the bytes the request has left
+    /// for them, shared by its messages (newest first).</summary>
+    public static IReadOnlyList<AttachmentWirePart> Parts(IReadOnlyList<MessageAttachment> attachments, AttachmentRoute route, ref long mediaRoom) =>
+        Plan(attachments, route, ref mediaRoom).SelectMany(p => p.Parts).ToList();
+
+    /// <summary>How each attachment of a message actually goes once the limits are applied — what the badges under a sent
+    /// message say (a fourth big PDF past the request total says "sent as text", not "sent as PDF document").</summary>
+    public static IReadOnlyList<AttachmentDelivery> Deliveries(IReadOnlyList<MessageAttachment> attachments, AttachmentRoute route)
+    {
+        var room = route.MaxRequestMediaBytes ?? long.MaxValue;
+        return Plan(attachments, route, ref room).Select(p => p.Delivery).ToList();
+    }
+
+    /// <summary>Each attachment's delivery after the limits, and its wire pieces.</summary>
+    private static List<(AttachmentDelivery Delivery, List<AttachmentWirePart> Parts)> Plan(IReadOnlyList<MessageAttachment> attachments,
+        AttachmentRoute route, ref long mediaRoom)
+    {
+        var output = new List<(AttachmentDelivery Delivery, List<AttachmentWirePart> Parts)>();
         var images = 0;
         var documents = 0;
-        bool ImageFits(byte[] data) => images < (route.MaxImages ?? int.MaxValue) && data.LongLength <= (route.MaxImageBytes ?? long.MaxValue);
+        // What a file that couldn't go as a document or pages is labelled when its text goes instead.
+        static AttachmentDelivery AsText(MessageAttachment attachment) =>
+            attachment.Digest is { Readable: false } ? new AttachmentDelivery.NameOnly() : new AttachmentDelivery.Text();
         foreach (var attachment in attachments)
         {
-            switch (Delivery(attachment, route))
+            var delivery = Delivery(attachment, route);
+            switch (delivery)
             {
                 case AttachmentDelivery.Image:
-                    if (ImageFits(attachment.Data))
+                    if (images < (route.MaxImages ?? int.MaxValue) && attachment.Data.LongLength <= (route.MaxImageBytes ?? long.MaxValue)
+                        && attachment.Data.LongLength <= mediaRoom)
                     {
-                        output.Add(new AttachmentWirePart.Image(attachment.Mime, attachment.Data));
+                        output.Add((delivery, [new AttachmentWirePart.Image(attachment.Mime, attachment.Data)]));
                         images++;
+                        mediaRoom -= attachment.Data.LongLength;
                     }
                     else
                     {
-                        output.Add(new AttachmentWirePart.Text(FallbackText(attachment)));
+                        output.Add((new AttachmentDelivery.OcrText(), [new AttachmentWirePart.Text(FallbackText(attachment))]));
                     }
                     break;
                 case AttachmentDelivery.Document:
-                    if (documents < (route.MaxDocuments ?? int.MaxValue))
+                    if (documents < (route.MaxDocuments ?? int.MaxValue) && attachment.Data.LongLength <= mediaRoom)
                     {
-                        output.Add(new AttachmentWirePart.Document(attachment.Name, attachment.Data));
+                        output.Add((delivery, [new AttachmentWirePart.Document(attachment.Name, attachment.Data)]));
                         documents++;
+                        mediaRoom -= attachment.Data.LongLength;
                     }
                     else
                     {
-                        output.Add(new AttachmentWirePart.Text(FallbackText(attachment)));
+                        output.Add((AsText(attachment), [new AttachmentWirePart.Text(FallbackText(attachment))]));
                     }
                     break;
                 case AttachmentDelivery.PageImages:
                 {
                     var digest = attachment.Digest!;
                     var room = Math.Max(0, (route.MaxImages ?? int.MaxValue) - images);
-                    var pages = digest.PageImages.Take(room)
-                        .Where(p => p.Data.LongLength <= (route.MaxImageBytes ?? long.MaxValue)
-                                    && (route.ImageTypes?.Contains(p.Mime) ?? true)).ToList();
+                    var pages = new List<PageImage>();
+                    long used = 0;
+                    foreach (var page in digest.PageImages.Take(room)
+                                 .Where(p => p.Data.LongLength <= (route.MaxImageBytes ?? long.MaxValue)
+                                             && (route.ImageTypes?.Contains(p.Mime) ?? true)))
+                    {
+                        if (used + page.Data.LongLength > mediaRoom) break;
+                        pages.Add(page);
+                        used += page.Data.LongLength;
+                    }
                     if (pages.Count == 0)
                     {
-                        output.Add(new AttachmentWirePart.Text(FallbackText(attachment)));
+                        output.Add((AsText(attachment), [new AttachmentWirePart.Text(FallbackText(attachment))]));
                         break;
                     }
                     var total = digest.Pages ?? pages.Count;
                     var head = $"[Attached file: {attachment.Name} — {digest.Summary} — it has no text layer, so " +
                                (pages.Count == total ? "its pages follow as images]" : $"its first {pages.Count} of {total} pages follow as images]");
-                    output.Add(new AttachmentWirePart.Text(head));
-                    foreach (var page in pages) output.Add(new AttachmentWirePart.Image(page.Mime, page.Data));
+                    var wire = new List<AttachmentWirePart> { new AttachmentWirePart.Text(head) };
+                    foreach (var page in pages) wire.Add(new AttachmentWirePart.Image(page.Mime, page.Data));
                     images += pages.Count;
+                    mediaRoom -= used;
                     // Pages past the images: what OCR read from the whole file.
-                    if (pages.Count < total && digest.Ocr) output.Add(new AttachmentWirePart.Text(FallbackText(attachment)));
+                    if (pages.Count < total && digest.Ocr) wire.Add(new AttachmentWirePart.Text(FallbackText(attachment)));
+                    output.Add((new AttachmentDelivery.PageImages(pages.Count), wire));
                     break;
                 }
                 default:
-                    output.Add(new AttachmentWirePart.Text(FallbackText(attachment)));
+                    output.Add((delivery, [new AttachmentWirePart.Text(FallbackText(attachment))]));
                     break;
             }
         }

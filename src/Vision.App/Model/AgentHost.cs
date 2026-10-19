@@ -1186,8 +1186,9 @@ public sealed partial class AgentHost : ObservableObject
         {
             vm.Activity = previous;
         }
-        var badges = prepared.Badges.Zip(prepared.Attachments,
-            (badge, attachment) => badge with { Label = badge.Label + " · " + AttachmentWire.Delivery(attachment, route).Label() }).ToList();
+        // How each one actually goes once the route's limits apply (past them: "sent as text").
+        var badges = prepared.Badges.Zip(AttachmentWire.Deliveries(prepared.Attachments, route),
+            (badge, delivery) => badge with { Label = badge.Label + " · " + delivery.Label() }).ToList();
         vm.SetAttachments(entryId, badges);
         Log.SetAttachments(vm.Id, badges);
         return prepared.Attachments;
