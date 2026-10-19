@@ -27,15 +27,6 @@ public sealed partial class AgentHost
     private ShieldOptions? ShieldFor(string? sessionId)
     {
         var privacy = Config.Privacy;
-        // A Sensitive chat is masked on every route that isn't private, whatever the switch says (the policy's "through the shield").
-        var sensitive = sessionId is not null && Session(sessionId) is { } chat && IsSensitive(chat);
-        if (sensitive)
-        {
-            var categories = privacy.Mask && privacy.Categories != SensitiveCategories.None ? privacy.Categories : PrivacySettings.Default.Categories;
-            privacy = privacy with { Mask = true, Secrets = categories.HasFlag(SensitiveCategories.Secrets), Emails = categories.HasFlag(SensitiveCategories.Emails),
-                                     Phones = categories.HasFlag(SensitiveCategories.Phones), Ids = categories.HasFlag(SensitiveCategories.Ids),
-                                     Ips = categories.HasFlag(SensitiveCategories.Ips), Terms = categories.HasFlag(SensitiveCategories.CustomTerms) || privacy.Terms };
-        }
         IReadOnlyList<string> vault;
         try
         {
@@ -64,6 +55,8 @@ public sealed partial class AgentHost
     {
         var primary = MakeClient(profile, sessionId);
         var backups = BackupRoutes(profile.RouteId).Where(b => !b.IsInteractiveOnly || !IsUnattended(sessionId)).ToList();
+        // A Sensitive chat falls over only to routes it may use.
+        if (Session(sessionId) is { Sensitive: true }) backups = SensitivityPolicy.AdmittedBackups(backups, ShieldOn).ToList();
         if (backups.Count == 0) return primary;
         return new FailoverClient(primary, backups.Select(b => MakeClient(b, sessionId)).ToList(),
             notice => _dispatcher.BeginInvoke(DispatcherPriority.Normal, () => OnFailover(sessionId, notice)));
@@ -106,7 +99,7 @@ public sealed partial class AgentHost
         var backups = string.Join(",", RouteRoster.Backups(Config.Providers, chatRoute.RouteId).Select(b => b.RouteId + (b.IsPrivateRoute ? "+p" : "")));
         var servers = string.Join(",", SubagentServersNow().Select(s => s.Label + (s.IsPrivate ? "+p" : "")));
         // A chat's sensitivity changes its shield and its prompt; the MCP servers' tools change its tool list.
-        var power = vm is null ? "" : $"|s={IsSensitive(vm)}/{Config.SensitiveAllowsShielded}|mcp={Mcp.Revision}";
+        var power = vm is null ? "" : $"|s={vm.Sensitive}|mcp={Mcp.Revision}";
         return $"{Config.Privacy}|{chatRoute.IsPrivateRoute}|{chatRoute.IsInteractiveOnly}|{backups}|{servers}{power}";
     }
 

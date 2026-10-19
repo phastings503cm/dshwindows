@@ -141,51 +141,55 @@ public sealed partial class CompactionEntryVM(int removed, string summary, DateT
     [ObservableProperty] private bool _isExpanded;
 }
 
-/// <summary>"Files changed (N)" under a turn that changed files: the files, their +added −removed counts, and "Rewind this turn"
+/// <summary>"Files changed (N)" under a turn that changed files: the files, their +added −removed counts, and "Rewind this turn…"
 /// (10-19 item 20). The checkpoint itself is on disk (see <see cref="CheckpointStore"/>); a pruned one leaves the row saying so.</summary>
-public sealed partial class CheckpointEntryVM(string turnId, string storedTitle, DateTimeOffset? at = null) : ChatEntryVM(null, at)
+public sealed partial class CheckpointEntryVM(string turnId, string storedHeading, DateTimeOffset? at = null) : ChatEntryVM(null, at)
 {
     public string TurnId { get; } = turnId;
-    /// <summary>The title it was stored with (shown when the checkpoint was pruned).</summary>
-    public string StoredTitle { get; } = storedTitle;
+    /// <summary>The heading it was stored with (shown when the checkpoint was pruned).</summary>
+    public string StoredTitle { get; } = storedHeading;
 
     /// <summary>The checkpoint as on disk now; null = no longer kept (pruned).</summary>
     [ObservableProperty]
-    [NotifyPropertyChangedFor(nameof(Title), nameof(LineSummary), nameof(Files), nameof(Status), nameof(HasStatus), nameof(CanRewind), nameof(CanUndo))]
+    [NotifyPropertyChangedFor(nameof(Title), nameof(LineSummary), nameof(Files), nameof(Status), nameof(HasStatus), nameof(CanRewind), nameof(IsRewound), nameof(TurnTitle))]
     private TurnCheckpoint? _turn;
 
     [ObservableProperty] private bool _isExpanded;
 
-    public string Title => Turn?.Title ?? StoredTitle;
-    public string LineSummary => Turn is { } t && t.Changed.Any(f => !f.Binary && !f.TooLarge) ? t.LineSummary : "";
+    /// <summary>"Files changed (3)".</summary>
+    public string Title => Turn?.Heading ?? StoredTitle;
+    /// <summary>What the turn was asked ("Fix the build", "Rewind of “Fix the build”").</summary>
+    public string TurnTitle => Turn?.Title ?? "";
+    public bool IsRewound => Turn?.IsRewound == true;
+    public string LineSummary => Turn is { } t && t.Changed.Any(f => !f.Binary && f.Skipped is null) ? t.LineSummary : "";
 
     public IReadOnlyList<CheckpointFileVM> Files => Turn is { } t
         ? t.Changed.Select(f => new CheckpointFileVM(f, t.Workspace)).ToList()
         : [];
 
-    /// <summary>"Rewound 3 files · 14:02", "Snapshot no longer kept", or nothing.</summary>
+    /// <summary>"Rewound", "Its record is no longer kept", or nothing.</summary>
     public string Status => Turn switch
     {
-        null => "Snapshot no longer kept",
-        { RewoundAt: { } when } t => $"Rewound {t.RewoundCount} {(t.RewoundCount == 1 ? "file" : "files")} · {when.ToLocalTime():HH:mm}",
+        null => "Its record is no longer kept",
+        { IsRewound: true } => "Rewound",
         _ => "",
     };
 
     public bool HasStatus => Status.Length > 0;
-    public bool CanRewind => Turn is { IsRewound: false };
-    public bool CanUndo => Turn is { IsRewound: true, RewoundFrom.Count: > 0 };
+    /// <summary>A rewound turn can be rewound again (a file changed since asks first); one whose record is gone can't.</summary>
+    public bool CanRewind => Turn is not null;
 }
 
 /// <summary>One file of a checkpoint, as its row shows it.</summary>
 public sealed record CheckpointFileVM(CheckpointFile File, string? Root)
 {
     public string Name => System.IO.Path.GetFileName(File.Path);
-    public string RelativePath => Root is { } root ? CheckpointRewind.Relative(root, File.Path) : File.Path;
+    public string RelativePath => CheckpointRewind.Display(File.Path, Root);
     public string Change => File.Change switch { CheckpointChange.Created => "created", CheckpointChange.Deleted => "deleted", _ => "modified" };
-    public string Counts => File.TooLarge ? "too large to keep" : File.Binary ? "binary" : $"+{File.Added} −{File.Removed}";
+    public string Counts => File.Skipped is not null ? "can't be rewound" : File.Binary ? "binary" : $"+{File.Added} −{File.Removed}";
     public bool IsCreated => File.Change == CheckpointChange.Created;
     public bool IsDeleted => File.Change == CheckpointChange.Deleted;
-    public string Tooltip => $"{File.Path} — {Change}{(File.Source == "run_shell_command" ? " by a shell command" : "")}";
+    public string Tooltip => $"{File.Path} — {Change} by {File.By}" + (File.Skipped is { } why ? $"\nCan't be rewound: {why}" : "");
 }
 
 /// <summary>A pending permission question surfaced by the engine.</summary>
@@ -226,9 +230,9 @@ public sealed partial class SessionVM : ObservableObject
     /// two chats in two projects never share a model by accident. Null = not chosen yet (it takes the primary when it next
     /// sends, and keeps it). Set through <see cref="AgentHost.SetChatRoute"/>.</summary>
     [ObservableProperty] private string? _routeId;
-    /// <summary>This chat's sensitivity: true = Sensitive, false = Standard, null = its project's default. Set through
-    /// <see cref="AgentHost.SetChatSensitive"/>.</summary>
-    [ObservableProperty] private bool? _sensitive;
+    /// <summary>The chat is Sensitive: only private models, or others through the shield (see <see cref="SensitivityPolicy"/>).
+    /// Stored with the conversation; a new chat starts with its project's default. Set through <see cref="AgentHost.SetChatSensitive"/>.</summary>
+    [ObservableProperty] private bool _sensitive;
     /// <summary>The model's live reasoning for the current step (not persisted).</summary>
     [ObservableProperty] private string _reasoning = "";
     [ObservableProperty] private DateTimeOffset? _reasoningStarted;

@@ -335,17 +335,12 @@
                         <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Center">
                             <Button x:Name="RewindButton" Style="{StaticResource SubtleButton}" Padding="8,2" Click="RewindTurn_Click"
                                     Visibility="{Binding CanRewind, Converter={StaticResource BoolToVisibility}}"
-                                    ToolTip="Put these files back the way they were before this turn (asks first if any changed since)">
+                                    ToolTip="Put these files back to how they were before this turn (you confirm first)">
                                 <StackPanel Orientation="Horizontal">
                                     <TextBlock Style="{StaticResource Glyph}" FontSize="11" Text="{x:Static infra:Icons.Undo}" Margin="0,1,6,0"
                                                Foreground="{DynamicResource AccentTextFillColorPrimaryBrush}" />
-                                    <TextBlock Text="Rewind this turn" FontSize="12" Foreground="{DynamicResource AccentTextFillColorPrimaryBrush}" />
+                                    <TextBlock Text="Rewind this turn…" FontSize="12" Foreground="{DynamicResource AccentTextFillColorPrimaryBrush}" />
                                 </StackPanel>
-                            </Button>
-                            <Button Style="{StaticResource SubtleButton}" Padding="8,2" Click="UndoRewind_Click"
-                                    Visibility="{Binding CanUndo, Converter={StaticResource BoolToVisibility}}"
-                                    ToolTip="Put back what the rewind replaced">
-                                <TextBlock Text="Undo rewind" FontSize="12" Foreground="{DynamicResource AccentTextFillColorPrimaryBrush}" />
                             </Button>
                             <Button Style="{StaticResource SubtleButton}" Padding="8,2" Click="ViewCheckpoint_Click"
                                     ToolTip="See each file's changes, and the chat's other turns (/rewind)">
@@ -361,7 +356,7 @@
                                            Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
                                 <TextBlock Text="{Binding LineSummary}" Style="{StaticResource MonoText}" FontSize="11.5" Margin="8,0,0,0"
                                            VerticalAlignment="Center" Foreground="{DynamicResource TextFillColorTertiaryBrush}" />
-                                <TextBlock Text="{Binding Status, StringFormat=' · {0}'}" Style="{StaticResource MetaText}" VerticalAlignment="Center"
+                                <TextBlock x:Name="StatusText" Text="{Binding Status, StringFormat=' · {0}'}" Style="{StaticResource MetaText}" VerticalAlignment="Center"
                                            Visibility="{Binding HasStatus, Converter={StaticResource BoolToVisibility}}" />
                                 <TextBlock x:Name="Chevron" Style="{StaticResource Glyph}" FontSize="9" Text="{x:Static infra:Icons.ChevronRight}"
                                            Margin="8,1,0,0" VerticalAlignment="Center" Foreground="{DynamicResource TextFillColorTertiaryBrush}" />
@@ -401,6 +396,9 @@
                 </DataTrigger>
                 <DataTrigger Binding="{Binding Turn}" Value="{x:Null}">
                     <Setter TargetName="Card" Property="Opacity" Value="0.7" />
+                </DataTrigger>
+                <DataTrigger Binding="{Binding IsRewound}" Value="True">
+                    <Setter TargetName="StatusText" Property="Foreground" Value="{DynamicResource SystemFillColorCautionBrush}" />
                 </DataTrigger>
             </DataTemplate.Triggers>
         </DataTemplate>
@@ -506,13 +504,26 @@
 
     <Grid>
         <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
             <RowDefinition Height="*" />
             <RowDefinition Height="Auto" />
             <RowDefinition Height="Auto" />
         </Grid.RowDefinitions>
 
+        <!-- A Sensitive chat's strip (10-19 #20): what the policy means for the chat's model right now, and Turn Off. -->
+        <Border x:Name="SensitiveStrip" Grid.Row="0" Visibility="Collapsed" Padding="24,7" BorderThickness="0,0,0,1"
+                BorderBrush="{DynamicResource DividerStrokeColorDefaultBrush}">
+            <DockPanel>
+                <Button DockPanel.Dock="Right" Content="Turn Off" Padding="10,2" Margin="10,0,0,0" Click="SensitiveOff_Click"
+                        ToolTip="Make this chat not Sensitive: every model may be used, with the usual masking" />
+                <TextBlock x:Name="SensitiveGlyph" Style="{StaticResource Glyph}" FontSize="13" Text="{x:Static infra:Icons.Lock}" Margin="0,1,8,0"
+                           VerticalAlignment="Center" />
+                <TextBlock x:Name="SensitiveLine" FontSize="12" TextWrapping="Wrap" VerticalAlignment="Center" />
+            </DockPanel>
+        </Border>
+
         <!-- Transcript -->
-        <ItemsControl x:Name="Transcript" Grid.Row="0" Focusable="False"
+        <ItemsControl x:Name="Transcript" Grid.Row="1" Focusable="False"
                       VirtualizingPanel.IsVirtualizing="True" VirtualizingPanel.VirtualizationMode="Recycling"
                       VirtualizingPanel.ScrollUnit="Pixel" VirtualizingPanel.CacheLength="2,2" VirtualizingPanel.CacheLengthUnit="Page"
                       ScrollViewer.CanContentScroll="True">
@@ -538,7 +549,7 @@
         </ItemsControl>
 
         <!-- First-run content for an empty chat. -->
-        <ScrollViewer x:Name="Starter" Grid.Row="0" VerticalScrollBarVisibility="Auto" Visibility="Collapsed">
+        <ScrollViewer x:Name="Starter" Grid.Row="1" VerticalScrollBarVisibility="Auto" Visibility="Collapsed">
             <StackPanel MaxWidth="{StaticResource TranscriptMaxWidth}" Margin="24,48,24,24">
                 <DockPanel Margin="0,0,0,16">
                     <Image Source="pack://application:,,,/Assets/logo-256.png" Width="40" Height="40" Margin="0,0,12,0" DockPanel.Dock="Left" />
@@ -581,7 +592,7 @@
         </ScrollViewer>
 
         <!-- Permission question -->
-        <Border x:Name="GateHost" Grid.Row="1" Visibility="Collapsed" BorderThickness="0,1,0,0"
+        <Border x:Name="GateHost" Grid.Row="2" Visibility="Collapsed" BorderThickness="0,1,0,0"
                 BorderBrush="{DynamicResource DividerStrokeColorDefaultBrush}" Background="{DynamicResource LayerFillColorDefaultBrush}">
             <Border MaxWidth="{StaticResource TranscriptMaxWidth}" Margin="24,10" CornerRadius="8" Padding="14,10" BorderThickness="1"
                     Background="{DynamicResource SystemFillColorCautionBackgroundBrush}" BorderBrush="{DynamicResource SystemFillColorCautionBrush}">
@@ -604,7 +615,7 @@
         </Border>
 
         <!-- Composer -->
-        <Border Grid.Row="2" BorderThickness="0,1,0,0" BorderBrush="{DynamicResource DividerStrokeColorDefaultBrush}">
+        <Border Grid.Row="3" BorderThickness="0,1,0,0" BorderBrush="{DynamicResource DividerStrokeColorDefaultBrush}">
             <StackPanel MaxWidth="{StaticResource TranscriptMaxWidth}" Margin="24,10,24,10">
                 <!-- Spark swap progress -->
                 <Border x:Name="SparkBanner" CornerRadius="8" Padding="10,6" Margin="0,0,0,6" Visibility="Collapsed"

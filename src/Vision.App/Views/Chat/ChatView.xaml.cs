@@ -75,7 +75,9 @@ public partial class ChatView : UserControl
                 UpdateMeta();
                 RefreshChipDeliveries();
             }
+            if (e.PropertyName is nameof(AppConfig.Privacy) or nameof(AppConfig.ActiveRoute) or nameof(AppConfig.ActiveProvider)) UpdateSensitiveStrip();
         };
+        _model.Host.SensitivityChanged += UpdateSensitiveStrip;
         _model.Host.ContextInfoChanged += () =>
         {
             UpdateMeta();
@@ -139,6 +141,7 @@ public partial class ChatView : UserControl
         {
             Transcript.ItemsSource = null;
             Composer.Text = "";
+            UpdateSensitiveStrip();
             return;
         }
         session.PropertyChanged += OnSessionChanged;
@@ -170,6 +173,7 @@ public partial class ChatView : UserControl
         UpdateBackgroundBar();
         UpdateRunningTool();
         UpdateGauge();
+        UpdateSensitiveStrip();
         _pinned = true;
         Dispatcher.BeginInvoke(DispatcherPriority.Loaded, () =>
         {
@@ -192,7 +196,11 @@ public partial class ChatView : UserControl
             case nameof(SessionVM.Cwd):
                 UpdateMeta();
                 break;
+            case nameof(SessionVM.Sensitive):
+                UpdateSensitiveStrip();
+                break;
             case nameof(SessionVM.RouteId):
+                UpdateSensitiveStrip();
                 UpdateMeta();
                 UpdateGauge();
                 UpdateStarter();

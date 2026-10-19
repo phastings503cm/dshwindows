@@ -115,7 +115,7 @@ public partial class ChatView
         };
         _findBar.SetResourceReference(Border.BackgroundProperty, "SolidBackgroundFillColorQuarternaryBrush");
         _findBar.SetResourceReference(Border.BorderBrushProperty, "CardStrokeColorDefaultBrush");
-        Grid.SetRow(_findBar, 0);
+        Grid.SetRow(_findBar, 1);
         Panel.SetZIndex(_findBar, 10);
         ((Panel)Content).Children.Add(_findBar);
     }

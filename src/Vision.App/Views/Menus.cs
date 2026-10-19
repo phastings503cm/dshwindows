@@ -93,8 +93,8 @@ public static class Menus
                     config.MakePrimary(route);
                     model.Host.ResetRouteCache();
                 }, provider.IsPrivateRoute ? Icons.Lock : Icons.Shield, isChecked: route == chosen);
-                // A Sensitive chat can't pick a route its policy refuses (Claude Code; online ones when masked use is off).
-                if (session is not null && model.Host.AdmissionFor(session, provider) is { Allowed: false, Refusal: { } refusal })
+                // A Sensitive chat can't pick a route its policy refuses (Claude Code; online ones while the shield is off).
+                if (session is not null && model.Host.AdmissionFor(session, provider) is { IsAllowed: false, Refusal: { } refusal })
                 {
                     item.IsEnabled = route == chosen;
                     item.ToolTip = refusal;
@@ -129,40 +129,28 @@ public static class Menus
         return menu;
     }
 
-    /// <summary>The sensitivity menu of the header's chip: this chat Sensitive or Standard (or its project's default), the
-    /// project's default, and what the policy means.</summary>
+    /// <summary>The header's Sensitive menu (Vision for macOS's composer menu): this chat, and what new chats in its project start
+    /// with, and what the policy is.</summary>
     public static ContextMenu Sensitivity(AppModel model, SessionVM? session)
     {
         var menu = new ContextMenu();
         var host = model.Host;
         var project = session is not null ? session.WorkspacePath : model.Project;
-        var projectSensitive = model.Config.IsSensitiveProject(project);
         if (session is not null)
-        {
-            menu.Items.Add(Header("This chat"));
-            var sensitive = Item("Sensitive", () => host.SetChatSensitive(session, true), Icons.Lock, isChecked: session.Sensitive == true);
-            sensitive.ToolTip = RouteAdmission.Describe(true, null, model.Config.SensitiveAllowsShielded);
-            menu.Items.Add(sensitive);
-            var standard = Item("Standard", () => host.SetChatSensitive(session, false), Icons.Shield, isChecked: session.Sensitive == false);
-            standard.ToolTip = RouteAdmission.Describe(false, null);
-            menu.Items.Add(standard);
-            menu.Items.Add(Item($"Project default ({RouteAdmission.Label(projectSensitive)})", () => host.SetChatSensitive(session, null),
-                isChecked: session.Sensitive is null));
-            menu.Items.Add(new Separator());
-        }
-        var name = project is { } p ? System.IO.Path.GetFileName(p.TrimEnd('\\', '/')) : "chats without a project";
-        menu.Items.Add(Header(project is null ? "Chats without a project" : $"Project {name}"));
-        menu.Items.Add(Item("New and undecided chats are Sensitive", () => host.SetProjectSensitive(project, !projectSensitive),
-            isChecked: projectSensitive));
+            menu.Items.Add(Item("Sensitive Chat", () => host.SetChatSensitive(session, !session.Sensitive), Icons.Lock, isChecked: session.Sensitive));
+        var name = project is { } p ? System.IO.Path.GetFileName(p.TrimEnd('\\', '/')) : null;
+        var starts = host.ProjectStartsSensitive(project);
+        menu.Items.Add(Item(name is null ? "New Chats Without a Project Start Sensitive" : $"New Chats in {name} Start Sensitive",
+            () => host.SetProjectStartsSensitive(project, !starts), isChecked: starts));
         menu.Items.Add(new Separator());
-        var shielded = Item("Sensitive chats may use online models, masked", () =>
+        var explanation = new MenuItem
         {
-            model.Config.SensitiveAllowsShielded = !model.Config.SensitiveAllowsShielded;
-        }, isChecked: model.Config.SensitiveAllowsShielded);
-        shielded.ToolTip = "On: a Sensitive chat may use an online model, with every sensitive detail masked by the shield before anything is sent. " +
-                           "Off: Sensitive chats use private models only (your own servers, Bedrock in your AWS account, Guardian).";
-        menu.Items.Add(shielded);
-        menu.Items.Add(Item("Shield settings…", () => model.ShowSettings(SettingsTab.Models), Icons.Settings));
+            Header = new TextBlock { Text = SensitivityPolicy.Explanation, TextWrapping = TextWrapping.Wrap, MaxWidth = 380 },
+            IsEnabled = false,
+        };
+        menu.Items.Add(explanation);
+        menu.Items.Add(new Separator());
+        menu.Items.Add(Item("Sensitive-Data Shield Settings…", () => model.ShowSettings(SettingsTab.Models), Icons.Settings));
         return menu;
     }
 

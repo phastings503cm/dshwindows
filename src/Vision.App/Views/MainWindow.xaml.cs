@@ -168,7 +168,7 @@ public partial class MainWindow : Window
             case nameof(AppConfig.Preset):
                 UpdatePreset();
                 break;
-            case nameof(AppConfig.SensitiveAllowsShielded):
+            case nameof(AppConfig.Privacy):
             case nameof(AppConfig.SensitiveProjects):
                 UpdateSensitivity();
                 break;
@@ -256,23 +256,23 @@ public partial class MainWindow : Window
         UpdateSensitivity();
     }
 
-    /// <summary>The header's sensitivity chip: "Sensitive" (a lock, amber — red when the chat's model can't be used) or
-    /// "Standard", with the policy in its tooltip.</summary>
+    /// <summary>The header's sensitivity control: "Sensitive" (a lock, green — red when the chat's model can't be used) or "Not
+    /// sensitive", and a menu for the chat and its project (Vision for macOS's composer menu).</summary>
     private void UpdateSensitivity()
     {
         var session = Model.Host.Selected;
-        var sensitive = session is not null ? Model.Host.IsSensitive(session) : Model.Config.IsSensitiveProject(Model.Project);
-        SensitiveLabel.Text = RouteAdmission.Label(sensitive);
+        var sensitive = session?.Sensitive ?? Model.Config.IsSensitiveProject(Model.Project);
+        SensitiveLabel.Text = SensitivityPolicy.Label(sensitive);
         SensitiveGlyph.Text = sensitive ? Icons.Lock : Icons.Shield;
         var refused = session is not null && Model.Host.SensitiveRefusal(session) is not null;
         SensitiveGlyph.Foreground = !sensitive
             ? ThemeService.Brush("TextFillColorSecondaryBrush", System.Windows.Media.Colors.Gray)
             : refused
                 ? ThemeService.Brush("SystemFillColorCriticalBrush", System.Windows.Media.Colors.IndianRed)
-                : ThemeService.Brush("SystemFillColorCautionBrush", System.Windows.Media.Colors.DarkOrange);
-        SensitiveButton.ToolTip = session is not null
-            ? Model.Host.SensitivityDescription(session)
-            : RouteAdmission.Describe(sensitive, null, Model.Config.SensitiveAllowsShielded);
+                : ThemeService.Brush("SystemFillColorSuccessBrush", System.Windows.Media.Colors.SeaGreen);
+        SensitiveButton.ToolTip = sensitive
+            ? "Sensitive: only private models, or others through the shield. Claude Code is refused."
+            : "Not sensitive: every model may be used. Make it Sensitive to keep it on private models (or masked).";
     }
 
     private void SensitiveButton_Click(object sender, RoutedEventArgs e)
@@ -913,9 +913,9 @@ public partial class MainWindow : Window
     }
 
     /// <summary>The Rewind window: a chat's recent turns that changed files, their diffs, Rewind.</summary>
-    public void ShowRewind(SessionVM session, string? turnId, string? file)
+    public void ShowRewind(SessionVM session, string? turnId, string? file, bool ask)
     {
-        var window = new RewindWindow(Model, session, turnId, file) { Owner = this };
+        var window = new RewindWindow(Model, session, turnId, file, ask) { Owner = this };
         window.Show();
     }
 

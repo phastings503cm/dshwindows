@@ -216,6 +216,7 @@ public sealed partial class AgentHost : ObservableObject
         Sessions.Insert(0, vm);
         Log.Upsert(id, cwd, "New chat", resolved.RawValue());
         AssignInitialChoice(vm);
+        AssignInitialSensitivity(vm);
         if (select) SelectedId = id;
         return vm;
     }
@@ -285,7 +286,7 @@ public sealed partial class AgentHost : ObservableObject
                 // The chat's own model and thinking level (null in a chat from before they were stored).
                 RouteId = row.Route,
                 Thinking = ThinkingLevels.FromRaw(row.Thinking),
-                Sensitive = row.Sensitive,
+                Sensitive = row.Sensitive == true,
             };
             Sessions.Add(vm);
         }
@@ -433,10 +434,7 @@ public sealed partial class AgentHost : ObservableObject
         // The person's MCP servers that apply here, by name (their own instructions are data, not passed on).
         if (Mcp.PromptSection(vm.WorkspacePath) is { } mcpSection) prompt += "\n\n" + mcpSection;
         var sensitive = IsSensitive(vm);
-        if (sensitive)
-            prompt += "\n\n--- Sensitive chat ---\nThe person marked this chat Sensitive. Keep its sensitive details (names, contact details, " +
-                      "credentials, client and patient information) inside this chat: never put them into web fetches, MCP tools or anything else " +
-                      "that sends them outside, unless the person asks for exactly that. Every subagent task counts as sensitive.";
+        if (sensitive) prompt += "\n\n" + SensitivePrompt;
         _systemPrompts[sessionId] = prompt;
 
         // Background processes: the model's own long-running programs (game engines, dev servers,
@@ -473,7 +471,7 @@ public sealed partial class AgentHost : ObservableObject
             extra.Add(new ProposeSkillTool(vm.WorkspacePath, SkillLocations));
         }
         // The person's MCP servers' tools (built-ins and the tools above keep their names).
-        extra.AddRange(Mcp.ToolsFor(vm.WorkspacePath, McpGrantsFor(sessionId), builtins.Names.Concat(extra.Select(t => t.Name)).ToList()));
+        extra.AddRange(Mcp.ToolsFor(vm.WorkspacePath, builtins.Names.Concat(extra.Select(t => t.Name)).ToList()));
         var registry = builtins.Adding(extra);
 
         if (!_grants.TryGetValue(sessionId, out var grants)) _grants[sessionId] = grants = new ComputerGrants();
@@ -484,7 +482,8 @@ public sealed partial class AgentHost : ObservableObject
                 MaxOutputTokens = profile.MaxOutputTokens,
                 ContextWindow = window,
                 Thinking = thinking,
-                VisionEnabled = VisionOn(profile),
+                // A Sensitive chat sends no pictures to a model that only gets it masked (the shield can't check them).
+                VisionEnabled = VisionOn(profile) && !WithholdsPictures(vm, profile),
                 Shell = shell,
                 Retry = RetryPolicy,
                 // The step limit is a checkpoint, not a stop: nobody has to type "continue". Twelve of them (360 steps in one
@@ -512,6 +511,7 @@ public sealed partial class AgentHost : ObservableObject
             Cache = CacheFor(sessionId),
             Checkpoints = CheckpointSlotFor(sessionId),
             Sensitive = sensitive,
+            PrivateSubagentsOnly = PrivateSubagentsOnly(vm),
         };
         _engines[sessionId] = engine;
         return engine;
@@ -815,12 +815,17 @@ public sealed partial class AgentHost : ObservableObject
                 AgentsCommand(vm);
                 break;
 
-            case SlashCommand.Rewind:
-                RewindCommand(vm);
+            case SlashCommand.Rewind rewind:
+                RewindCommand(rewind.Argument, vm);
                 break;
 
-            case SlashCommand.Mcp:
-                McpCommand(vm);
+            case SlashCommand.Mcp mcp:
+                if (mcp.Argument?.Trim().ToLowerInvariant() is "reload" or "restart" or "reconnect")
+                {
+                    vm.Note("Reconnecting the MCP servers…");
+                    _ = Task.Run(() => Mcp.ReconnectAllAsync());
+                }
+                else McpCommand(vm);
                 break;
 
             case SlashCommand.Sensitive sensitive:
@@ -1082,7 +1087,7 @@ public sealed partial class AgentHost : ObservableObject
         // Notes that bear on this message ride along with it (a few, only when relevant — never a dump).
         if (recallQuery is not null && RecallBlockFor(vm, recallQuery) is { } recalled) modelText = recalled + "\n\n" + modelText;
         // The person rewound a turn since the last one: the model reads those files again instead of trusting its memory.
-        if (_rewindNotes.Remove(sessionId, out var rewound)) modelText = rewound + "\n\n" + modelText;
+        if (TakeModelNotes(sessionId) is { } notes) modelText = notes + "\n\n" + modelText;
         if (vm.Title == "New chat")
         {
             var first = displayText.Split('\n').FirstOrDefault() ?? displayText;
@@ -1103,7 +1108,7 @@ public sealed partial class AgentHost : ObservableObject
         var skillState = BuildSkillState(vm);
         var shell = Config.ResolvedAgentShell;
         var key = new EngineKey(ProfileKey(profile), window, thinking, vm.Preset, skillState.Signature,
-                                Config.ComputerToolsEnabled, VisionOn(profile), shell.Executable, Vault.Revision,
+                                Config.ComputerToolsEnabled, VisionOn(profile) && !WithholdsPictures(vm, profile), shell.Executable, Vault.Revision,
                                 vm.Goal is not null, MemorySignature(vm), AgentsStampFor(vm), RoutingStamp(profile, vm), IsUnattended(sessionId));
         if (_engineKeys.TryGetValue(sessionId, out var previous))
         {
@@ -1210,6 +1215,7 @@ public sealed partial class AgentHost : ObservableObject
     {
         var store = AttachmentStoreFor(vm.Id);
         var route = AttachmentRouteFor(profile);
+        if (WithholdsPictures(vm, profile)) route = route with { Vision = false };
         var previous = vm.Activity;
         if (attachments.Any(a => a.Digest is null)) vm.Activity = "Reading attachments…";
         AttachmentPrep.Prepared prepared;

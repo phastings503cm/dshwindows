@@ -101,36 +101,39 @@ public sealed class PowerTests : IDisposable
 
         var row = Assert.Single(vm.Entries.OfType<CheckpointEntryVM>());
         Assert.Equal("Files changed (1)", row.Title);
+        Assert.Equal("update the notes", row.TurnTitle);
         Assert.Equal("+1 −1", row.LineSummary);
         Assert.True(row.CanRewind);
         Assert.Equal("v2\n", File.ReadAllText(file));
         Assert.Contains(AgentHost.LogRows(vm.Entries, vm.Id), r => r.Kind == "checkpoint" && r.ArgSummary == row.TurnId);
 
-        var result = host.Rewind(vm, host.PlanRewind(vm, row.TurnId)!, overwriteConflicts: false);
-        Assert.Equal(1, result.Changed);
+        var result = host.Rewind(vm, host.PlanRewind(vm, row.TurnId)!, includeConflicts: false);
+        Assert.Equal(1, result.ChangedCount);
         Assert.Equal("v1\n", File.ReadAllText(file));
-        Assert.True(row.Turn!.IsRewound);
-        Assert.True(row.CanUndo);
-        Assert.Contains("Rewound 1 file to before this turn.", Notes(vm));
+        Assert.True(row.IsRewound);
+        Assert.Equal("Rewound", row.Status);
+        Assert.Contains("↺ Rewound “update the notes”: put back 1 file (notes.md).", Notes(vm));
+        // The rewind is a turn of its own, with its own row (so it can be rewound in turn).
+        var rewind = vm.Entries.OfType<CheckpointEntryVM>().Last();
+        Assert.Equal("Rewind of “update the notes”", rewind.TurnTitle);
 
         // The model hears of it with its next message.
         _server.Reset((_, _) => new FakeReply.Text("ok"));
         host.Send("what now?", vm.Id);
         await WaitUntil("second turn", () => !vm.Running && _server.Seen.Count >= 1);
-        Assert.Contains("rewound the file changes of an earlier turn", _server.Seen[0].LastUser);
+        Assert.Contains("the user rewound the file changes of an earlier turn (“update the notes”)", _server.Seen[0].LastUser);
         Assert.Contains("notes.md", _server.Seen[0].LastUser);
         Assert.EndsWith("what now?", _server.Seen[0].LastUser);
 
-        // A relaunch reads the row back with its checkpoint.
+        // A relaunch reads the rows back with their records.
         var again = MakeHost();
         var reopened = again.Session(vm.Id)!;
         again.Hydrate(reopened);
-        var restored = Assert.Single(reopened.Entries.OfType<CheckpointEntryVM>());
-        Assert.True(restored.Turn!.IsRewound);
+        Assert.True(reopened.Entries.OfType<CheckpointEntryVM>().First().IsRewound);
     });
 
     [Fact]
-    public void RewindWithoutAWindowListsTheTurnsOrSaysThereAreNone() => Run(async host =>
+    public void RewindWithNothingToListSaysSo() => Run(async host =>
     {
         var vm = host.NewSession(Project("main"));
         host.Send("/rewind", vm.Id);
@@ -139,51 +142,46 @@ public sealed class PowerTests : IDisposable
     });
 
     [Fact]
-    public void ASensitiveChatRefusesAnOnlineModelWhenMaskedUseIsOffAndOtherwiseMasksEvenWithTheShieldOff() => Run(async host =>
+    public void ASensitiveChatIsRefusedAnOnlineModelWhileTheShieldIsOffAndMaskedWhileItIsOn() => Run(async host =>
     {
         var vm = host.NewSession(Project("main"));
         host.Config.Privacy = host.Config.Privacy with { Mask = false };
         host.SetChatSensitive(vm, true);
-        Assert.True(host.IsSensitive(vm));
-        Assert.Contains("This chat is now Sensitive", Notes(vm).Last());
-
-        host.Config.SensitiveAllowsShielded = false;
+        Assert.StartsWith("🔒 This chat is now Sensitive.", Notes(vm).Last());
         Assert.NotNull(host.SensitiveRefusal(vm));
+
         host.Send("hello", vm.Id);
         await WaitUntil("refused", () => !vm.Running && Notes(vm, MessageRole.Error).Count > 0);
         Assert.Empty(_server.Seen);
-        Assert.Contains("Sensitive chats use private models only", Notes(vm, MessageRole.Error).Last());
+        Assert.StartsWith("This chat is Sensitive. stub is an online service and the sensitive-data shield is switched off", Notes(vm, MessageRole.Error).Last());
 
-        host.Config.SensitiveAllowsShielded = true;
+        host.Config.Privacy = host.Config.Privacy with { Mask = true };
+        Assert.Null(host.SensitiveRefusal(vm));
+        Assert.Equal("Sensitive — stub isn't private: what the shield detects is masked before sending.", host.SensitivityHeader(vm));
         host.Send("mail jane.doe@example.com about it", vm.Id);
         await WaitUntil("sent", () => !vm.Running && _server.Seen.Count >= 1);
         Assert.Contains("⟦EMAIL_1⟧", _server.Seen[0].LastUser);
         Assert.DoesNotContain("jane.doe@example.com", _server.Seen[0].AllUserText);
         Assert.Contains("--- Sensitive chat ---", _server.Seen[0].System);
 
-        // Standard again, with the shield off: it goes as it is.
         host.SetChatSensitive(vm, false);
-        _server.Reset((_, _) => new FakeReply.Text("ok"));
-        host.Send("and cc bob@example.com", vm.Id);
-        await WaitUntil("sent again", () => !vm.Running && _server.Seen.Count >= 1);
-        Assert.Contains("bob@example.com", _server.Seen[0].LastUser);
+        Assert.Null(host.SensitivityHeader(vm));
+        Assert.Equal("This chat is no longer Sensitive: every model may be used, with the usual masking for models that aren't private.", Notes(vm).Last());
     });
 
     [Fact]
-    public void AProjectsDefaultMakesItsChatsSensitiveUnlessAChatChoseForItself() => UiThread.Run(() =>
+    public void NewChatsOfAProjectSetToSensitiveStartSensitive() => UiThread.Run(() =>
     {
         var host = MakeHost();
         var project = Project("clinic");
-        var first = host.NewSession(project);
-        Assert.False(host.IsSensitive(first));
-        host.SetProjectSensitive(project, true);
-        Assert.True(host.IsSensitive(first));
-        Assert.True(host.IsSensitive(host.NewSession(project)));
-        host.SetChatSensitive(first, false);
-        Assert.False(host.IsSensitive(first));
-        Assert.False(host.IsSensitive(host.NewSession(Project("other"))));
-        // The chat's own choice is stored with it.
-        Assert.False(host.Log.List().Single(s => s.Id == first.Id).Sensitive);
+        var earlier = host.NewSession(project);
+        host.SetProjectStartsSensitive(project, true);
+        Assert.False(earlier.Sensitive); // a chat keeps what it started with
+        var fresh = host.NewSession(project);
+        Assert.True(fresh.Sensitive);
+        Assert.True(host.Log.List().Single(s => s.Id == fresh.Id).Sensitive);
+        Assert.False(host.NewSession(Project("other")).Sensitive);
+        Assert.Null(host.Log.List().Single(s => s.Id == earlier.Id).Sensitive);
         return Task.CompletedTask;
     });
 
@@ -193,7 +191,8 @@ public sealed class PowerTests : IDisposable
         McpManager.TransportOverride = _ => new LoopbackMcpTransport(new McpLoopbackServer());
         try
         {
-            host.McpServers.Save(new McpServerConfig { Id = "demo", Name = "demo", Command = "demo-server" });
+            host.Config.Preset = PermissionPreset.WorkspaceWrite.RawValue();
+            host.McpServers.Save(new McpServerConfig { Id = "demo-id", Name = "demo", Command = "demo-server" });
             await host.Mcp.SyncAsync();
             _server.Reset((_, n) => n == 1
                 ? new FakeReply.ToolCall("mcp__demo__echo", """{"text":"from the server"}""")
@@ -201,12 +200,12 @@ public sealed class PowerTests : IDisposable
             var vm = host.NewSession(Project("main"));
             host.Send("use the echo tool", vm.Id);
             await WaitUntil("asked", () => vm.PendingGates.Count > 0);
-            Assert.Contains("MCP server “demo” wants to run echo", vm.PendingGates[0].Detail);
+            Assert.Equal("MCP server “demo” wants to run its tool “echo” with {\"text\":\"from the server\"}", vm.PendingGates[0].Detail);
             host.AnswerGate(vm.Id, vm.PendingGates[0].Id, true);
             await WaitUntil("done", () => !vm.Running && _server.Seen.Count >= 2);
 
             Assert.Contains("mcp__demo__echo", _server.Seen[0].Tools);
-            Assert.Contains("--- MCP servers ---", _server.Seen[0].System);
+            Assert.Contains("MCP servers connected (their tools are named mcp__<server>__<tool>): demo (2 tools).", _server.Seen[0].System);
             Assert.Contains(_server.Seen[1].Messages, m => m.Role == "tool" && m.Content == "from the server");
         }
         finally

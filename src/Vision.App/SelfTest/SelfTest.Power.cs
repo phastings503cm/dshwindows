@@ -31,7 +31,7 @@ public sealed partial class SelfTest
             {
                 Id = "github", Name = "github", Command = "npx", Args = ["-y", "@modelcontextprotocol/server-github"],
                 // Its name only: nothing is written to this PC's Credential Manager.
-                EnvKeys = ["GITHUB_PERSONAL_ACCESS_TOKEN"],
+                EnvNames = ["GITHUB_PERSONAL_ACCESS_TOKEN"], Trust = McpTrust.ReadOnly,
                 Source = McpImport.ClaudeCode, SourceFile = Path.Combine(Home, ".claude.json"),
             });
             store.Save(new McpServerConfig
@@ -41,7 +41,7 @@ public sealed partial class SelfTest
             store.Save(new McpServerConfig
             {
                 Id = "playwright", Name = "playwright", Command = "npx", Args = ["@playwright/mcp@latest"], Enabled = false, Project = Project,
-                Source = McpImport.ProjectFile,
+                Source = "Claude Code (this project)",
             });
             await model.Host.Mcp.SyncAsync();
             // Saving also started a sync of its own: wait for every connection to settle.
@@ -86,7 +86,8 @@ public sealed partial class SelfTest
             var tests = Path.Combine(Project, "tests", "StockTests.cs");
             var original = File.ReadAllText(stock);
             var originalTests = File.ReadAllText(tests);
-            var recorder = new TurnRecorder(host.Checkpoints, chat.Id, Guid.NewGuid().ToString(), Project, "Fix the low-stock report: it should list every SKU under 5");
+            var recorder = new TurnRecorder(host.Checkpoints, chat.Id, Guid.NewGuid().ToString(), Project,
+                TurnCheckpoint.TitleOf("Fix the low-stock report: it should list every SKU under 5"));
             recorder.BeforeChange(stock, EditTool.ToolName);
             File.WriteAllText(stock, original.Replace("    // Returns the new level; never below zero.\n",
                 "    /// <summary>The SKUs whose level is below <paramref name=\"threshold\"/>.</summary>\n" +
@@ -99,7 +100,7 @@ public sealed partial class SelfTest
             var turn = recorder.Finish() ?? throw new InvalidOperationException("the demo turn recorded nothing");
             chat.AppendMessage(MessageRole.User, "Fix the low-stock report: it should list every SKU under 5");
             chat.AppendMessage(MessageRole.Assistant, "Added `Stock.Low(threshold)`, a `StockReport` that lists every SKU under 5, and a test for it.");
-            chat.Entries.Add(new CheckpointEntryVM(turn.Id, turn.Title) { Turn = turn, IsExpanded = true });
+            chat.Entries.Add(new CheckpointEntryVM(turn.Id, turn.Heading) { Turn = turn, IsExpanded = true });
             model.Select(chat.Id);
             model.Mode = WorkspaceMode.Chat;
             await Settle(1000);
@@ -110,8 +111,8 @@ public sealed partial class SelfTest
 
             // Rewind for real (the files go back), and the row says so.
             var plan = host.PlanRewind(chat, turn.Id) ?? throw new InvalidOperationException("no rewind plan");
-            var result = host.Rewind(chat, plan, overwriteConflicts: false);
-            Note($"rewind: {result.Summary}");
+            var result = host.Rewind(chat, plan, includeConflicts: false);
+            Note($"rewind: {CheckpointRewind.Summary(result, plan.Turn.Title, Project)}");
             if (File.ReadAllText(stock) != original || File.Exists(report) || File.ReadAllText(tests) != originalTests)
                 throw new InvalidOperationException("the rewind didn't put the files back");
             await Settle(600);
@@ -121,7 +122,7 @@ public sealed partial class SelfTest
             host.SetChatSensitive(chat, true);
             await Settle(600);
             Capture(window, "chat-sensitive");
-            host.SetChatSensitive(chat, null);
+            host.SetChatSensitive(chat, false);
         }
         catch (Exception error)
         {

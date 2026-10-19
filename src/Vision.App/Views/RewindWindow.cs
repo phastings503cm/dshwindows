@@ -13,8 +13,9 @@ namespace Vision.App.Views;
 // MARK: - Rewind (10-19 #20)
 //
 // /rewind (and "Changes…" on a turn's "Files changed" row) opens this window: the chat's recent turns that changed files on
-// the left, the chosen turn's files and the selected file's diff on the right, and "Rewind this turn" / "Undo rewind".
-// Rewinding asks first — and names every file that changed since the turn, which is overwritten only if the person says so.
+// the left, the chosen turn's files and the selected file's diff on the right, and "Rewind…". Rewinding asks first — naming
+// every file that changed since the turn, which is rewound only on "Rewind All". A rewind is a turn of its own, so it can be
+// rewound in turn. The words are Vision for macOS's (CheckpointViews.swift).
 
 /// <summary>Rewinding a turn, with its confirmation: shared by the transcript row and the Rewind window.</summary>
 public static class RewindFlow
@@ -25,80 +26,42 @@ public static class RewindFlow
         var host = model.Host;
         if (AgentHost.RewindBlocked(vm) is { } blocked)
         {
-            Dialog.Info("Can't rewind right now", blocked);
+            Dialog.Info("Can't rewind yet", blocked);
             return false;
         }
         if (host.PlanRewind(vm, turnId) is not { } plan)
         {
-            Dialog.Info("Can't rewind this turn", "Its snapshot is no longer kept (checkpoints are kept for 30 days, up to 1 GB).");
+            Dialog.Info("Can't rewind this turn", "Its record is no longer kept (turns are kept for 30 days, up to 1 GB).");
             return false;
         }
-        string Name(RewindItem item) => plan.Turn.Workspace is { } root ? CheckpointRewind.Relative(root, item.File.Path) : System.IO.Path.GetFileName(item.File.Path);
-        string List(IEnumerable<RewindItem> items)
+        if (plan.IsEmpty)
         {
-            var names = items.Select(Name).ToList();
-            return string.Join("\n", names.Take(10).Select(n => "• " + n)) + (names.Count > 10 ? $"\n• and {names.Count - 10} more" : "");
-        }
-        if (plan.Actionable == 0)
-        {
-            var why = plan.Unavailable.Count > 0
-                ? $"These files can't go back (too large to keep a copy of, or their snapshot is gone):\n{List(plan.Unavailable)}"
-                : "The files are already as they were before this turn.";
-            Dialog.Info("Nothing to rewind", why);
+            Dialog.Info("Nothing to rewind", "Every file this turn changed already holds what it held before it (or can't be rewound).");
             return false;
         }
-        var actionable = plan.Items.Where(i => i.Action is RewindAction.Restore or RewindAction.Delete).ToList();
-        var message = $"These files go back to how they were before “{TextUtil.Prefix(plan.Turn.Prompt, 80)}”:\n{List(actionable)}";
-        if (actionable.Any(i => i.Action == RewindAction.Delete))
-            message += "\n\nFiles the turn created are deleted.";
-        if (plan.Unavailable.Count > 0)
-            message += $"\n\nThese can't go back (too large to keep a copy of, or their snapshot is gone):\n{List(plan.Unavailable)}";
-        bool overwrite;
-        if (plan.Conflicts.Count > 0)
+        var message = CheckpointRewind.Confirmation(plan, vm.WorkspacePath ?? plan.Turn.Workspace);
+        var title = $"Rewind “{plan.Turn.Title}”?";
+        bool includeConflicts;
+        if (plan.Conflicts.Count == 0)
         {
-            message += $"\n\nThese changed since the turn ended — rewinding them loses those later changes:\n{List(plan.Conflicts)}";
-            var all = plan.Conflicts.Count == actionable.Count;
-            var choices = all
-                ? new[] { new Dialog.Choice("Cancel", IsCancel: true), new Dialog.Choice("Rewind Anyway", IsDestructive: true) }
-                : new[] { new Dialog.Choice("Cancel", IsCancel: true), new Dialog.Choice("Skip Changed Files", IsDefault: true), new Dialog.Choice("Rewind All", IsDestructive: true) };
-            var answer = Dialog.Ask("Rewind this turn?", message, choices);
-            if (answer <= 0) return false;
-            overwrite = all || answer == 2;
+            if (Dialog.Ask(title, message, new Dialog.Choice("Cancel", IsCancel: true), new Dialog.Choice("Rewind", IsDefault: true)) != 1) return false;
+            includeConflicts = false;
         }
         else
         {
-            if (!Dialog.Confirm("Rewind this turn?", message, "Rewind")) return false;
-            overwrite = false;
+            var choices = new List<Dialog.Choice> { new("Cancel", IsCancel: true), new("Rewind All", IsDestructive: true) };
+            if (plan.Safe.Count > 0) choices.Add(new Dialog.Choice("Rewind Only the Others", IsDefault: true));
+            var answer = Dialog.Ask(title, message, [.. choices]);
+            if (answer <= 0) return false;
+            includeConflicts = answer == 1;
         }
         try
         {
-            var result = host.Rewind(vm, plan, overwrite);
-            if (result.Failed.Count > 0) Dialog.Info("Some files couldn't be rewound", result.Summary);
-            return result.Changed > 0;
+            return host.Rewind(vm, plan, includeConflicts).ChangedCount > 0;
         }
         catch (InvalidOperationException error)
         {
-            Dialog.Info("Can't rewind right now", error.Message);
-            return false;
-        }
-    }
-
-    /// <summary>Ask, then put back what a rewind replaced.</summary>
-    public static bool Undo(AppModel model, SessionVM vm, string turnId)
-    {
-        if (AgentHost.RewindBlocked(vm) is { } blocked)
-        {
-            Dialog.Info("Can't undo right now", blocked);
-            return false;
-        }
-        if (!Dialog.Confirm("Undo the rewind?", "The files go back to how they were just before you rewound this turn.", "Undo Rewind")) return false;
-        try
-        {
-            return model.Host.UndoRewind(vm, turnId).Changed > 0;
-        }
-        catch (InvalidOperationException error)
-        {
-            Dialog.Info("Can't undo right now", error.Message);
+            Dialog.Info("Can't rewind yet", error.Message);
             return false;
         }
     }
@@ -115,14 +78,14 @@ public sealed class RewindWindow : Window
     private readonly TextBlock _heading = Ui.Subtitle("");
     private readonly TextBlock _meta = Ui.Secondary("");
     private readonly Button _rewind;
-    private readonly Button _undo;
     private IReadOnlyList<TurnCheckpoint> _list = [];
     private string? _selectFile;
 
     /// <summary>Lines of one diff shown at most (the rest is summarised).</summary>
     private const int MaxDiffLines = 4_000;
 
-    public RewindWindow(AppModel model, SessionVM session, string? turnId = null, string? file = null)
+    /// <param name="ask">Open on <paramref name="turnId"/> and ask to rewind it (/rewind n).</param>
+    public RewindWindow(AppModel model, SessionVM session, string? turnId = null, string? file = null, bool ask = false)
     {
         _model = model;
         _session = session;
@@ -136,22 +99,21 @@ public sealed class RewindWindow : Window
         ShowInTaskbar = false;
         SetResourceReference(BackgroundProperty, "SolidBackgroundFillColorBaseBrush");
 
-        _rewind = Ui.Button("Rewind this turn", () => Act(undo: false), accent: true,
-            tooltip: "Put this turn's files back the way they were before it (asks first if any changed since)");
-        _undo = Ui.Button("Undo rewind", () => Act(undo: true), tooltip: "Put back what the rewind replaced");
+        _rewind = Ui.Button("Rewind…", Act, accent: true, tooltip: "Put this turn's files back to how they were before it (you confirm first)");
 
         // Left: the turns.
         _turns.BorderThickness = new Thickness(0);
         _turns.Background = Brushes.Transparent;
         _turns.SetResourceReference(ItemsControl.ItemContainerStyleProperty, "NavListItem");
         _turns.SelectionChanged += (_, _) => ShowTurn();
-        var left = new DockPanel { Width = 330 };
+        var left = new DockPanel { Width = 340 };
         left.SetResourceReference(Panel.BackgroundProperty, "LayerFillColorDefaultBrush");
-        var leftTitle = Ui.Subtitle("Recent turns");
-        leftTitle.Margin = new Thickness(16, 16, 12, 2);
+        var leftTitle = Ui.Subtitle("Rewind");
+        leftTitle.Margin = new Thickness(16, 16, 12, 4);
         DockPanel.SetDock(leftTitle, Dock.Top);
         left.Children.Add(leftTitle);
-        var leftNote = Ui.Secondary("Turns of this chat that changed files, newest first. Kept for 30 days.", 11.5);
+        var leftNote = Ui.Secondary("Each turn below changed files. Rewinding one puts its files back to how they were before it — a file it " +
+                                    "created is removed. You're asked first when a file changed again since. A rewind can itself be rewound.", 11.5);
         leftNote.Margin = new Thickness(16, 0, 12, 10);
         DockPanel.SetDock(leftNote, Dock.Top);
         left.Children.Add(leftNote);
@@ -168,7 +130,7 @@ public sealed class RewindWindow : Window
         _diff.SetResourceReference(Control.BorderBrushProperty, "CardStrokeColorDefaultBrush");
         var header = Ui.Stack(_heading, _meta);
         _meta.Margin = new Thickness(0, 2, 0, 8);
-        var buttons = Ui.Buttons(_rewind, _undo, Ui.Button("Close", Close));
+        var buttons = Ui.Buttons(_rewind, Ui.Button("Done", Close));
         buttons.Margin = new Thickness(0, 10, 0, 0);
         buttons.HorizontalAlignment = HorizontalAlignment.Right;
         var right = new DockPanel { Margin = new Thickness(20, 16, 20, 16) };
@@ -197,6 +159,7 @@ public sealed class RewindWindow : Window
         model.Host.CheckpointsChanged += OnCheckpointsChanged;
         Closed += (_, _) => model.Host.CheckpointsChanged -= OnCheckpointsChanged;
         Reload(turnId);
+        if (ask && turnId is not null) Loaded += (_, _) => Dispatcher.BeginInvoke(Act);
     }
 
     private void OnCheckpointsChanged(string chatId)
@@ -206,25 +169,29 @@ public sealed class RewindWindow : Window
 
     private void Reload(string? select)
     {
-        _list = _model.Host.CheckpointsOf(_session).Take(50).ToList();
+        _list = _model.Host.CheckpointsOf(_session);
         _turns.Items.Clear();
-        foreach (var turn in _list)
+        foreach (var (turn, index) in _list.Select((t, i) => (t, i)))
         {
-            var title = Ui.Text(turn.Prompt.Length > 0 ? turn.Prompt : "(a turn the harness started)", 13, wrap: false);
-            var line = Ui.Secondary($"{turn.At.ToLocalTime():MMM d, HH:mm} · {turn.Title}{(turn.IsRewound ? " · rewound" : "")}", 11.5);
+            var title = Ui.Text($"{index + 1}. {turn.Title}", 13, wrap: false);
+            var names = string.Join(", ", turn.Changed.Take(4).Select(f => System.IO.Path.GetFileName(f.Path)));
+            var line = Ui.Secondary($"{turn.StartedAt.ToLocalTime():MMM d, HH:mm} · {turn.Changed.Count} file{(turn.Changed.Count == 1 ? "" : "s")}: {names}" +
+                                    (turn.IsRewound ? " · rewound" : ""), 11.5);
+            line.TextTrimming = TextTrimming.CharacterEllipsis;
+            line.TextWrapping = TextWrapping.NoWrap;
             _turns.Items.Add(new ListBoxItem { Content = Ui.Stack(title, line), Tag = turn.Id, Padding = new Thickness(12, 7, 12, 7) });
         }
         if (_list.Count == 0)
         {
-            _heading.Text = "Nothing to rewind yet";
-            _meta.Text = "No turn in this chat has changed files.";
+            _heading.Text = "No turn in this chat has changed files yet.";
+            _meta.Text = "";
             _files.Items.Clear();
             _diff.Document = new FlowDocument();
-            _rewind.IsEnabled = _undo.IsEnabled = false;
+            _rewind.IsEnabled = false;
             return;
         }
-        var index = select is null ? 0 : Math.Max(0, _list.ToList().FindIndex(t => t.Id == select));
-        _turns.SelectedIndex = index;
+        var index2 = select is null ? 0 : Math.Max(0, _list.ToList().FindIndex(t => t.Id == select));
+        _turns.SelectedIndex = index2;
         ShowTurn();
     }
 
@@ -233,16 +200,16 @@ public sealed class RewindWindow : Window
     private void ShowTurn()
     {
         if (Selected is not { } turn) return;
-        _heading.Text = turn.Prompt.Length > 0 ? TextUtil.Prefix(turn.Prompt, 140) : "A turn the harness started";
+        _heading.Text = turn.Title;
         var status = turn.IsRewound ? $" · rewound {turn.RewoundAt!.Value.ToLocalTime():MMM d, HH:mm}" : "";
-        _meta.Text = $"{turn.At.ToLocalTime():dddd MMM d, HH:mm} · {turn.Title} · {turn.LineSummary}{status}";
-        _rewind.IsEnabled = !turn.IsRewound;
-        _undo.Visibility = turn.RewoundFrom is { Count: > 0 } ? Visibility.Visible : Visibility.Collapsed;
-        _undo.IsEnabled = true;
+        _meta.Text = $"{turn.StartedAt.ToLocalTime():dddd MMM d, HH:mm} · {turn.Heading} · {turn.LineSummary}{status}";
+        _rewind.IsEnabled = AgentHost.RewindBlocked(_session) is null;
+        _rewind.ToolTip = AgentHost.RewindBlocked(_session) ?? "Put this turn's files back to how they were before it (you confirm first)";
         _files.Items.Clear();
+        var root = _session.WorkspacePath ?? turn.Workspace;
         foreach (var file in turn.Changed)
         {
-            var vm = new CheckpointFileVM(file, turn.Workspace);
+            var vm = new CheckpointFileVM(file, root);
             var (key, fallback) = vm.IsCreated ? ("SystemFillColorSuccessBrush", Colors.SeaGreen)
                 : vm.IsDeleted ? ("SystemFillColorCriticalBrush", Colors.IndianRed) : ("SystemFillColorCautionBrush", Colors.DarkOrange);
             var dot = new System.Windows.Shapes.Ellipse { Width = 7, Height = 7, Margin = new Thickness(0, 0, 8, 0), Fill = ThemeService.Brush(key, fallback), VerticalAlignment = VerticalAlignment.Center };
@@ -264,7 +231,7 @@ public sealed class RewindWindow : Window
             _diff.Document = new FlowDocument();
             return;
         }
-        _diff.Document = Render(CheckpointRewind.Diff(_model.Host.Checkpoints, file, turn.Workspace));
+        _diff.Document = Render(CheckpointRewind.Diff(_model.Host.Checkpoints, file, _session.WorkspacePath ?? turn.Workspace));
     }
 
     /// <summary>A diff as a document: added lines green, removed lines red, hunk headers in the accent colour.</summary>
@@ -273,7 +240,7 @@ public sealed class RewindWindow : Window
         var document = new FlowDocument { PagePadding = new Thickness(10), FontSize = 12 };
         document.SetResourceReference(FlowDocument.FontFamilyProperty, "MonoFont");
         document.SetResourceReference(FlowDocument.ForegroundProperty, "TextFillColorPrimaryBrush");
-        var lines = diff.Split('\n');
+        var lines = diff.TrimEnd('\n').Split('\n');
         var shown = 0;
         foreach (var line in lines)
         {
@@ -296,17 +263,8 @@ public sealed class RewindWindow : Window
         return document;
     }
 
-    private void Act(bool undo)
+    private void Act()
     {
-        if (Selected is not { } turn) return;
-        if (undo) RewindFlow.Undo(_model, _session, turn.Id);
-        else RewindFlow.Run(_model, _session, turn.Id);
-    }
-
-    /// <summary>Self-test: choose a turn and a file without clicking.</summary>
-    internal void SelfTestSelect(int turn, int file)
-    {
-        if (turn < _turns.Items.Count) _turns.SelectedIndex = turn;
-        if (file < _files.Items.Count) _files.SelectedIndex = file;
+        if (Selected is { } turn) RewindFlow.Run(_model, _session, turn.Id);
     }
 }

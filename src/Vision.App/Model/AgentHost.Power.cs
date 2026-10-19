@@ -7,13 +7,14 @@ namespace Vision.App.Model;
 // MARK: - What the agent itself needs (10-19, item 20)
 //
 //  * Checkpoints and Rewind: every turn's file changes are recorded (the files as they were, in a content-addressed store),
-//    the turn ends with a "Files changed (N)" row, and "Rewind this turn" (or /rewind) puts them back — asking first about
-//    any file that changed since. The model is told at its next turn which files went back.
+//    the turn ends with a "Files changed (N)" row, and "Rewind this turn…" (or /rewind) puts them back — asking first about
+//    any file that changed since. A rewind is recorded as a turn of its own, so it can be rewound in turn. The model hears at
+//    its next message which files went back.
 //  * MCP servers: the servers in Settings › MCP Servers (added there, or brought in from Claude Code, Claude Desktop and
 //    Cursor) are connected at launch, and their tools are offered to every chat they apply to.
-//  * The sensitivity policy: a Sensitive chat (by its own toggle, or its project's default) uses only private routes, or
-//    online ones through the shield (forced on for it); engines that read the files themselves are refused.
-// UI thread only, like the rest of AgentHost.
+//  * Sensitive chats: a chat marked Sensitive (new chats of a project start so when the project is set to) uses only private
+//    routes, or others through the shield; engines that read the files themselves are refused (see SensitivityPolicy).
+// The behaviour and the words are Vision for macOS's (AppTransport+Checkpoints/+MCP/+Sensitivity.swift). UI thread only.
 
 public sealed partial class AgentHost
 {
@@ -21,18 +22,18 @@ public sealed partial class AgentHost
 
     private CheckpointStore? _checkpointStore;
     private readonly Dictionary<string, CheckpointSlot> _checkpointSlots = new();
-    /// <summary>Chat → what its next turn tells the model about a rewind.</summary>
-    private readonly Dictionary<string, string> _rewindNotes = new();
+    /// <summary>Chat → what its next message tells the model (after a rewind: which files went back).</summary>
+    private readonly Dictionary<string, List<string>> _modelNotes = new();
     private bool _checkpointsPruned;
 
     /// <summary>checkpoints\ in the data folder.</summary>
     public CheckpointStore Checkpoints => _checkpointStore ??= new CheckpointStore(Path.Combine(DataFolder, CheckpointStore.FolderName));
 
-    /// <summary>Raised when a chat's checkpoints change (one was added, rewound or un-rewound) — the /rewind window listens.</summary>
+    /// <summary>Raised when a chat's checkpoints change (one was added or rewound) — the Rewind window listens.</summary>
     public event Action<string>? CheckpointsChanged;
 
-    /// <summary>/rewind: the UI opens the list of this chat's recent turns. Null = the host lists them as a note.</summary>
-    public Action<SessionVM>? OnRewindCommand { get; set; }
+    /// <summary>/rewind: the UI opens the Rewind window for the chat — at a turn to confirm (null = the list).</summary>
+    public Action<SessionVM, string?>? OnRewindCommand { get; set; }
 
     private CheckpointSlot CheckpointSlotFor(string sessionId)
     {
@@ -40,12 +41,13 @@ public sealed partial class AgentHost
         return slot;
     }
 
-    /// <summary>A turn begins: what its tools change is recorded under its prompt's id.</summary>
+    /// <summary>A turn begins: what its tools change is recorded under its prompt's id ("auto-…" for the harness's own turn).</summary>
     private void BeginCheckpoint(SessionVM vm, string prompt)
     {
         var slot = CheckpointSlotFor(vm.Id);
         if (slot.Current is not null) FinishCheckpoint(vm); // a turn that never closed its own
-        slot.Current = new TurnRecorder(Checkpoints, vm.Id, vm.CurrentPromptId ?? Guid.NewGuid().ToString(), vm.WorkingFolder, prompt);
+        slot.Current = new TurnRecorder(Checkpoints, vm.Id, vm.CurrentPromptId ?? "auto-" + Guid.NewGuid(), vm.WorkingFolder,
+            TurnCheckpoint.TitleOf(prompt));
     }
 
     /// <summary>The turn is over: its checkpoint is saved and, when it changed files, "Files changed (N)" goes under it.</summary>
@@ -63,15 +65,19 @@ public sealed partial class AgentHost
             turn = null;
         }
         PruneCheckpointsOnce();
-        if (turn is null) return;
+        if (turn is not null) AddCheckpointRow(vm, turn);
+    }
+
+    private void AddCheckpointRow(SessionVM vm, TurnCheckpoint turn)
+    {
         vm.EndStreaming();
-        vm.Entries.Add(new CheckpointEntryVM(turn.Id, turn.Title) { Turn = turn });
+        vm.Entries.Add(new CheckpointEntryVM(turn.Id, turn.Heading) { Turn = turn });
         vm.NotifyContentChanged();
-        Log.RecordItem(vm.Id, "checkpoint", turn.Title, "checkpoint", turn.Id);
+        Log.RecordItem(vm.Id, "checkpoint", turn.Heading, "checkpoint", turn.Id);
         CheckpointsChanged?.Invoke(vm.Id);
     }
 
-    /// <summary>Once per launch, off the UI thread: checkpoints older than 30 days go, then the oldest past 1 GB.</summary>
+    /// <summary>Once per launch, off the UI thread: records older than 30 days go, then the oldest past 1 GB.</summary>
     private void PruneCheckpointsOnce()
     {
         if (_checkpointsPruned) return;
@@ -90,101 +96,98 @@ public sealed partial class AgentHost
         });
     }
 
-    /// <summary>A chat's checkpoints, newest first.</summary>
-    public IReadOnlyList<TurnCheckpoint> CheckpointsOf(SessionVM vm) => Checkpoints.List(vm.Id);
+    /// <summary>The chat's recent turns that changed files, newest first.</summary>
+    public IReadOnlyList<TurnCheckpoint> CheckpointsOf(SessionVM vm, int limit = 30) => Checkpoints.List(vm.Id).Take(limit).ToList();
 
     public TurnCheckpoint? CheckpointOf(SessionVM vm, string turnId) => Checkpoints.Load(vm.Id, turnId);
 
-    /// <summary>What rewinding a turn would do now (null when its checkpoint is gone).</summary>
+    /// <summary>What rewinding a turn would do now (null when its record is gone).</summary>
     public RewindPlan? PlanRewind(SessionVM vm, string turnId) =>
         CheckpointOf(vm, turnId) is { } turn ? CheckpointRewind.Plan(Checkpoints, turn) : null;
 
     /// <summary>Why a chat's turns can't be rewound right now (null = they can).</summary>
-    public static string? RewindBlocked(SessionVM vm) =>
-        vm.Running ? "The agent is working in this chat — stop it (Ctrl+.) or wait for it to finish, then rewind." : null;
+    public static string? RewindBlocked(SessionVM vm) => vm.Running ? "Wait for the turn to finish (or stop it) to rewind it." : null;
 
-    /// <summary>Carry out a rewind the person confirmed: the files go back, the chat says so, and the model hears of it at its
-    /// next turn.</summary>
-    public RewindResult Rewind(SessionVM vm, RewindPlan plan, bool overwriteConflicts)
+    /// <summary>Rewind a turn the person confirmed: put its files back (and, with <paramref name="includeConflicts"/>, also the
+    /// ones changed since). The rewind is recorded as a turn of its own (it gets its own "Files changed" row); the chat says
+    /// what happened, and the model hears it with the next message.</summary>
+    public RewindResult Rewind(SessionVM vm, RewindPlan plan, bool includeConflicts)
     {
         if (RewindBlocked(vm) is { } why) throw new InvalidOperationException(why);
-        var result = CheckpointRewind.Apply(Checkpoints, plan, overwriteConflicts);
-        var moved = plan.Items
-            .Where(i => i.Action is RewindAction.Restore or RewindAction.Delete && (!i.Conflict || overwriteConflicts) && !result.Failed.Contains(i.File.Path))
-            .ToList();
-        AfterRewind(vm, plan.Turn, result, moved.Select(i => new FileChange(i.File.Path,
-            i.Action == RewindAction.Delete ? FileChangeKind.Deleted : i.Current is null ? FileChangeKind.Created : FileChangeKind.Modified)).ToList());
-        if (moved.Count > 0)
-            _rewindNotes[vm.Id] = RewindNote(plan.Turn, moved.Select(i => i.File.Path), undone: false);
-        return result;
-    }
-
-    /// <summary>Put back what a rewind replaced.</summary>
-    public RewindResult UndoRewind(SessionVM vm, string turnId)
-    {
-        if (RewindBlocked(vm) is { } why) throw new InvalidOperationException(why);
-        if (CheckpointOf(vm, turnId) is not { RewoundFrom: { Count: > 0 } from } turn) return new RewindResult(0, 0, 0, []);
-        var paths = from.Keys.ToList();
-        var result = CheckpointRewind.Undo(Checkpoints, turn);
-        var undone = result.Changed == 0 ? "Nothing to undo." : $"Undid the rewind: {result.Changed} {(result.Changed == 1 ? "file is" : "files are")} back as they were before it.";
-        AfterRewind(vm, turn, result, paths.Select(p => new FileChange(p, File.Exists(p) ? FileChangeKind.Modified : FileChangeKind.Deleted)).ToList(), undone);
-        if (result.Changed > 0) _rewindNotes[vm.Id] = RewindNote(turn, paths, undone: true);
-        return result;
-    }
-
-    private void AfterRewind(SessionVM vm, TurnCheckpoint turn, RewindResult result, IReadOnlyList<FileChange> changes, string? summary = null)
-    {
-        if (changes.Count > 0)
+        var recorder = new TurnRecorder(Checkpoints, vm.Id, "rewind-" + Guid.NewGuid(), vm.WorkingFolder, $"Rewind of “{plan.Turn.Title}”");
+        var result = CheckpointRewind.Apply(Checkpoints, plan, includeConflicts, recorder);
+        var root = vm.WorkspacePath ?? plan.Turn.Workspace;
+        var text = CheckpointRewind.Summary(result, plan.Turn.Title, root);
+        var failed = result.Failed.Count > 0;
+        vm.Note(text, failed ? MessageRole.Error : MessageRole.Notice);
+        Log.RecordItem(vm.Id, failed ? "error" : "notice", text, isError: failed);
+        if (result.ChangedCount > 0)
         {
+            ModelNotesFor(vm.Id).Add(CheckpointRewind.ModelNote(result, plan.Turn.Title, root));
+            // The editor reloads what went back.
+            var changes = result.Restored.Select(p => new FileChange(p, FileChangeKind.Modified))
+                .Concat(result.Removed.Select(p => new FileChange(p, FileChangeKind.Deleted))).ToList();
             vm.RecordFileChanges(changes);
             OnFilesChanged?.Invoke(changes);
         }
-        // Every row of this turn shows its new state.
-        var fresh = CheckpointOf(vm, turn.Id);
-        foreach (var entry in vm.Entries.OfType<CheckpointEntryVM>().Where(e => e.TurnId == turn.Id)) entry.Turn = fresh;
-        var text = summary ?? result.Summary;
-        vm.Note(text);
-        Log.RecordItem(vm.Id, "notice", text);
-        CheckpointsChanged?.Invoke(vm.Id);
+        // The turn's rows show it rewound; the rewind gets its own row.
+        var updated = CheckpointOf(vm, plan.Turn.Id);
+        foreach (var entry in vm.Entries.OfType<CheckpointEntryVM>().Where(e => e.TurnId == plan.Turn.Id)) entry.Turn = updated;
+        if (recorder.Finish() is { } rewind) AddCheckpointRow(vm, rewind);
+        else CheckpointsChanged?.Invoke(vm.Id);
+        return result;
     }
 
-    /// <summary>What the model is told at its next turn: which files went back (so it reads them again rather than trusting
-    /// what it remembers).</summary>
-    public static string RewindNote(TurnCheckpoint turn, IEnumerable<string> paths, bool undone)
+    private List<string> ModelNotesFor(string sessionId)
     {
-        var names = paths.Select(p => turn.Workspace is { } root ? CheckpointRewind.Relative(root, p) : Path.GetFileName(p)).ToList();
-        var shown = string.Join(", ", names.Take(12)) + (names.Count > 12 ? $" and {names.Count - 12} more" : "");
-        var prompt = turn.Prompt.Length > 0 ? $" (“{TextUtil.Prefix(turn.Prompt, 80)}”)" : "";
-        return undone
-            ? $"[Automatic message: the person undid their rewind of an earlier turn{prompt}. These files have that turn's changes again: {shown}. Read them again before relying on what you remember of them.]"
-            : $"[Automatic message: the person rewound the file changes of an earlier turn{prompt}. These files are back to how they were before it: {shown}. Read them again before relying on what you remember of them.]";
+        if (!_modelNotes.TryGetValue(sessionId, out var notes)) _modelNotes[sessionId] = notes = [];
+        return notes;
     }
 
-    /// <summary>/rewind without a window: the chat's recent turns that changed files.</summary>
-    private void RewindCommand(SessionVM vm)
+    /// <summary>The words for the model that go in front of the next message (taken: they go once).</summary>
+    private string? TakeModelNotes(string sessionId) =>
+        _modelNotes.Remove(sessionId, out var notes) && notes.Count > 0 ? string.Join("\n\n", notes) : null;
+
+    /// <summary>/rewind: the recent turns that changed files (and the Rewind window); /rewind n asks to rewind turn n.</summary>
+    private void RewindCommand(string? argument, SessionVM vm)
     {
-        if (OnRewindCommand is not null)
-        {
-            OnRewindCommand(vm);
-            return;
-        }
-        var turns = CheckpointsOf(vm).Take(10).ToList();
-        if (turns.Count == 0)
+        var records = CheckpointsOf(vm);
+        if (records.Count == 0)
         {
             vm.Note(NothingToRewind);
             return;
         }
-        vm.Note("Recent turns that changed files (newest first):\n" + string.Join("\n", turns.Select(t =>
-            $"• {t.At.ToLocalTime():MMM d, HH:mm} — “{TextUtil.Prefix(t.Prompt, 60)}” — {t.Title}{(t.IsRewound ? " · rewound" : "")}")));
+        var root = vm.WorkspacePath;
+        if (argument is { } arg && int.TryParse(arg.Trim(), out var n))
+        {
+            if (n < 1 || n > records.Count)
+            {
+                vm.Note($"There is no turn {n} — `/rewind` lists {records.Count}.", MessageRole.Error);
+                return;
+            }
+            OnRewindCommand?.Invoke(vm, records[n - 1].Id);
+            return;
+        }
+        var lines = records.Take(10).Select((record, index) =>
+        {
+            var files = record.Changed;
+            var names = string.Join(", ", files.Take(3).Select(f => Path.GetFileName(CheckpointRewind.Display(f.Path, root))))
+                        + (files.Count > 3 ? $" +{files.Count - 3}" : "");
+            return $"{index + 1}. {record.StartedAt.ToLocalTime():HH:mm} “{record.Title}” — {files.Count} file{(files.Count == 1 ? "" : "s")} ({names})"
+                   + (record.IsRewound ? " · rewound" : "");
+        });
+        vm.Note("Recent turns that changed files (newest first):\n" + string.Join("\n", lines) +
+                "\n\n`/rewind <n>` undoes turn n's file changes (you confirm first).");
+        OnRewindCommand?.Invoke(vm, null);
     }
 
-    public const string NothingToRewind = "Nothing to rewind yet: no turn in this chat has changed files.";
+    public const string NothingToRewind =
+        "No turn in this chat has changed files yet — nothing to rewind. (Changes made by shell commands are tracked in git repositories only.)";
 
     // MARK: MCP servers
 
     private McpServerStore? _mcpStore;
     private McpManager? _mcp;
-    private readonly Dictionary<string, McpGrants> _mcpGrants = new();
 
     /// <summary>Settings › MCP Servers' list (mcp-servers.json in the data folder).</summary>
     public McpServerStore McpServers => _mcpStore ??= new McpServerStore(Path.Combine(DataFolder, McpServerStore.FileName));
@@ -197,7 +200,7 @@ public sealed partial class AgentHost
             if (_mcp is not null) return _mcp;
             _mcp = new McpManager(McpServers);
             _mcp.Changed += () => _dispatcher.BeginInvoke(DispatcherPriority.Normal, () => McpChanged?.Invoke());
-            McpServers.Changed += () => StartMcp();
+            McpServers.Changed += StartMcp;
             return _mcp;
         }
     }
@@ -213,27 +216,23 @@ public sealed partial class AgentHost
         _ = Task.Run(() => manager.SyncAsync());
     }
 
-    private McpGrants McpGrantsFor(string sessionId)
-    {
-        if (!_mcpGrants.TryGetValue(sessionId, out var grants)) _mcpGrants[sessionId] = grants = new McpGrants();
-        return grants;
-    }
-
     /// <summary>/mcp: the servers, their state and their tools, as a note.</summary>
     private void McpCommand(SessionVM vm)
     {
         var statuses = Mcp.Statuses;
         if (statuses.Count == 0)
         {
-            vm.Note("No MCP servers yet. Add one, or bring in the ones Claude Code, Claude Desktop and Cursor already have, in Settings › MCP Servers.");
+            vm.Note("No MCP servers yet. Add one, or import the ones Claude Code, Claude Desktop and Cursor already have, in Settings › MCP Servers.");
             return;
         }
         vm.Note("MCP servers:\n" + string.Join("\n", statuses.Select(s =>
         {
             var scope = s.Config.Project is { } project ? $" (only in {Path.GetFileName(project.TrimEnd('\\', '/'))})" : "";
             var applies = s.Config.AppliesTo(vm.WorkspacePath) ? "" : " — not used in this chat";
-            var tools = s.State == McpState.Connected && s.Tools.Count > 0
-                ? ": " + string.Join(", ", s.Tools.Take(12).Select(t => $"`{McpTool.NameFor(s.Config.Id, t.Name)}`")) + (s.Tools.Count > 12 ? $" and {s.Tools.Count - 12} more" : "")
+            var offered = s.Tools.Where(t => !s.Config.DisabledTools.Contains(t.Name)).ToList();
+            var tools = s.State == McpState.Connected && offered.Count > 0
+                ? $" · {offered.Count} tool{(offered.Count == 1 ? "" : "s")}: " +
+                  string.Join(", ", offered.Take(12).Select(t => $"`{McpNames.ToolName(s.Config.Name, t.Name)}`")) + (offered.Count > 12 ? $" and {offered.Count - 12} more" : "")
                 : "";
             return $"• **{s.Config.Name}**{scope} — {s.Headline}{applies}{tools}";
         })) + "\nManage them in Settings › MCP Servers.");
@@ -252,88 +251,109 @@ public sealed partial class AgentHost
         }
     }
 
-    // MARK: Sensitivity
+    // MARK: Sensitive chats
 
-    /// <summary>Whether a chat is Sensitive: its own choice, else its project's default.</summary>
-    public bool IsSensitive(SessionVM vm) => vm.Sensitive ?? Config.IsSensitiveProject(vm.WorkspacePath);
+    /// <summary>Whether the shield is switched on (Settings › AI Models › Sensitive data).</summary>
+    public bool ShieldOn => Config.Privacy.Mask;
+
+    public bool IsSensitive(SessionVM vm) => vm.Sensitive;
 
     /// <summary>Raised when a chat's sensitivity (or a project's default) changes — the header listens.</summary>
     public event Action? SensitivityChanged;
 
-    /// <summary>Mark a chat Sensitive or Standard (null = follow its project's default). Takes effect at its next turn.</summary>
-    public void SetChatSensitive(SessionVM vm, bool? sensitive)
+    /// <summary>A new chat starts Sensitive when its project (or, without one, chats without a project) is set to.</summary>
+    private void AssignInitialSensitivity(SessionVM vm)
     {
-        var before = IsSensitive(vm);
-        vm.Sensitive = sensitive;
-        Log.SetSensitive(vm.Id, sensitive);
-        var after = IsSensitive(vm);
-        if (before != after)
-        {
-            var text = after
-                ? "This chat is now Sensitive: it uses only private models (your own servers, Bedrock in your AWS account, Guardian)" +
-                  (Config.SensitiveAllowsShielded ? " or online models with every sensitive detail masked" : "") +
-                  ", never an engine that reads your files itself (Claude Code)."
-                : "This chat is now Standard: any model, with the shield's usual masking for models that aren't private.";
-            vm.Note(text);
-            Log.RecordItem(vm.Id, "notice", text);
-        }
+        vm.Sensitive = Config.IsSensitiveProject(vm.WorkspacePath);
+        Log.SetSensitive(vm.Id, vm.Sensitive);
+    }
+
+    /// <summary>Mark a chat Sensitive or not. Its engine is rebuilt at the next turn (the prompt and subagent rules change).</summary>
+    public void SetChatSensitive(SessionVM vm, bool on)
+    {
+        if (vm.Sensitive == on) return;
+        vm.Sensitive = on;
+        Log.SetSensitive(vm.Id, on);
+        var text = on
+            ? "🔒 This chat is now Sensitive. " + SensitivityPolicy.Explanation + (SensitiveRefusal(vm) is { } refusal ? "\n\n" + refusal : "")
+            : "This chat is no longer Sensitive: every model may be used, with the usual masking for models that aren't private.";
+        vm.Note(text);
+        Log.RecordItem(vm.Id, "notice", text);
         SensitivityChanged?.Invoke();
     }
 
-    /// <summary>Make <paramref name="project"/>'s chats Sensitive (or Standard) by default — every chat there that hasn't chosen.</summary>
-    public void SetProjectSensitive(string? project, bool sensitive)
+    /// <summary>Whether new chats in <paramref name="project"/> (null = without a project) start Sensitive.</summary>
+    public bool ProjectStartsSensitive(string? project) => Config.IsSensitiveProject(project);
+
+    public void SetProjectStartsSensitive(string? project, bool on)
     {
-        Config.SetSensitiveProject(project, sensitive);
+        Config.SetSensitiveProject(project, on);
         SensitivityChanged?.Invoke();
     }
 
-    /// <summary>Whether <paramref name="route"/> (default: the chat's own) may serve the chat, and how.</summary>
-    public Admission? AdmissionFor(SessionVM vm, ProviderProfile? route = null)
+    /// <summary>How the chat's model (or <paramref name="route"/>) may be used in it — null when the chat isn't Sensitive (or
+    /// has no model).</summary>
+    public RouteAdmission? AdmissionFor(SessionVM vm, ProviderProfile? route = null)
     {
-        route ??= ChatRoute(vm);
-        return route is null ? null : RouteAdmission.Admit(route, IsSensitive(vm), Config.SensitiveAllowsShielded);
+        if (!vm.Sensitive || (route ?? ChatRoute(vm)) is not { } chosen) return null;
+        return SensitivityPolicy.Admission(chosen, ShieldOn);
     }
 
-    /// <summary>Why the chat can't send on its model right now (a Sensitive chat on a route it may not use); null = it can.</summary>
-    public string? SensitiveRefusal(SessionVM vm) => AdmissionFor(vm) is { Allowed: false, Refusal: { } why } ? why : null;
+    /// <summary>Why the chat can't send right now (a Sensitive chat on a model it may not use), else null.</summary>
+    public string? SensitiveRefusal(SessionVM vm) =>
+        vm.Sensitive && ChatRoute(vm) is { } route ? SensitivityPolicy.RefusalMessage(route, ShieldOn) : null;
 
-    /// <summary>The header's policy text for a chat.</summary>
-    public string SensitivityDescription(SessionVM vm) => RouteAdmission.Describe(IsSensitive(vm), AdmissionFor(vm), Config.SensitiveAllowsShielded);
+    /// <summary>Whether a Sensitive chat may switch to <paramref name="route"/> (true for every route when it isn't Sensitive).</summary>
+    public bool SensitivityAllows(ProviderProfile route, SessionVM? vm) => vm is not { Sensitive: true } || SensitivityPolicy.Admission(route, ShieldOn).IsAllowed;
 
-    /// <summary>/sensitive [on|off|default].</summary>
+    /// <summary>The chat header's line for a Sensitive chat (null when it isn't).</summary>
+    public string? SensitivityHeader(SessionVM vm) => vm.Sensitive ? SensitivityPolicy.HeaderLine(ChatRoute(vm), ShieldOn) : null;
+
+    /// <summary>Subagents of a Sensitive chat stay on private servers while the shield is off.</summary>
+    private bool PrivateSubagentsOnly(SessionVM vm) => vm.Sensitive && SensitivityPolicy.SubagentsPrivateOnly(ShieldOn);
+
+    /// <summary>Pictures (attached, or captured by the screen tools) aren't sent from a Sensitive chat to a model that only gets
+    /// it masked: the shield can't check what is in a picture (the model gets the text read out of it instead).</summary>
+    private bool WithholdsPictures(SessionVM? vm, ProviderProfile? route) =>
+        vm is { Sensitive: true } && route is not null && SensitivityPolicy.Admission(route, ShieldOn).IsMasked;
+
+    /// <summary>/sensitive [on|off].</summary>
     private void SensitiveCommand(string? argument, SessionVM vm)
     {
         switch (argument?.Trim().ToLowerInvariant())
         {
-            case null or "":
-                var project = Config.IsSensitiveProject(vm.WorkspacePath) ? "Sensitive" : "Standard";
-                vm.Note($"This chat is **{RouteAdmission.Label(IsSensitive(vm))}**{(vm.Sensitive is null ? $" (its project's default)" : $" (its own choice; the project's default is {project})")}.\n" +
-                        SensitivityDescription(vm) + "\nChange it with `/sensitive on`, `/sensitive off` or `/sensitive default`, or the Sensitive button at the top.");
-                break;
-            case "on" or "yes" or "true" or "sensitive":
+            case "on" or "yes" or "true":
+                if (vm.Sensitive) vm.Note("This chat is already Sensitive. " + (SensitivityHeader(vm) ?? ""));
                 SetChatSensitive(vm, true);
                 break;
-            case "off" or "no" or "false" or "standard":
+            case "off" or "no" or "false":
+                if (!vm.Sensitive) vm.Note("This chat isn't Sensitive.");
                 SetChatSensitive(vm, false);
                 break;
-            case "default" or "project" or "reset" or "auto":
-                SetChatSensitive(vm, null);
-                vm.Note($"This chat follows its project's default now: {RouteAdmission.Label(IsSensitive(vm))}.");
+            case null or "":
+                vm.Note(vm.Sensitive
+                    ? (SensitivityHeader(vm) ?? "Sensitive.") + "\n\n" + SensitivityPolicy.Explanation + "\n\nTurn it off with `/sensitive off`."
+                    : "This chat isn't Sensitive: every model may be used, with what the shield detects masked for models that aren't " +
+                      "private. `/sensitive on` limits it to private models (or masked ones).");
                 break;
             default:
-                vm.Note($"Unknown setting “{argument}”. Use `/sensitive on`, `/sensitive off` or `/sensitive default`.", MessageRole.Error);
+                vm.Note("Use `/sensitive`, `/sensitive on` or `/sensitive off`.", MessageRole.Error);
                 break;
         }
     }
 
-    /// <summary>A chat's turn refused because of its sensitivity.</summary>
+    /// <summary>What the system prompt adds for a Sensitive chat (Vision for macOS's words).</summary>
+    public const string SensitivePrompt =
+        "--- Sensitive chat ---\nThe user marked this chat Sensitive: treat what you read here as confidential. Don't put it into web addresses " +
+        "(web_fetch), queue tasks, skills or anything that leaves this chat unless the user asks; give subagents only what their task needs.";
+
+    /// <summary>A chat's turn refused because it is Sensitive and its model may not see it.</summary>
     public sealed class SensitiveRouteException(string message) : Exception(message);
 
     private void ForgetPowerState(string id)
     {
         _checkpointSlots.Remove(id);
-        _rewindNotes.Remove(id);
-        _mcpGrants.Remove(id);
+        _modelNotes.Remove(id);
         try
         {
             Checkpoints.DeleteChat(id);

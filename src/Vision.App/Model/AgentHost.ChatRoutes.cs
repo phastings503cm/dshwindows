@@ -187,9 +187,8 @@ public sealed partial class AgentHost
             Id = profile.RouteId,
             Label = RouteLabel(profile),
             IsPrimary = true,
-            // In a Sensitive chat its own route is where its sensitive data may go (private, or masked through its forced shield),
-            // so its subagents — all sensitive there — may fall back to it.
-            IsPrivate = profile.IsPrivateRoute || (IsSensitive(vm) && AdmissionFor(vm, profile) is { Allowed: true }),
+            // A Sensitive chat's own route is private for its subagents when the policy says so (Guardian, Bedrock in your account).
+            IsPrivate = profile.IsPrivateRoute || AdmissionFor(vm, profile) is { IsPrivate: true },
             InteractiveOnly = profile.IsInteractiveOnly,
             MaxParallel = Math.Clamp(profile.SubagentParallel ?? 4, 1, 16),
             Resolve = _ => _dispatcher.InvokeAsync(() => ResolveHomeTargetAsync(sessionId)).Task.Unwrap(),

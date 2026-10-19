@@ -387,15 +387,11 @@ public sealed class ModelsPage : UserControl
 
         // Sensitive chats (10-19 #20): the policy a chat (or a project's chats) can be put under from the header.
         var sensitiveTitle = Ui.Text("Sensitive chats", 13.5, FontWeights.SemiBold);
-        var sensitiveExplain = Ui.Secondary(
-            "Mark a chat Sensitive (the button beside the model at the top, or /sensitive on) — or every chat of a project by default. A Sensitive " +
-            "chat uses only private models: your own servers (the Spark, Ollama, LM Studio, anything on your network), Bedrock in your AWS account, " +
-            "and Guardian. Engines that read your files themselves, like Claude Code, are never used for it. Masking is always on for it, " +
-            "whatever the switch above says.");
-        sensitiveExplain.Margin = new Thickness(0, 4, 0, 8);
-        var shielded = Ui.Check("Sensitive chats may also use online models, with every sensitive detail masked", config.SensitiveAllowsShielded,
-            on => config.SensitiveAllowsShielded = on);
-        _privacy.Children.Add(Ui.Card(Ui.Stack(sensitiveTitle, sensitiveExplain, shielded)));
+        var sensitiveExplain = Ui.Secondary(SensitivityPolicy.Explanation +
+            " Mark a chat Sensitive with the Sensitive button beside the model at the top (or /sensitive on); the same menu makes a project's " +
+            "new chats start Sensitive. While the shield above is off, a Sensitive chat can use private models only.");
+        sensitiveExplain.Margin = new Thickness(0, 4, 0, 0);
+        _privacy.Children.Add(Ui.Card(Ui.Stack(sensitiveTitle, sensitiveExplain)));
         UpdateTermProblems();
         UpdateTry();
     }

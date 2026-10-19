@@ -53,8 +53,9 @@ public sealed partial class AppModel : ObservableObject
     /// <summary>Open the setup window on "Connect a subscription plan" (optionally with a plan already chosen).</summary>
     public event Action<string?>? PlanGuideRequested;
     public event Action? MemoryRequested;
-    /// <summary>/rewind, or a turn's "Changes…": the Rewind window for a chat, at a turn and file (null = the newest).</summary>
-    public event Action<SessionVM, string?, string?>? RewindRequested;
+    /// <summary>/rewind, or a turn's "Changes…": the Rewind window for a chat, at a turn and file (null = the newest), asking to
+    /// rewind that turn when told to (/rewind n).</summary>
+    public event Action<SessionVM, string?, string?, bool>? RewindRequested;
     public event Action? ExternalImportRequested;
     public event Action? MemoriesRequested;
     public event Action? OpenClawImportRequested;
@@ -84,7 +85,7 @@ public sealed partial class AppModel : ObservableObject
                 Host.ResumeAfterServerSwitch();
         };
         Host.OnSwapCommand = (arg, vm) => _ = Spark.HandleCommandAsync(arg, vm);
-        Host.OnRewindCommand = vm => ShowRewind(vm, null, null);
+        Host.OnRewindCommand = (vm, turnId) => ShowRewind(vm, turnId, null, ask: turnId is not null);
         // The agent's file writes drive the editor's live reload.
         Host.OnFilesChanged = changes => Code.ApplyExternalChanges(changes);
         Code.ImageRequested += path => ImageRequested?.Invoke(path);
@@ -235,7 +236,7 @@ public sealed partial class AppModel : ObservableObject
     public void ShowPlanGuide(string? plan = null) => PlanGuideRequested?.Invoke(plan);
     public void ShowMemory() => MemoryRequested?.Invoke();
     /// <summary>Open the Rewind window for <paramref name="session"/> (at a turn and file, or its newest).</summary>
-    public void ShowRewind(SessionVM session, string? turnId, string? file) => RewindRequested?.Invoke(session, turnId, file);
+    public void ShowRewind(SessionVM session, string? turnId, string? file, bool ask) => RewindRequested?.Invoke(session, turnId, file, ask);
     /// <summary>Open "Bring in Claude Code &amp; Cursor".</summary>
     public void ShowExternalImport() => ExternalImportRequested?.Invoke();
     /// <summary>Open the remembered-notes manager.</summary>

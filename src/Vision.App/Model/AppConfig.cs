@@ -107,10 +107,7 @@ public sealed partial class AppConfig : ObservableObject
 
     /// <summary>The sensitive-data shield's settings.</summary>
     [ObservableProperty] private PrivacySettings _privacy = PrivacySettings.Default;
-    /// <summary>Sensitive chats may use online models with every sensitive detail masked (on, the default); off = private
-    /// models only (see <see cref="RouteAdmission"/>).</summary>
-    [ObservableProperty] private bool _sensitiveAllowsShielded = true;
-    /// <summary>Project folders whose chats are Sensitive by default ("" = chats without a project).</summary>
+    /// <summary>Project folders whose new chats start Sensitive ("" = chats without a project; see SensitivityPolicy).</summary>
     public HashSet<string> SensitiveProjects { get; } = new(StringComparer.OrdinalIgnoreCase);
 
     [ObservableProperty] private double _sidebarWidth = 260;
@@ -332,7 +329,7 @@ public sealed partial class AppConfig : ObservableObject
 
     // MARK: - Sensitive projects
 
-    /// <summary>Whether chats in <paramref name="project"/> (null = without a project) are Sensitive by default.</summary>
+    /// <summary>Whether new chats in <paramref name="project"/> (null = without a project) start Sensitive.</summary>
     public bool IsSensitiveProject(string? project) => SensitiveProjects.Contains(ProjectKey(project));
 
     public void SetSensitiveProject(string? project, bool sensitive)
@@ -568,7 +565,6 @@ public sealed partial class AppConfig : ObservableObject
         public bool? SubagentsUsePrimary { get; set; }
         public List<SwapperConnection>? SwapperConnections { get; set; }
         public StoredPrivacy? Privacy { get; set; }
-        public bool? SensitiveAllowsShielded { get; set; }
         public List<string>? SensitiveProjects { get; set; }
         /// <summary>Legacy: Bedrock routes DSH saved without a profile have been given DSH's profile by name
         /// (<see cref="AwsSignIn.PinLegacyDefaultProfile"/>); done once.</summary>
@@ -631,7 +627,6 @@ public sealed partial class AppConfig : ObservableObject
             MemoryEnabled = stored?.MemoryEnabled ?? true;
             SubagentsUsePrimary = stored?.SubagentsUsePrimary ?? true;
             Privacy = ReadPrivacy(stored?.Privacy, out migratePrivacy);
-            SensitiveAllowsShielded = stored?.SensitiveAllowsShielded ?? true;
             foreach (var project in stored?.SensitiveProjects ?? []) SensitiveProjects.Add(project);
             // Legacy: settings DSH (the app's former name) wrote. New settings have nothing to pin, and must not be pinned later.
             pinAwsProfile = stored is not null && stored.LegacyAwsProfilePinned != true;
@@ -796,7 +791,6 @@ public sealed partial class AppConfig : ObservableObject
             SubagentsUsePrimary = SubagentsUsePrimary,
             SwapperConnections = SwapperConnections.Select(c => c.DeepCopy()).ToList(),
             Privacy = WritePrivacy(Privacy),
-            SensitiveAllowsShielded = SensitiveAllowsShielded ? null : false,
             SensitiveProjects = SensitiveProjects.Count == 0 ? null : SensitiveProjects.OrderBy(s => s, StringComparer.Ordinal).ToList(),
             LegacyAwsProfilePinned = true,
         };
