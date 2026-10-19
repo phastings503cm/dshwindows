@@ -167,6 +167,16 @@ public sealed class ClaudeCodeReviewTests
         Assert.Equal((recap, "AKIAIOSFODNN7EXAMPLE"), (off.Recap, off.Message));
         var clean = ClaudeCodeShield.Mask("[Earlier] hello", "hi", [], shield);
         Assert.Equal("[Earlier] hello", clean.Recap);
+
+        // A recap with no secret in it is still masked for everything else (a map looks at a text only once).
+        var plain = ClaudeCodeRecap.Build([LlmMessage.User("my address is pat@example.com"), LlmMessage.Assistant("noted")])!;
+        var onlyEmail = ClaudeCodeShield.Mask(plain, "carry on with AKIAIOSFODNN7EXAMPLE", [], shield);
+        Assert.StartsWith(ClaudeCodeRecap.Header + "\n" + ClaudeCodeShield.RecapNote, onlyEmail.Recap);
+        Assert.Contains(SensitiveKinds.Placeholder(SensitiveKind.Email, 1), onlyEmail.Recap);
+        Assert.DoesNotContain("pat@example.com", onlyEmail.Recap);
+        Assert.Equal("carry on with " + SensitiveKinds.Placeholder(SensitiveKind.Secret, 1), onlyEmail.Message);
+        Assert.Equal(1, onlyEmail.Counts[SensitiveKind.Secret]);
+        Assert.Equal(1, onlyEmail.Counts[SensitiveKind.Email]);
     }
 
     // MARK: Attachments

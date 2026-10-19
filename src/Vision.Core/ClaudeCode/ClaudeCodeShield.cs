@@ -40,19 +40,24 @@ public static class ClaudeCodeShield
         foreach (var part in parts.OfType<AttachmentWirePart.Text>()) map.Collect(part.Value, secrets);
         var maskedMessage = map.Replace(message);
         var maskedParts = parts.Select(p => p is AttachmentWirePart.Text t ? new AttachmentWirePart.Text(map.Replace(t.Value)) : p).ToList();
-        // …then everything else the shield masks, in the recap only.
+        var counts = map.Counts;
+        // …then everything else the shield masks, in the recap only — with a map of its own (a map looks at a text once, and
+        // the recap was looked at for secrets), seeded with the secrets' placeholders so the numbering carries on.
         string? maskedRecap = null;
         if (recap is not null)
         {
-            var secretsOut = map.Replace(recap);
-            map.Collect(secretsOut, shield.Detector);
-            var full = map.Replace(secretsOut);
-            maskedRecap = full == recap ? recap
-                : full.StartsWith(ClaudeCodeRecap.Header, StringComparison.Ordinal)
-                    ? ClaudeCodeRecap.Header + "\n" + RecapNote + full[ClaudeCodeRecap.Header.Length..]
-                    : RecapNote + "\n\n" + full;
+            var full = new ShieldMap();
+            foreach (var (kind, count) in map.Counts.OrderBy(c => c.Key))
+                for (var n = 1; n <= count; n++)
+                    if (map.ValueOf(SensitiveKinds.Placeholder(kind, n)) is { } value) full.CollectValue(kind, value);
+            full.Collect(recap, shield.Detector);
+            var masked = full.Replace(recap);
+            counts = full.Counts;
+            maskedRecap = masked == recap ? recap
+                : masked.StartsWith(ClaudeCodeRecap.Header, StringComparison.Ordinal)
+                    ? ClaudeCodeRecap.Header + "\n" + RecapNote + masked[ClaudeCodeRecap.Header.Length..]
+                    : RecapNote + "\n\n" + masked;
         }
-        return new Masked(maskedRecap, maskedMessage, maskedParts,
-            map.Counts.Where(c => c.Value > 0).ToDictionary(c => c.Key, c => c.Value), notChecked);
+        return new Masked(maskedRecap, maskedMessage, maskedParts, counts.Where(c => c.Value > 0).ToDictionary(c => c.Key, c => c.Value), notChecked);
     }
 }
