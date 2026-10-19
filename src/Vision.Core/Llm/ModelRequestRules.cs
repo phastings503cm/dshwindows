@@ -139,6 +139,11 @@ public sealed partial record ModelRequestRules
     /// tools — DeepSeek answers 400 "The `reasoning_content` in the thinking mode must be passed back to the API" otherwise.</summary>
     public bool EchoReasoningEveryTurn { get; init; }
 
+    /// <summary>Whether these rules already make <paramref name="change"/> (DeepSeek's own API echoes reasoning every turn:
+    /// its refusal there teaches nothing).</summary>
+    public bool Already(RequestChange change) =>
+        change is RequestChange.EchoReasoning echo && (echo.EveryTurn ? EchoReasoning && EchoReasoningEveryTurn : EchoReasoning);
+
     /// <summary>Thinking is switched off for <paramref name="level"/> by <c>thinking.type: "disabled"</c> (a toggle, or an effort
     /// vocabulary with a toggle beside it).</summary>
     public bool TurnsThinkingOff(ThinkingLevel? level) =>

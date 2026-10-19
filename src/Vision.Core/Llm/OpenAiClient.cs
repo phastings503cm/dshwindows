@@ -396,7 +396,7 @@ public sealed partial class OpenAiClient : IProviderClient
                 var key = AdaptationKey(request);
                 if (adapted < MaxAdaptations
                     && ParameterRejection.Change(code, body, RequestBody.Keys(bodyObject)) is { } change
-                    && _adaptations.Adaptation(key)?.Contains(change) != true)
+                    && _adaptations.Adaptation(key)?.Contains(change) != true && !RulesFor(request).Already(change))
                 {
                     _adaptations.Learn(change, key);
                     var provider = KnownProviders.Of(Profile);
@@ -759,6 +759,8 @@ public sealed partial class OpenAiClient : IProviderClient
         var rules = RulesFor(request);
         var learned = _adaptations.Adaptation(AdaptationKey(request));
         var echo = rules.EchoReasoning || learned?.EchoReasoning == true;
+        // DeepSeek (its own API, or behind a proxy where its 400 taught it): every assistant message, not only tool calls.
+        var everyTurn = rules.EchoReasoningEveryTurn || learned?.EchoReasoningEveryTurn == true;
         // A stand-in is only needed while the model thinks (K2.6 or DeepSeek with thinking switched off wants none).
         var thinkingOff = rules.TurnsThinkingOff(ThinkingLevelFor(request));
         var messages = new JsonArray();
@@ -803,7 +805,7 @@ public sealed partial class OpenAiClient : IProviderClient
                     if (echo)
                     {
                         if (ReasoningEcho.Reasoning(m.ProviderState) is { } reasoning) msg["reasoning_content"] = reasoning;
-                        else if ((m.ToolCalls is { Count: > 0 } || rules.EchoReasoningEveryTurn) && !thinkingOff) msg["reasoning_content"] = ReasoningEcho.Placeholder;
+                        else if ((m.ToolCalls is { Count: > 0 } || everyTurn) && !thinkingOff) msg["reasoning_content"] = ReasoningEcho.Placeholder;
                     }
                     messages.Add(msg);
                     break;

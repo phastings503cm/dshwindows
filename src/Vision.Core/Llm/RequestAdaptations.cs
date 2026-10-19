@@ -23,17 +23,21 @@ public abstract record RequestChange
     public sealed record Rename(string From, string To) : RequestChange;
     /// <summary>The server refused a parameter without naming it: send only the basics (model, messages, stream, tools).</summary>
     public sealed record Minimal : RequestChange;
-    /// <summary>The server wants the model's reasoning back on assistant messages that called tools (reasoning_content).</summary>
-    public sealed record EchoReasoning : RequestChange;
+    /// <summary>The server wants the model's reasoning back on assistant messages that called tools (reasoning_content) — or,
+    /// <paramref name="EveryTurn"/>, on every assistant message (DeepSeek's rule, served behind a proxy).</summary>
+    public sealed record EchoReasoning(bool EveryTurn = false) : RequestChange;
 }
 
-/// <summary>What was learned for one server and model (stored as JSON: dropped, renamed, minimal, echoReasoning, learnedAt).</summary>
+/// <summary>What was learned for one server and model (stored as JSON: dropped, renamed, minimal, echoReasoning,
+/// echoReasoningEveryTurn, learnedAt).</summary>
 public sealed class RequestAdaptation
 {
     public List<string> Dropped { get; set; } = [];
     public Dictionary<string, string> Renamed { get; set; } = new(StringComparer.Ordinal);
     public bool Minimal { get; set; }
     public bool EchoReasoning { get; set; }
+    /// <summary>With <see cref="EchoReasoning"/>: on every assistant message, not only the ones that called tools.</summary>
+    public bool EchoReasoningEveryTurn { get; set; }
     public DateTimeOffset LearnedAt { get; set; } = DateTimeOffset.Now;
 
     [JsonIgnore] public bool IsEmpty => Dropped.Count == 0 && Renamed.Count == 0 && !Minimal && !EchoReasoning;
@@ -44,7 +48,7 @@ public sealed class RequestAdaptation
         RequestChange.Drop drop => Dropped.Contains(drop.Key) || (Minimal && RequestBody.OptionalKeys.Contains(drop.Key)),
         RequestChange.Rename rename => Renamed.GetValueOrDefault(rename.From) == rename.To,
         RequestChange.Minimal => Minimal,
-        RequestChange.EchoReasoning => EchoReasoning,
+        RequestChange.EchoReasoning echo => echo.EveryTurn ? EchoReasoningEveryTurn : EchoReasoning,
         _ => false,
     };
 
@@ -61,8 +65,9 @@ public sealed class RequestAdaptation
             case RequestChange.Minimal:
                 Minimal = true;
                 break;
-            case RequestChange.EchoReasoning:
+            case RequestChange.EchoReasoning echo:
                 EchoReasoning = true;
+                if (echo.EveryTurn) EchoReasoningEveryTurn = true;
                 break;
         }
         LearnedAt = DateTimeOffset.Now;
@@ -71,7 +76,7 @@ public sealed class RequestAdaptation
     internal RequestAdaptation Copy() => new()
     {
         Dropped = [.. Dropped], Renamed = new Dictionary<string, string>(Renamed, StringComparer.Ordinal), Minimal = Minimal,
-        EchoReasoning = EchoReasoning, LearnedAt = LearnedAt,
+        EchoReasoning = EchoReasoning, EchoReasoningEveryTurn = EchoReasoningEveryTurn, LearnedAt = LearnedAt,
     };
 
     /// <summary>In a sentence, for Settings: "no `temperature`, `thinking`; `max_completion_tokens` instead of `max_tokens`".</summary>
@@ -84,7 +89,8 @@ public sealed class RequestAdaptation
             if (Minimal) parts.Add("only the basic settings");
             if (Dropped.Count > 0) parts.Add("no " + string.Join(", ", Dropped.Select(d => $"`{d}`")));
             foreach (var (from, to) in Renamed.OrderBy(r => r.Key, StringComparer.Ordinal)) parts.Add($"`{to}` instead of `{from}`");
-            if (EchoReasoning) parts.Add("its reasoning sent back with tool calls");
+            if (EchoReasoningEveryTurn) parts.Add("its reasoning sent back with every reply");
+            else if (EchoReasoning) parts.Add("its reasoning sent back with tool calls");
             return string.Join("; ", parts);
         }
     }
@@ -185,11 +191,12 @@ public static partial class ParameterRejection
         if (status is not (400 or 422)) return null;
         var lower = Text(body).ToLowerInvariant();
 
-        // Kimi: "thinking is enabled but reasoning_content is missing" (an assistant tool-call message without it); DeepSeek
-        // served elsewhere: "The `reasoning_content` in the thinking mode must be passed back to the API."
+        // DeepSeek served elsewhere (a proxy, a router): "The `reasoning_content` in the thinking mode must be passed back to
+        // the API." — with tools, DeepSeek wants it on every earlier assistant message, not only the ones that called tools.
+        if (DeepSeekErrors.WantsReasoningBack(body)) return new RequestChange.EchoReasoning(EveryTurn: true);
+        // Kimi: "thinking is enabled but reasoning_content is missing" (an assistant tool-call message without it).
         if (lower.Contains("reasoning_content", StringComparison.Ordinal)
-            && (lower.Contains("missing", StringComparison.Ordinal) || lower.Contains("required", StringComparison.Ordinal)
-                || lower.Contains("passed back", StringComparison.Ordinal)))
+            && (lower.Contains("missing", StringComparison.Ordinal) || lower.Contains("required", StringComparison.Ordinal)))
             return new RequestChange.EchoReasoning();
         // Structured errors name the parameter: OpenAI's {"error":{"param":"max_tokens"}}, FastAPI/vLLM's
         // {"detail":[{"loc":["body","chat_template_kwargs"]}]}.
@@ -344,6 +351,8 @@ public static partial class ParameterRejection
             RequestChange.Drop drop => $"{who} doesn't take `{drop.Key.Split('.')[^1]}` — Vision stopped sending it for this model and carried on.",
             RequestChange.Rename rename => $"{who} wants `{rename.To}` instead of `{rename.From}` — Vision switched and carried on.",
             RequestChange.Minimal => $"{who} refused one of Vision's optional settings without saying which — Vision now sends only the basics to this model.",
+            RequestChange.EchoReasoning { EveryTurn: true } =>
+                $"{who} wants the model's reasoning sent back with every reply — Vision now does that for this model.",
             _ => $"{who} wants the model's reasoning sent back with its tool calls — Vision now does that for this model.",
         };
     }

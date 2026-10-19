@@ -168,14 +168,55 @@ public sealed class DeepSeekTests
         Assert.IsType<RetryDisposition.UntilAvailable>(RequestRetry.Disposition(slow));
     }
 
-    /// <summary>DeepSeek's reasoning refusal served somewhere Vision doesn't know (a proxy, a router) turns the echo on there.</summary>
+    /// <summary>DeepSeek's reasoning refusal served somewhere Vision doesn't know (a proxy, a router) turns the echo on there —
+    /// on every earlier assistant message, as DeepSeek wants it, so a plain reply from before the lesson (its reasoning never
+    /// kept) gets the stand-in too and the retry goes through; reasoning is kept from then on. (The one-turn thinking-off
+    /// retry stays DeepSeek's own API's: elsewhere Vision has no sure way to switch DeepSeek's thinking off.)</summary>
     [Fact]
-    public void ADeepSeekReasoningRefusalElsewhereTurnsTheEchoOn()
+    public async Task ADeepSeekReasoningRefusalElsewhereTurnsTheEchoOnForEveryTurn()
     {
         Assert.True(DeepSeekErrors.WantsReasoningBack(ReasoningMissing));
         Assert.False(DeepSeekErrors.WantsReasoningBack(NoBalance));
-        Assert.Equal(new RequestChange.EchoReasoning(),
+        Assert.Equal(new RequestChange.EchoReasoning(EveryTurn: true),
             ParameterRejection.Change(400, ReasoningMissing, new HashSet<string> { "model", "messages", "stream", "tools" }));
+
+        var store = new RequestAdaptationStore();
+        var calls = 0;
+        var handler = new FakeHttpHandler(_ => Interlocked.Increment(ref calls) == 1
+            ? FakeHttpHandler.Json(ReasoningMissing, HttpStatusCode.BadRequest)
+            : FakeHttpHandler.Sse("""{"choices":[{"delta":{"reasoning_content":"Next step."}}]}""",
+                                  """{"choices":[{"delta":{"content":"ok"},"finish_reason":"stop"}]}"""));
+        var notices = new List<string>();
+        var proxy = new ProviderProfile(ProviderKind.OpenAICompat, "Router", "https://llm-router.example.com/v1", "deepseek/deepseek-v4-pro");
+        var client = new OpenAiClient(proxy, handler, store, notices.Add);
+        var request = new LlmRequest("", [LlmMessage.User("hi"), LlmMessage.Assistant("Hello."), LlmMessage.User("next")], [],
+            proxy.Model, Thinking: ThinkingLevel.High);
+        var events = new List<LlmStreamEvent>();
+        await foreach (var e in client.StreamAsync(request)) events.Add(e);
+        Assert.Equal(2, handler.Requests.Count);
+        Assert.Null(JsonNode.Parse(handler.Requests[0].Body)!["messages"]![1]!["reasoning_content"]);
+        Assert.Equal(ReasoningEcho.Placeholder, JsonNode.Parse(handler.Requests[1].Body)!["messages"]![1]!["reasoning_content"]!.GetValue<string>());
+        var learned = store.Adaptation(RequestAdaptationStore.Key(proxy.BaseUrl, proxy.Model))!;
+        Assert.True(learned.EchoReasoning && learned.EchoReasoningEveryTurn);
+        Assert.Equal("its reasoning sent back with every reply", learned.Summary);
+        Assert.Equal("Router (deepseek/deepseek-v4-pro) wants the model's reasoning sent back with every reply — Vision now does that for this model.",
+            Assert.Single(notices));
+        Assert.Equal("Next step.", ReasoningEcho.Reasoning(events.OfType<LlmStreamEvent.Done>().Single().ProviderState));
+
+        // On DeepSeek's own API the rules already send it every turn: the same refusal after the thinking-off retry teaches
+        // nothing (no lesson, no second line) and is said in DeepSeek's words.
+        var own = new RequestAdaptationStore();
+        var refused = new FakeHttpHandler(_ => FakeHttpHandler.Json(ReasoningMissing, HttpStatusCode.BadRequest));
+        var ownNotices = new List<string>();
+        var ownClient = new OpenAiClient(Route(), refused, own, ownNotices.Add);
+        await Assert.ThrowsAsync<LlmException>(async () =>
+        {
+            await foreach (var _ in ownClient.StreamAsync(new LlmRequest("", [LlmMessage.User("hi"), LlmMessage.Assistant("Hello."), LlmMessage.User("next")],
+                               [], "deepseek-v4-pro", Thinking: ThinkingLevel.High))) { }
+        });
+        Assert.Equal(2, refused.Requests.Count);
+        Assert.Null(own.Adaptation(RequestAdaptationStore.Key(Api, "deepseek-v4-pro")));
+        Assert.Equal(DeepSeekErrors.ReasoningRetryNotice, Assert.Single(ownNotices));
     }
 
     // MARK: The plan guide
