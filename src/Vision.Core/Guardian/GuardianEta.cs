@@ -151,7 +151,9 @@ public sealed class GuardianEtaClient
             {
                 ["text"] = record.Text,
                 ["at"] = record.At.ToUniversalTime().ToString("yyyy-MM-dd'T'HH:mm:ss.fff'Z'", System.Globalization.CultureInfo.InvariantCulture),
-                ["source"] = record.Source.RawValue(),
+                // The contract's source is the harness ("vision-mac", "vision-windows"); how it was sent (typed, /goal, a
+                // task) stays on this PC's timeline.
+                ["source"] = Harness,
                 ["chatId"] = record.ChatId,
             };
             if (NotebookOutcome(record.Outcome) is { } outcome) item["outcome"] = outcome;

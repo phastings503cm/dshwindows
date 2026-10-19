@@ -301,9 +301,14 @@ public sealed partial class AgentHost
 
     private bool _etaSynced;
 
-    /// <summary>The Guardian a route through Guardian's model proxy points at, with its key — null when no route does.</summary>
+    /// <summary>The signed-in Guardian account (Settings › Guardian), when there is one. Set by the app's Guardian service.</summary>
+    public Func<GuardianEndpoint?>? GuardianAccount { get; set; }
+
+    /// <summary>Where prompt history and shared ETAs go: the signed-in account, else the Guardian a route through Guardian's
+    /// model proxy points at, with its key — null when neither.</summary>
     private GuardianEndpoint? GuardianEndpointNow()
     {
+        if (GuardianAccount?.Invoke() is { } account) return account;
         foreach (var route in Config.Providers.Where(p => p.IsEnabled))
         {
             if (!route.BaseUrl.Contains(GuardianEndpoint.HarnessPath, StringComparison.OrdinalIgnoreCase)) continue;
@@ -523,8 +528,9 @@ public sealed partial class AgentHost
     private const int MaxRecordEvidence = 8;
     private const int MaxEvidenceDetail = 400;
 
-    /// <summary>With a route through Guardian: the prompt goes to the account's prompt history (Guardian's Prompt Notebook) —
-    /// when it starts and again when it ends, which Guardian keeps as one row. Silent on failure.</summary>
+    /// <summary>Signed in to Guardian, or with a route through it: the prompt goes to the account's prompt history (Guardian's
+    /// Prompt Notebook) — when it starts and again when it ends, with the same text and time, which Guardian keeps as one
+    /// row. Silent on failure: the timeline file has it.</summary>
     private void PushPrompt(SessionVM vm, PromptRecord record)
     {
         if (GuardianEta() is not { } client) return;

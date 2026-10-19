@@ -192,12 +192,8 @@ public sealed partial class AppModel : ObservableObject
         return session;
     }
 
-    public void Send(string text, SessionVM session, IReadOnlyList<MessageAttachment>? attachments = null)
-    {
-        var wasRunning = session.Running;
+    public void Send(string text, SessionVM session, IReadOnlyList<MessageAttachment>? attachments = null) =>
         Host.Send(text, session.Id, attachments);
-        SyncPrompt(session, text, wasRunning);
-    }
 
     // MARK: - Stopping
 

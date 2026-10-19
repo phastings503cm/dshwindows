@@ -111,7 +111,7 @@ public sealed class GuardianEtaTests
         Assert.Equal("completed with issues", GuardianEtaClient.NotebookOutcome(PromptOutcome.Issues));
         Assert.Equal("needs you", GuardianEtaClient.NotebookOutcome(PromptOutcome.NeedsYou));
         Assert.Null(GuardianEtaClient.NotebookOutcome(PromptOutcome.Running)); // the start push carries none
-        Assert.Equal(("Fix the parser", "2026-10-18T09:00:00.000Z", "completed", "goal", "c1", "Parser work", "inventory", "qwen3", 90.0, "t1"),
+        Assert.Equal(("Fix the parser", "2026-10-18T09:00:00.000Z", "completed", "vision-windows", "c1", "Parser work", "inventory", "qwen3", 90.0, "t1"),
             ((string)prompt["text"]!, (string)prompt["at"]!, (string)prompt["outcome"]!, (string)prompt["source"]!, (string)prompt["chatId"]!,
              (string)prompt["chatTitle"]!, (string)prompt["project"]!, (string)prompt["model"]!, (double)prompt["durationSeconds"]!, (string)prompt["runId"]!));
     }

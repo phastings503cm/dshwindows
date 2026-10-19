@@ -18,7 +18,7 @@ public sealed class GuardianSerial
 }
 
 /// <summary>The app's Guardian connection against a scripted Guardian: sign-in (password, 2FA, browser), the token as every
-/// Guardian route's key, org switching, sign-out, prompt sync with the outcome, and refusals shown once.</summary>
+/// Guardian route's key, org switching, sign-out, prompt sync with the outcome (through the host), and refusals shown once.</summary>
 [Collection(GuardianSerial.Name)]
 public sealed class GuardianServiceTests : IDisposable
 {
@@ -198,40 +198,83 @@ public sealed class GuardianServiceTests : IDisposable
         Assert.Equal(("https://guardian.example.test", "pat@503cm.com"), guardian.Remembered());
     });
 
-    [Fact]
-    public void APromptGoesToTheNotebookOnSubmitAndAgainWithHowItEnded() => UiThread.Run(async () =>
+    /// <summary>Guardian's routes to the scripted Guardian, everything else to the fake model server.</summary>
+    private sealed class Split(HttpMessageHandler guardian, HttpMessageHandler model) : HttpMessageHandler
     {
-        var (_, host, guardian, fake) = Make();
-        await guardian.SignInAsync("https://guardian.example.test", "pat@503cm.com", "pw");
-        var vm = host.NewSession(null);
-        vm.Title = "Inventory";
+        private readonly HttpMessageInvoker _guardian = new(guardian, disposeHandler: false);
+        private readonly HttpMessageInvoker _model = new(model, disposeHandler: false);
 
-        guardian.PromptSubmitted(vm, "Fix the failing test");
-        vm.Running = true;
-        await WaitUntil("the prompt went up", () => fake.Prompts().Count == 1);
-        vm.Entries.Add(new MessageEntryVM(MessageRole.Error, "The model server replied 500"));
-        vm.Running = false;
-        await WaitUntil("the outcome went up", () => fake.Prompts().Count == 2);
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken) =>
+            (request.RequestUri!.AbsolutePath.StartsWith("/api/", StringComparison.Ordinal) ? _guardian : _model).SendAsync(request, cancellationToken);
+    }
 
-        var (first, second) = (fake.Prompts()[0], fake.Prompts()[1]);
-        Assert.Equal("Fix the failing test", first["text"]!.GetValue<string>());
-        Assert.Equal("vision-windows", first["source"]!.GetValue<string>());
-        Assert.Equal(vm.Id, first["chatId"]!.GetValue<string>());
-        Assert.Null(first["outcome"]);
-        // Same text and time: Guardian updates the row it has.
-        Assert.Equal(first["at"]!.GetValue<string>(), second["at"]!.GetValue<string>());
-        Assert.Equal("failed", second["outcome"]!.GetValue<string>());
-        Assert.NotNull(second["durationSeconds"]);
+    /// <summary>A chat on a model server of its own (not Guardian's), with the fake model answering.</summary>
+    private static SessionVM ChatOnOwnServer(AppConfig config, AgentHost host, FakeGuardian fake, FakeModelServer model)
+    {
+        config.Activate(new ProviderProfile(ProviderKind.OpenAICompat, "stub", "http://stub.test/v1", "stub-model"));
+        config.Preset = PermissionPreset.FullAccess.RawValue();
+        config.ComputerToolsEnabled = false;
+        model.Reset((_, _) => new FakeReply.Text("Done."));
+        host.HttpHandlerForTesting = new Split(fake, model);
+        return host.NewSession(null);
+    }
+
+    [Fact]
+    public void APromptGoesToTheAccountsNotebookWhenItStartsAndAgainWithHowItEnded() => UiThread.Run(async () =>
+    {
+        var (config, host, guardian, fake) = Make();
+        var model = new FakeModelServer();
+        try
+        {
+            await guardian.SignInAsync("https://guardian.example.test", "pat@503cm.com", "pw");
+            var vm = ChatOnOwnServer(config, host, fake, model);
+            vm.Title = "Inventory";
+
+            // Signed in, a chat on any model: the prompt reaches the notebook once from the chat's timeline (one row).
+            host.Send("Fix the failing test", vm.Id);
+            await WaitUntil("the prompt and its ending went up", () => fake.Prompts().Count(p => p["outcome"] is not null) == 1);
+            var prompts = fake.Prompts();
+            Assert.Equal(2, prompts.Count);
+            var (first, second) = (prompts[0], prompts[1]);
+            Assert.Equal("Fix the failing test", first["text"]!.GetValue<string>());
+            Assert.Equal("vision-windows", first["source"]!.GetValue<string>());
+            Assert.Equal(vm.Id, first["chatId"]!.GetValue<string>());
+            Assert.Null(first["outcome"]);
+            // Same text and time: Guardian updates the row it has.
+            Assert.Equal(first["at"]!.GetValue<string>(), second["at"]!.GetValue<string>());
+            Assert.Equal("completed", second["outcome"]!.GetValue<string>());
+            Assert.Equal("stub-model", second["model"]!.GetValue<string>());
+            Assert.NotNull(second["durationSeconds"]);
+            // With the account's token and org.
+            (string Method, string Path, string Body, Dictionary<string, string> Headers) sent;
+            lock (fake.Requests) sent = fake.Requests.First(r => r.Path == "/api/harness/prompts");
+            Assert.Equal("Bearer tok-pw", sent.Headers["Authorization"]);
+        }
+        finally
+        {
+            host.StopAll();
+            await Task.Delay(50);
+        }
     });
 
     [Fact]
     public void NotSignedInNothingIsSent() => UiThread.Run(async () =>
     {
-        var (_, host, guardian, fake) = Make();
-        var vm = host.NewSession(null);
-        guardian.PromptSubmitted(vm, "hello");
-        await Task.Delay(100);
-        Assert.Empty(fake.Requests);
+        var (config, host, _, fake) = Make();
+        var model = new FakeModelServer();
+        try
+        {
+            var vm = ChatOnOwnServer(config, host, fake, model);
+            host.Send("hello", vm.Id);
+            await WaitUntil("the turn ended", () => vm.PromptHistory.Count == 1 && vm.PromptHistory[0].Outcome != PromptOutcome.Running);
+            await Task.Delay(100);
+            lock (fake.Requests) Assert.Empty(fake.Requests);
+        }
+        finally
+        {
+            host.StopAll();
+            await Task.Delay(50);
+        }
     });
 
     [Fact]
@@ -246,19 +289,6 @@ public sealed class GuardianServiceTests : IDisposable
         guardian.Report(GuardianError.FromResponse(403, """{"error":"forbidden","status":403,"reason":"module_disabled","needed":"files","message":"No files"}"""));
         guardian.Report(GuardianError.FromResponse(500, "{}")); // not a refusal: the page's status line says it
         Assert.Equal(["Over budget", "No files"], shown.Select(e => e.Message));
-        await Task.CompletedTask;
-    });
-
-    [Fact]
-    public void OutcomesUseTheMacsWords() => UiThread.Run(async () =>
-    {
-        var vm = new SessionVM("s", "t", null, PermissionPreset.WorkspaceWrite);
-        Assert.Equal("completed", GuardianService.Outcome(vm));
-        vm.BlockedGoal = "ship it";
-        Assert.Equal("needs you", GuardianService.Outcome(vm));
-        vm.BlockedGoal = null;
-        vm.Stopping = true;
-        Assert.Equal("stopped", GuardianService.Outcome(vm));
         await Task.CompletedTask;
     });
 }

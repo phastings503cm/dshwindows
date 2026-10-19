@@ -10,7 +10,7 @@ using Vision.Core;
 namespace Vision.App.Model;
 
 /// <summary>The app's Guardian connection (one per app): the sign-in and its token, the account's identity, orgs, limits
-/// and models, the routes through its proxy, prompt sync on submit, and the Settings › Guardian actions. Every refusal
+/// and models, the routes through its proxy, the account the host's prompt sync uses, and the Settings › Guardian actions. Every refusal
 /// Guardian sends (401/403/402/429) is shown as a dialog naming what is missing or which limit was reached
 /// (<see cref="Refused"/>); the page shows the rest as a status line.</summary>
 public sealed partial class GuardianService : ObservableObject
@@ -61,6 +61,8 @@ public sealed partial class GuardianService : ObservableObject
             }
         }
         GuardianProxyRefusals.Reported += OnProxyRefusal;
+        // Prompt history and the shared ETAs go to the signed-in account, whether or not a chat uses Guardian's models.
+        host.GuardianAccount = AccountEndpoint;
     }
 
     public bool IsSignedIn => Client is not null;
@@ -363,61 +365,15 @@ public sealed partial class GuardianService : ObservableObject
         }
     }
 
-    // MARK: - Prompt sync (on submit, then the outcome)
+    // MARK: - Prompt sync
+    //
+    // The host pushes every prompt (typed, /goal, a skill, a task) to the account's notebook when it starts and again with
+    // how it ended, from the chat's Prompts timeline (AgentHost.Runs: PushPrompt), so there is one row per prompt. It
+    // finds the account through AgentHost.GuardianAccount, which this service answers.
 
-    private sealed record Pending(GuardianPrompt Prompt, DateTimeOffset Started);
-    private readonly Dictionary<string, Pending> _pending = new(StringComparer.Ordinal);
-
-    /// <summary>A prompt the person sent in a chat: it goes to Guardian's notebook now, and again with how the turn ended.</summary>
-    public void PromptSubmitted(SessionVM vm, string text)
-    {
-        if (Client is not { } client || string.IsNullOrWhiteSpace(text)) return;
-        var prompt = new GuardianPrompt(text, DateTimeOffset.Now)
-        {
-            ChatId = vm.Id,
-            ChatTitle = vm.Title,
-            Project = vm.ProjectName,
-            Model = _config.ActiveProvider?.Model,
-        };
-        _ = Push(client, prompt);
-        if (_pending.Remove(vm.Id, out _)) { /* an older turn's outcome is no longer coming */ }
-        _pending[vm.Id] = new Pending(prompt, DateTimeOffset.Now);
-        vm.PropertyChanged -= OnSessionChanged;
-        vm.PropertyChanged += OnSessionChanged;
-    }
-
-    private void OnSessionChanged(object? sender, PropertyChangedEventArgs e)
-    {
-        if (sender is not SessionVM vm || e.PropertyName != nameof(SessionVM.Running) || vm.Running) return;
-        if (!_pending.Remove(vm.Id, out var pending) || Client is not { } client) return;
-        var outcome = Outcome(vm);
-        _ = Push(client, pending.Prompt with { Outcome = outcome, DurationSeconds = (DateTimeOffset.Now - pending.Started).TotalSeconds, ChatTitle = vm.Title });
-    }
-
-    /// <summary>How a turn ended, in the Mac's words: "completed", "needs you", "failed", "stopped".</summary>
-    public static string Outcome(SessionVM vm)
-    {
-        if (vm.Stopping) return "stopped";
-        if (vm.BlockedGoal is not null || vm.PendingGates.Count > 0) return "needs you";
-        if (vm.Entries.LastOrDefault() is MessageEntryVM { Role: MessageRole.Error }) return "failed";
-        return "completed";
-    }
-
-    private async Task Push(GuardianClient client, GuardianPrompt prompt)
-    {
-        try
-        {
-            await client.PushPromptsAsync([prompt]).ConfigureAwait(false);
-        }
-        catch (GuardianError error) when (error.IsRefusal)
-        {
-            _ = _dispatcher.BeginInvoke(() => Report(error));
-        }
-        catch (GuardianError)
-        {
-            // The notebook is a record, not the work: a failed push never stops a chat.
-        }
-    }
+    /// <summary>The signed-in account as the host's Guardian calls see it (prompt history, shared ETAs), or null.</summary>
+    public GuardianEndpoint? AccountEndpoint() =>
+        Client is { Session: { } session } client ? new GuardianEndpoint(client.Address, session.Token, client.OrgId) : null;
 
     /// <summary>The notebook, newest first.</summary>
     public async Task<IReadOnlyList<GuardianPrompt>> NotebookAsync(int limit = 20)
