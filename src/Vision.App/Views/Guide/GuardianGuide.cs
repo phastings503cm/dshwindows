@@ -28,7 +28,7 @@ public sealed class GuardianGuide : IWizardGuide
     private readonly TextBox _address = new() { Padding = new Thickness(8, 5, 8, 5) };
     private readonly TextBox _email = new() { Padding = new Thickness(8, 5, 8, 5) };
     private readonly PasswordBox _password = PasswordField();
-    private readonly TextBox _code = new() { Padding = new Thickness(8, 5, 8, 5), Width = 160, MaxLength = 7 };
+    private readonly TextBox _code = new() { Padding = new Thickness(8, 5, 8, 5), Width = 160, MaxLength = 7, HorizontalAlignment = HorizontalAlignment.Left };
 
     private GuardianModel? _chosen;
     private RouteUse _use;
@@ -257,8 +257,8 @@ public sealed class GuardianGuide : IWizardGuide
             if (model.ContextWindow is { } window) detail.Add($"{Fmt.Short(window)} context");
             if (model.IsAlias) detail.Add("your org picks the model behind it");
             if (model.InteractiveOnly == true) detail.Add("interactive use only");
-            var label = model.Title + (detail.Count > 0 ? "  · " + string.Join(" · ", detail) : "");
-            var radio = new RadioButton { Content = label, GroupName = "guardian-guide-model", IsChecked = _chosen?.Id == model.Id, Margin = new Thickness(0, 3, 0, 3) };
+            var content = Ui.Stack(Ui.Text(model.Title, 13), detail.Count == 0 ? null : Ui.Secondary(string.Join(" · ", detail)));
+            var radio = new RadioButton { Content = content, GroupName = "guardian-guide-model", IsChecked = _chosen?.Id == model.Id, Margin = new Thickness(0, 3, 0, 3) };
             var value = model;
             radio.Checked += (_, _) =>
             {

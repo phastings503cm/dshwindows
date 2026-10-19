@@ -103,7 +103,6 @@ public sealed partial class GuardianService : ObservableObject
                 _pendingClient = client;
                 PendingChallenge = error.Challenge;
                 PendingEmail = email.Trim();
-                Status = "Enter the 6-digit code from your authenticator app. Codes rotate every 30 seconds.";
                 return false;
             }
         }).ConfigureAwait(true);
@@ -205,7 +204,6 @@ public sealed partial class GuardianService : ObservableObject
         Client = client;
         Account = account;
         ApplyTokenToRoutes();
-        Status ??= $"Signed in as {account.Label}.";
         await RefreshAsync().ConfigureAwait(true);
     }
 
@@ -688,7 +686,7 @@ public sealed partial class GuardianService : ObservableObject
                 _pendingClient = new GuardianClient(GuardianClient.DefaultAddress);
                 PendingChallenge = "demo-challenge";
                 PendingEmail = "pat@503cm.com";
-                Status = "Enter the 6-digit code from your authenticator app. Codes rotate every 30 seconds.";
+                Status = null;
             }
             return;
         }
@@ -712,6 +710,6 @@ public sealed partial class GuardianService : ObservableObject
             new GuardianModel("global.anthropic.claude-sonnet-5-5", "Claude Sonnet 5.5", 1_000_000, 64_000),
             new GuardianModel("us.anthropic.claude-opus-5-5", "Claude Opus 5.5", 1_000_000, 48_000, InteractiveOnly: true),
         ];
-        Status = "Signed in as Pat Hastings (pat@503cm.com).";
+        Status = null;
     }
 }

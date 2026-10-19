@@ -60,7 +60,9 @@ public sealed record GuardianLimit(string Kind, string Window, double? Used, dou
 
     private bool IsMoney => Unit is { } u && (u.Equals("usd", StringComparison.OrdinalIgnoreCase) || u == "$") || (Unit is null && Kind == "spend");
 
-    private string UnitSuffix => IsMoney ? "" : Unit is { Length: > 0 } unit ? " " + (unit == "usd" ? "" : unit) : Kind switch
+    private bool IsBytes => Unit is "bytes" or "B" || (Unit is null && Kind == "storage");
+
+    private string UnitSuffix => IsMoney || IsBytes ? "" : Unit is { Length: > 0 } unit ? " " + unit : Kind switch
     {
         "tokens" => " tokens",
         "requests" => " requests",
@@ -70,6 +72,12 @@ public sealed record GuardianLimit(string Kind, string Window, double? Used, dou
     private string Amount(double value)
     {
         if (IsMoney) return "$" + value.ToString("0.00", CultureInfo.InvariantCulture);
+        if (IsBytes) return value switch
+        {
+            >= 1L << 30 => (value / (1L << 30)).ToString("0.#", CultureInfo.InvariantCulture) + " GB",
+            >= 1L << 20 => (value / (1L << 20)).ToString("0.#", CultureInfo.InvariantCulture) + " MB",
+            _ => (value / 1024).ToString("0", CultureInfo.InvariantCulture) + " KB",
+        };
         if (Kind == "tokens" || Unit == "tokens") return Fmt(value);
         return value % 1 == 0 ? ((long)value).ToString(CultureInfo.InvariantCulture) : value.ToString("0.##", CultureInfo.InvariantCulture);
     }
@@ -84,10 +92,12 @@ public sealed record GuardianLimit(string Kind, string Window, double? Used, dou
     /// <summary>"today", "this week", "this month", "this run".</summary>
     public static string WindowPhrase(string? window) => window switch
     {
+        "minute" => "this minute",
         "day" => "today",
         "week" => "this week",
         "month" => "this month",
         "run" => "this run",
+        "total" => "in all",
         null or "" => "",
         _ => $"per {window}",
     };
@@ -98,6 +108,7 @@ public sealed record GuardianLimit(string Kind, string Window, double? Used, dou
         "spend" => "Spend",
         "tokens" => "Tokens",
         "requests" => "Requests",
+        "storage" => "Storage",
         _ => CultureInfo.InvariantCulture.TextInfo.ToTitleCase(Kind),
     };
 }
@@ -240,7 +251,9 @@ public sealed class GuardianError : Exception
         TimeSpan? retryAfter = headers?.RetryAfter?.Delta;
         if (retryAfter is null && headers?.RetryAfter?.Date is { } date) retryAfter = date - DateTimeOffset.UtcNow;
 
-        switch (status)
+        // A storage cap answers 409 with the limit shape (Guardian's review fix 4): a limit like any other.
+        var shape = status == 409 && code is "limit_reached" or "budget_exceeded" && limit is not null ? 402 : status;
+        switch (shape)
         {
             case 401:
                 return new GuardianError(GuardianErrorKind.Unauthorized,
@@ -258,7 +271,7 @@ public sealed class GuardianError : Exception
                 return new GuardianError(GuardianErrorKind.Limit, message ?? fallback)
                 {
                     Status = status,
-                    Code = code ?? (status == 402 ? "budget_exceeded" : "rate_limited"),
+                    Code = code ?? (status == 429 ? "rate_limited" : "budget_exceeded"),
                     Limit = limit,
                     RetryAfter = retryAfter is { } wait && wait > TimeSpan.Zero ? wait : null,
                 };

@@ -366,6 +366,21 @@ public sealed class GuardianClientTests
     }
 
     [Fact]
+    public void AStorageCapIsALimitTooWithItsSizesInWords()
+    {
+        var error = GuardianError.FromResponse(409, """
+            {"error":"limit_reached","status":409,"limit":{"kind":"storage","window":"total","used":4294967296,"max":4294967296,"unit":"bytes","resetsAt":null},"message":"Your Vision uploads use all 4 GB you have in Guardian. Delete an old project to make room."}
+            """);
+        Assert.Equal((GuardianErrorKind.Limit, 409, "limit_reached"), (error.Kind, error.Status, error.Code));
+        var text = GuardianRefusalText.For(error);
+        Assert.Equal("You've reached a Guardian limit", text.Title);
+        Assert.Equal("Storage: 4 GB of 4 GB in all", text.Details[0]);
+        // A plain conflict (a name taken) is not a limit.
+        Assert.Equal(GuardianErrorKind.Conflict, GuardianError.FromResponse(409, """{"error":"name_taken","status":409,"message":"Taken"}""").Kind);
+        Assert.Equal("1 of 30 requests this minute", new GuardianLimit("requests", "minute", 1, 30, null, null).Describe());
+    }
+
+    [Fact]
     public async Task APageThatIsntGuardiansApiSaysCheckTheAddress()
     {
         var client = new GuardianClient(Address, Signed(), new FakeHttpHandler(_ => new HttpResponseMessage(HttpStatusCode.OK)

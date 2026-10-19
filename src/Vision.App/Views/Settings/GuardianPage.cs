@@ -182,7 +182,9 @@ public sealed class GuardianPage : UserControl
                     ? "Models, limits, skills and the notebook follow the organization you pick. Its routes in AI Models follow it too."
                     : "Your account is in one organization."));
             }
-            var note = Ui.Secondary("Your password was exchanged for a session token kept in Windows Credential Manager — the password is never stored. " +
+            var note = Ui.Secondary((account.Method == "browser"
+                                        ? "Vision holds a session token for this PC in Windows Credential Manager; your password never passed through Vision. "
+                                        : "Your password was exchanged for a session token kept in Windows Credential Manager — the password is never stored. ") +
                                     "Prompts you send in chats go to your Guardian notebook automatically.");
             note.Margin = new Thickness(0, 10, 0, 0);
             panel.Children.Add(note);
@@ -209,10 +211,12 @@ public sealed class GuardianPage : UserControl
         form.Children.Add(Labeled("Address", _address));
         var browser = Ui.Button("Sign in with your browser…", () => _ = Guardian.SignInWithBrowserAsync(_address.Text), accent: true,
             tooltip: "For accounts that sign in with Microsoft (Entra SSO) or without a password: Guardian opens in your browser and asks which organization to connect");
-        var browserRow = Ui.Buttons(browser, Ui.Secondary("Microsoft (Entra) and passwordless sign-ins, and a choice of organization."));
-        ((FrameworkElement)browserRow.Children[1]).VerticalAlignment = VerticalAlignment.Center;
-        browserRow.Margin = new Thickness(90, 8, 0, 4);
-        form.Children.Add(browserRow);
+        browser.HorizontalAlignment = HorizontalAlignment.Left;
+        browser.Margin = new Thickness(90, 8, 0, 2);
+        form.Children.Add(browser);
+        var browserHint = Ui.Secondary("For Microsoft (Entra) and passwordless sign-ins: Guardian opens in your browser and asks which organization to connect.");
+        browserHint.Margin = new Thickness(90, 2, 0, 4);
+        form.Children.Add(browserHint);
         if (busy && Guardian.Status?.StartsWith("Finish signing in", StringComparison.Ordinal) == true)
         {
             var waiting = Ui.Buttons(new Spinner { Width = 14, Height = 14 }, Ui.Secondary("Waiting for your browser…"), Ui.LinkButton("Cancel", Guardian.CancelBrowser));
