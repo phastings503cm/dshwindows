@@ -321,6 +321,29 @@ public sealed class ProviderRulesTests
     }
 
     [Fact]
+    public void ARefusalAboutTheMessagesToolsOrModelIsNeverADrop()
+    {
+        // FastAPI/vLLM validation errors point into the messages or tools: what was in them was wrong. Learning "drop
+        // messages" would strip them from every later request to that server and model.
+        var sent = new HashSet<string> { "model", "messages", "tools", "stream", "temperature" };
+        Assert.Null(Change("""{"detail":[{"loc":["body","messages",1,"content"],"msg":"Field required","type":"missing"}]}""", sent, 422));
+        Assert.Null(Change("""{"detail":[{"loc":["body","tools",0,"function","parameters"],"msg":"Input should be a valid dictionary","type":"dict_type"}]}""", sent, 422));
+        // OpenAI-style param errors.
+        Assert.Null(Change("""{"error":{"message":"Invalid value for 'content': expected a string, got null.","type":"invalid_request_error","param":"messages","code":null}}""", sent));
+        Assert.Null(Change("""{"error":{"param":"messages"}}""", sent));
+        Assert.Null(Change("""{"error":{"message":"The model `qwen9` does not exist","type":"invalid_request_error","param":"model","code":"model_not_found"}}""", sent));
+        Assert.Null(Change("""{"error":{"param":"model"}}""", sent));
+        Assert.Null(Change("""{"error":{"param":"stream","message":"stream is not supported"}}""", sent));
+        // An optional parameter named next to them is still learned.
+        Assert.Equal(new RequestChange.Drop("temperature"),
+            Change("""{"detail":[{"loc":["body","temperature"],"msg":"Extra inputs are not permitted","type":"extra_forbidden"}]}""", sent, 422));
+        Assert.True(RequestBody.Learnable("chat_template_kwargs.enable_thinking"));
+        Assert.False(RequestBody.Learnable("messages"));
+        Assert.False(RequestBody.Learnable("tools"));
+        Assert.False(RequestBody.Learnable("some_new_field"));
+    }
+
+    [Fact]
     public void NoticesSayWhatChangedInOneLine()
     {
         Assert.Equal("Moonshot (kimi-k2.6) doesn't take `temperature` — Vision stopped sending it for this model and carried on.",
@@ -584,5 +607,30 @@ public sealed class ProviderRulesTests
         store.ForgetKey(RequestAdaptationStore.Key("https://api.moonshot.ai/v1", "kimi-k2.6"));
         Assert.NotNull(new RequestAdaptationStore(file).Adaptation(RequestAdaptationStore.Key("https://api.moonshot.ai/v1", "kimi-k2.6-x")));
         Assert.Null(new RequestAdaptationStore(file).Adaptation(RequestAdaptationStore.Key("https://api.moonshot.ai/v1", "kimi-k2.6")));
+    }
+
+    [Fact]
+    public void TheStoreNeverLearnsOrKeepsADropOfWhatARequestNeeds()
+    {
+        using var dir = new TempDirectory();
+        var file = Path.Combine(dir.Path, "request-adaptations.json");
+        // A file written by the earlier build, after a 422 about a message's content: messages and tools dropped.
+        File.WriteAllText(file, """
+            {
+              "http://spark:8000/v1|qwen": { "dropped": ["messages", "tools", "temperature"], "renamed": { "model": "x" } },
+              "http://spark:8000/v1|other": { "dropped": ["model"] }
+            }
+            """);
+        var store = new RequestAdaptationStore(file);
+        var kept = store.Adaptation("http://spark:8000/v1|qwen")!;
+        Assert.Equal(["temperature"], kept.Dropped);
+        Assert.Empty(kept.Renamed);
+        Assert.Null(store.Adaptation("http://spark:8000/v1|other")); // nothing left of it
+        Assert.False(store.Learn(new RequestChange.Drop("messages"), "http://spark:8000/v1|qwen"));
+        Assert.False(store.Learn(new RequestChange.Drop("tools"), "http://spark:8000/v1|qwen"));
+        Assert.False(store.Learn(new RequestChange.Rename("model", "model_id"), "http://spark:8000/v1|qwen"));
+        var body = new System.Text.Json.Nodes.JsonObject { ["model"] = "qwen", ["messages"] = new System.Text.Json.Nodes.JsonArray(), ["tools"] = new System.Text.Json.Nodes.JsonArray(), ["temperature"] = 0.6 };
+        RequestBody.Apply(store.Adaptation("http://spark:8000/v1|qwen")!, body);
+        Assert.Equal(["model", "messages", "tools"], body.Select(p => p.Key).ToArray());
     }
 }

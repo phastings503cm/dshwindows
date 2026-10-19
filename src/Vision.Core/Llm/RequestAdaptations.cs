@@ -101,6 +101,22 @@ public static class RequestBody
         "max_tokens", "max_completion_tokens", "seed", "stop",
     };
 
+    /// <summary>The keys a request can't go without. A refusal that names one of them ("Field required" at
+    /// <c>["body","messages",1,"content"]</c>, <c>{"error":{"param":"model"}}</c>) is about what was in it, never a
+    /// parameter the server doesn't take, so it is never learned as a drop.</summary>
+    public static readonly IReadOnlySet<string> RequiredKeys = new HashSet<string>(StringComparer.Ordinal)
+    {
+        "model", "messages", "tools", "stream", "input", "prompt", "functions",
+    };
+
+    /// <summary>Whether a lesson may leave <paramref name="key"/> out or rename it: only the optional parameters Vision
+    /// sends (<see cref="OptionalKeys"/>, the names <see cref="ParameterRejection"/> knows, and the parts of
+    /// chat_template_kwargs).</summary>
+    public static bool Learnable(string key) =>
+        !RequiredKeys.Contains(key)
+        && (OptionalKeys.Contains(key) || ParameterRejection.Candidates.Contains(key)
+            || (key.StartsWith("chat_template_kwargs.", StringComparison.Ordinal) && key.Length > "chat_template_kwargs.".Length));
+
     /// <summary>The body's parameter names, nested ones as "parent.child" (only the nested ones Vision ever sets).</summary>
     public static IReadOnlySet<string> Keys(JsonObject body)
     {
@@ -175,11 +191,15 @@ public static partial class ParameterRejection
             return new RequestChange.EchoReasoning();
         // Structured errors name the parameter: OpenAI's {"error":{"param":"max_tokens"}}, FastAPI/vLLM's
         // {"detail":[{"loc":["body","chat_template_kwargs"]}]}.
+        var namesRequired = false;
         foreach (var named in NamedParameters(body))
         {
-            if (Match(named, sent) is not { } key) continue;
-            return Decide(key, lower);
+            if (Match(named, sent) is { } key) return Decide(key, lower);
+            namesRequired |= RequestBody.RequiredKeys.Contains(named.ToLowerInvariant()) && sent.Contains(named.ToLowerInvariant());
         }
+        // The error points at the messages, tools or model: what was in them was wrong, and leaving any parameter out
+        // won't fix it (and leaving those out would break every later request).
+        if (namesRequired) return null;
         // Otherwise, a sent parameter the message names next to a refusal word.
         if (!RefusalCues.Any(cue => lower.Contains(cue, StringComparison.Ordinal))) return null;
         foreach (var key in Candidates)
@@ -210,11 +230,12 @@ public static partial class ParameterRejection
         return new RequestChange.Drop(key);
     }
 
-    /// <summary>The sent key a structured error's parameter name refers to.</summary>
+    /// <summary>The sent, optional key a structured error's parameter name refers to (never model, messages, tools,
+    /// stream or another key a request needs).</summary>
     private static string? Match(string named, IReadOnlySet<string> sent)
     {
         var name = named.ToLowerInvariant();
-        if (sent.Contains(name)) return name;
+        if (sent.Contains(name)) return RequestBody.Learnable(name) ? name : null;
         if (name == "enable_thinking" && sent.Contains("chat_template_kwargs.enable_thinking")) return "chat_template_kwargs.enable_thinking";
         if (name.StartsWith("thinking", StringComparison.Ordinal) && sent.Contains("thinking")) return "thinking";
         if (name.StartsWith("stream_options", StringComparison.Ordinal) && sent.Contains("stream_options")) return "stream_options";
@@ -383,6 +404,7 @@ public sealed class RequestAdaptationStore
     /// <summary>Remember a lesson. Returns false when it was already known.</summary>
     public bool Learn(RequestChange change, string key)
     {
+        if (!IsSafe(change)) return false;
         Dictionary<string, RequestAdaptation> snapshot;
         string? path;
         lock (_lock)
@@ -430,6 +452,23 @@ public sealed class RequestAdaptationStore
         if (path is not null) Write(snapshot, path);
     }
 
+    /// <summary>A lesson that never strips or renames a key the request needs.</summary>
+    private static bool IsSafe(RequestChange change) => change switch
+    {
+        RequestChange.Drop drop => RequestBody.Learnable(drop.Key),
+        RequestChange.Rename rename => RequestBody.Learnable(rename.From) && RequestBody.Learnable(rename.To),
+        _ => true,
+    };
+
+    /// <summary>A file written before lessons were checked may hold a drop of messages/tools/model: leave those out.</summary>
+    private static RequestAdaptation Sanitised(RequestAdaptation entry)
+    {
+        entry.Dropped = (entry.Dropped ?? []).Where(RequestBody.Learnable).ToList();
+        entry.Renamed = new Dictionary<string, string>(
+            (entry.Renamed ?? []).Where(r => RequestBody.Learnable(r.Key) && RequestBody.Learnable(r.Value)), StringComparer.Ordinal);
+        return entry;
+    }
+
     private void Load(string path)
     {
         Dictionary<string, RequestAdaptation> loaded;
@@ -446,7 +485,11 @@ public sealed class RequestAdaptationStore
         lock (_lock)
         {
             _path = path;
-            _map = new Dictionary<string, RequestAdaptation>(loaded.Where(e => e.Value is not null), StringComparer.Ordinal);
+            _map = new Dictionary<string, RequestAdaptation>(
+                loaded.Where(e => e.Value is not null)
+                    .Select(e => KeyValuePair.Create(e.Key, Sanitised(e.Value)))
+                    .Where(e => !e.Value.IsEmpty),
+                StringComparer.Ordinal);
         }
     }
 
