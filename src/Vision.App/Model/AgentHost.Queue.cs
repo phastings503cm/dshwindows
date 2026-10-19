@@ -165,8 +165,12 @@ public sealed partial class AgentHost
         // record), so the list moves on to the next task rather than pausing.
         var sessionId = _queueSessions.FirstOrDefault(p => p.Value == id).Key
                         ?? _chatQueues.FirstOrDefault(p => p.Value.ActiveTaskId == id).Key;
+        var removed = Queue.Find(id);
         Queue.Remove(id);
         if (sessionId is not null) StopSession(sessionId, pauseTasks: false);
+        // What a deleted prompt task kept goes with it (a running one stays as a skipped record and keeps them until then).
+        if (removed is { Attachments.Count: > 0, SessionId: { } chat } && Queue.Find(id) is null)
+            AttachmentStoreFor(chat).RemoveQueued(removed.Attachments);
     }
 
     /// <summary>Put a blocked, failed or skipped task back in line — at the front of its chat's list —

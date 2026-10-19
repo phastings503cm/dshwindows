@@ -53,6 +53,8 @@ public sealed class RunsTests : IDisposable
             HttpHandlerForTesting = handler ?? _server,
             RetryPolicy = new RetryPolicy { Delay = _ => TimeSpan.FromMilliseconds(50) },
             GoalErrorBackoff = _ => TimeSpan.FromMilliseconds(50),
+            // Never the real %APPDATA%\Vision (the installer test needs it absent).
+            AttachmentsRootForTesting = Path.Combine(_dir, "attachments"),
         };
     }
 
@@ -301,6 +303,47 @@ public sealed class RunsTests : IDisposable
         await WaitUntil("paused", () => host.ChatTasksPaused(chat.Id) == "Paused — the last task failed.");
         await Task.Delay(200);
         Assert.Equal(QueueTaskStatus.Queued, host.Queue.Find(next.Id)!.Status);
+    });
+
+    [Fact]
+    public void ALargePasteIsQueuedWhileAGoalRunsAndLaterGoesWithItsParts() => Run(async host =>
+    {
+        // 10-18 #11 × #5: a 10,000-line prompt becomes a chip; Enter while a /goal works puts it on the tasks, chip and all.
+        var gate = new TaskCompletionSource();
+        _server.Reset((seen, _) => seen.LastUser.Contains("GOAL: Long job", StringComparison.Ordinal) && seen.Fresh
+            ? new FakeReply.Gated(gate.Task, "Working on it.\nGOAL_COMPLETE")
+            : new FakeReply.Text("Read it.\nGOAL_COMPLETE"));
+        var chat = Chat(host);
+        host.Send("/goal Long job", chat.Id);
+        await WaitUntil("goal out", () => chat.Running && _server.Seen.Count == 1);
+
+        var log = string.Join("\n", Enumerable.Range(1, 10_000).Select(i => $"{i:D6} " + (i == 7_777 ? "ERROR the cache is cold" : new string('x', 33))));
+        var task = host.AddToTasks(chat.Id, "Summarise this log", attachments: [PastedText.Attachment(log)])!;
+        Assert.True(task.AsPrompt);
+        Assert.Equal("Summarise this log", task.Title);
+        Assert.Equal([QueuedAttachment.PastedKind], task.Attachments.Select(a => a.Kind));
+        Assert.Contains(chat.Entries.OfType<MessageEntryVM>(), m => m.Text == "📋 Added to this chat's tasks (#1) — it starts when the current work finishes. Its attachment goes with it.");
+        // Only a chip, no text: it still goes on the list, named after what it carries.
+        var only = host.AddToTasks(chat.Id, "", attachments: [PastedText.Attachment("a\nb\nc")])!;
+        Assert.Equal("📎 Pasted text", only.Title);
+        // On disk with the task, so a relaunch keeps it.
+        Assert.Contains("\"kind\": \"pasted\"", File.ReadAllText(Path.Combine(_dir, "task-queue.json")));
+
+        gate.SetResult();
+        await WaitUntil("both ran", () => host.Queue.Find(task.Id)?.Status == QueueTaskStatus.Complete && host.Queue.Find(only.Id)?.Status == QueueTaskStatus.Complete, 30);
+        // It went as the chat's next prompt with its paste: the contents list and first parts, and read_attachment for the rest.
+        var sent = _server.Seen.First(r => r.Fresh && r.LastUser.Contains("Summarise this log\n\n[Attached file: pasted-text.txt", StringComparison.Ordinal));
+        Assert.Contains("[Attached file: pasted-text.txt — Pasted text · 10,000 lines", sent.LastUser);
+        Assert.Contains("read_attachment", sent.Tools);
+        var row = chat.Entries.OfType<MessageEntryVM>().First(m => m.IsUser && m.Text == "Summarise this log");
+        Assert.Matches(@"^Pasted text · 10,000 lines · \d+ KB · sent as text in \d+ parts$", Assert.Single(row.Attachments).Label);
+        await WaitUntil("recorded", () => chat.PromptHistory.Count(r => r.Source == PromptSource.Task) == 2);
+
+        // Deleting a finished task deletes what it kept.
+        var folder = Path.Combine(host.AttachmentStoreFor(chat.Id).Directory, AttachmentStore.QueuedFolder);
+        Assert.Equal(2, Directory.GetDirectories(folder).Length);
+        host.QueueRemove(task.Id);
+        Assert.Single(Directory.GetDirectories(folder));
     });
 
     [Fact]

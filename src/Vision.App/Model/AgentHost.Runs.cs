@@ -599,19 +599,34 @@ public sealed partial class AgentHost
 
     /// <summary>Queue <paramref name="text"/> as this chat's next task: it runs here, as the chat's next prompt, exactly as
     /// written, once everything before it is done — at once when the chat is free and its list isn't paused.</summary>
-    public QueueTask? AddToTasks(string chatId, string text, bool atFront = false)
+    /// <param name="attachments">The composer's chips (files, pictures, a large paste): kept with the task in the chat's
+    /// attachments folder and sent with the prompt when its turn comes.</param>
+    public QueueTask? AddToTasks(string chatId, string text, bool atFront = false, IReadOnlyList<MessageAttachment>? attachments = null)
     {
         var trimmed = text.Trim();
-        if (trimmed.Length == 0 || Session(chatId) is not { } vm) return null;
-        var task = Queue.Add(ChatTaskRules.TitleFor(trimmed), trimmed, atFront, vm.WorkspacePath, chatId, asPrompt: true);
+        attachments ??= [];
+        if ((trimmed.Length == 0 && attachments.Count == 0) || Session(chatId) is not { } vm) return null;
+        IReadOnlyList<QueuedAttachment> kept;
+        try
+        {
+            kept = AttachmentStoreFor(chatId).SaveQueued(attachments);
+        }
+        catch (Exception error) when (error is IOException or UnauthorizedAccessException)
+        {
+            vm.Note($"Couldn't keep the attachments for the task list: {error.Message}", MessageRole.Error);
+            return null;
+        }
+        var title = ChatTaskRules.TitleFor(trimmed, attachments.Select(a => a.Digest?.Format == DigestFormat.Pasted ? "Pasted text" : a.Name).ToList());
+        var task = Queue.Add(title, trimmed, atFront, vm.WorkspacePath, chatId, asPrompt: true, attachments: kept);
         var position = Queue.Position(task.Id) ?? 1;
         var next = Queue.NextTaskFor(chatId);
+        var carries = kept.Count == 0 ? "" : " " + ChatTaskRules.CarriesNotice(kept.Count);
         if (ChatTasksPaused(chatId) is not null)
-            vm.Note($"📋 Added to this chat's tasks (#{position}) — the list is paused; Resume (Ctrl+Shift+Q) carries on.");
+            vm.Note($"📋 Added to this chat's tasks (#{position}) — the list is paused; Resume (Ctrl+Shift+Q) carries on.{carries}");
         else if (!IsQueueRunning(chatId) && next is { AsPrompt: false })
-            vm.Note($"📋 Added to this chat's tasks (#{position}) — after “{next.Title}”, which waits for Start (Ctrl+Shift+Q).");
+            vm.Note($"📋 Added to this chat's tasks (#{position}) — after “{next.Title}”, which waits for Start (Ctrl+Shift+Q).{carries}");
         else if (vm.Running || _runs.ContainsKey(chatId) || IsQueueRunning(chatId) || next?.Id != task.Id)
-            vm.Note(ChatTaskRules.AddedNotice(position, startsNow: false));
+            vm.Note(ChatTaskRules.AddedNotice(position, startsNow: false) + carries);
         PumpChatTasks(chatId);
         RaiseRunsChanged();
         return Queue.Find(task.Id) ?? task;
@@ -670,6 +685,19 @@ public sealed partial class AgentHost
     /// own row in the Prompts timeline. Its outcome decides the task's status and whether the list moves on.</summary>
     private async Task<(WorkOutcome Outcome, string? Pause)> WorkPromptAsync(SessionVM vm, QueueTask task, ChatQueueRun run)
     {
+        // What it was queued with goes with it, read again as when it was attached.
+        IReadOnlyList<MessageAttachment> attachments = [];
+        if (task.Attachments.Count > 0)
+        {
+            if (AttachmentStoreFor(vm.Id).LoadQueued(task.Attachments, out var missing) is not { } loaded)
+            {
+                Queue.Start(task.Id, vm.Id);
+                Queue.Finish(task.Id, QueueTaskStatus.Failed, $"its attachment “{missing}” is no longer on this PC", vm.Id);
+                QueueStateChanged();
+                return (WorkOutcome.Blocked, ChatTaskRules.PauseReason(PromptOutcome.Failed));
+            }
+            attachments = loaded;
+        }
         Queue.Start(task.Id, vm.Id);
         run.ActiveTaskId = task.Id;
         QueueStateChanged();
@@ -686,7 +714,7 @@ public sealed partial class AgentHost
             Task? work;
             try
             {
-                work = Dispatch(vm, task.PromptText, []);
+                work = Dispatch(vm, task.PromptText, attachments);
             }
             finally
             {

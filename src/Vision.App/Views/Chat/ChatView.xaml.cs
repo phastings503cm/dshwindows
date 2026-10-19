@@ -309,6 +309,9 @@ public partial class ChatView : UserControl
     /// <summary>Empty the composer's attachments (as sending does), for the self-test.</summary>
     internal void SelfTestClearAttachments() => _attachments.Clear();
 
+    /// <summary>Press "Add to tasks" (Ctrl+Enter), for the self-test.</summary>
+    internal void SelfTestAddToTasks() => AddToTasks();
+
     /// <summary>The transcript's scroll viewer, for the self-test's measurements.</summary>
     internal ScrollViewer? SelfTestScroller
     {
@@ -614,8 +617,8 @@ public partial class ChatView : UserControl
     {
         if (_session is not { } session) return;
         var text = Composer.Text.Trim();
-        // While the agent works, Enter queues what you typed on this chat's tasks: it starts by itself after. (Only a file or
-        // a large paste in the box: AddToTasks says why that can't be queued, rather than Enter doing nothing.)
+        // While the agent works, Enter queues what you typed on this chat's tasks, with its files and large pastes: it starts
+        // by itself after.
         if (session.Running && (text.Length > 0 || _attachments.Count > 0))
         {
             AddToTasks();
@@ -638,19 +641,17 @@ public partial class ChatView : UserControl
 
     private void AddTask_Click(object sender, RoutedEventArgs e) => AddToTasks();
 
-    /// <summary>"Add to tasks": what is typed goes on this chat's tasks, after whatever is there, and runs as the chat's next
-    /// prompt once the work before it is done (at once when the chat is free). Attachments stay for a message of their own.</summary>
+    /// <summary>"Add to tasks": what is typed — and the files, pictures and large pastes in the box — goes on this chat's
+    /// tasks, after whatever is there, and runs as the chat's next prompt once the work before it is done (at once when the
+    /// chat is free).</summary>
     private void AddToTasks()
     {
         if (_session is not { } session) return;
         var text = Composer.Text.Trim();
         if (text.Length == 0 && _attachments.Count == 0) return;
-        if (_attachments.Count > 0)
-        {
-            session.Note("A queued task can't carry attachments — send it when the agent is free, or remove the attachments.");
-            return;
-        }
-        if (_model.Host.AddToTasks(session.Id, text) is null) return;
+        var payload = _attachments.Select(c => c.Attachment).ToList();
+        if (_model.Host.AddToTasks(session.Id, text, attachments: payload) is null) return;
+        _attachments.Clear();
         Composer.Clear();
         SlashPopup.IsOpen = false;
         _pinned = true;

@@ -50,6 +50,18 @@ public static class ChatTaskRules
         if (first.Length > 80) first = first[..79] + "…";
         return first.Length == 0 ? "Untitled task" : first;
     }
+
+    /// <summary>A task's title from its prompt, or — for one queued with only attachments (a large paste, a PDF) — from
+    /// what it carries: "📎 Pasted text, report.pdf".</summary>
+    public static string TitleFor(string prompt, IReadOnlyList<string> attachmentNames)
+    {
+        if (prompt.Trim().Length > 0 || attachmentNames.Count == 0) return TitleFor(prompt);
+        return TitleFor("📎 " + string.Join(", ", attachmentNames));
+    }
+
+    /// <summary>What the chat says when a prompt with attachments goes on its list (after <see cref="AddedNotice"/>).</summary>
+    public static string CarriesNotice(int count) =>
+        count == 1 ? "Its attachment goes with it." : $"Its {count} attachments go with it.";
 }
 
 // MARK: - Which plan step a subagent works

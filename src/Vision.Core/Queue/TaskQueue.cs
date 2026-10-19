@@ -221,7 +221,9 @@ public sealed class TaskQueue
     /// tasks. Title and details are trimmed; an empty <paramref name="cwd"/> means none. Returns the
     /// task as stored.</summary>
     /// <param name="asPrompt">"Add to tasks": the task runs as the chat's next prompt (see <see cref="QueueTask.AsPrompt"/>).</param>
-    public QueueTask Add(string title, string details = "", bool atFront = false, string? cwd = null, string? chatId = null, bool asPrompt = false) => Mutate(() =>
+    /// <param name="attachments">What a prompt task sends with its prompt (see <see cref="QueueTask.Attachments"/>).</param>
+    public QueueTask Add(string title, string details = "", bool atFront = false, string? cwd = null, string? chatId = null, bool asPrompt = false,
+                         IReadOnlyList<QueuedAttachment>? attachments = null) => Mutate(() =>
     {
         var now = Now;
         var task = new QueueTask
@@ -232,6 +234,7 @@ public sealed class TaskQueue
             Cwd = string.IsNullOrEmpty(cwd) ? null : cwd,
             SessionId = string.IsNullOrEmpty(chatId) ? null : chatId,
             AsPrompt = asPrompt,
+            Attachments = attachments ?? [],
         };
         task = task.AppendingLog(QueueLogKind.Entered,
             $"Entered the queue at #{(atFront ? 1 : CountQueued(_tasks.Count, task.SessionId) + 1)}", now);

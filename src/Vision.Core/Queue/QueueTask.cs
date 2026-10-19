@@ -118,6 +118,16 @@ public sealed record QueueLogLine(DateTimeOffset At, QueueLogKind Kind, string T
 }
 
 /// <summary>One work item. Immutable: TaskQueue replaces a task with an updated copy.</summary>
+/// <summary>An attachment kept with a queued prompt: what it is ("file" or "image"), the name the model will know it by, and
+/// where its bytes are saved (relative to the chat's attachments folder).</summary>
+public sealed record QueuedAttachment(string Kind, string Name, string File)
+{
+    public const string FileKind = "file";
+    public const string ImageKind = "image";
+    /// <summary>A large paste the composer turned into a chip (it goes as "Pasted text", not as a file).</summary>
+    public const string PastedKind = "pasted";
+}
+
 public sealed record QueueTask
 {
     public string Id { get; init; } = Guid.NewGuid().ToString();
@@ -162,8 +172,17 @@ public sealed record QueueTask
     /// work before it is done. Stored as <c>"asPrompt": true</c>; an older build reads it as an ordinary task.</summary>
     public bool AsPrompt { get; init; }
 
+    /// <summary>The files and pasted text that go with a prompt task ("Add to tasks" with chips in the composer): their bytes
+    /// are kept in the chat's attachments folder until the task is deleted, and the task sends them with its prompt.
+    /// Stored as <c>"attachments": [{"kind", "name", "file"}]</c>, left out when empty.</summary>
+    public IReadOnlyList<QueuedAttachment> Attachments { get; init; } = [];
+
     /// <summary>What a prompt task sends when its turn comes: the prompt as it was written.</summary>
-    public string PromptText => AsPrompt && Details.Length > 0 ? Details : GoalText;
+    public string PromptText => !AsPrompt ? GoalText
+        : Details.Length > 0 ? Details
+        // Queued with only attachments: the title just names them; the message is the attachments alone.
+        : Attachments.Count > 0 ? ""
+        : GoalText;
 
     public long TotalTokens => PromptTokens + CompletionTokens;
 
@@ -197,7 +216,7 @@ public sealed record QueueTask
         && EnteredAt == other.EnteredAt && StartedAt == other.StartedAt && FinishedAt == other.FinishedAt
         && Rounds == other.Rounds && PromptTokens == other.PromptTokens && CompletionTokens == other.CompletionTokens
         && SessionId == other.SessionId && Cwd == other.Cwd && AsPrompt == other.AsPrompt
-        && Log.SequenceEqual(other.Log);
+        && Attachments.SequenceEqual(other.Attachments) && Log.SequenceEqual(other.Log);
 
     public override int GetHashCode() => HashCode.Combine(Id, Title, Status, Rounds, TotalTokens, Log.Count);
 }

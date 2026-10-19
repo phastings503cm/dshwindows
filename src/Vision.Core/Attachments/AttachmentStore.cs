@@ -130,6 +130,110 @@ public sealed class AttachmentStore
         }
     }
 
+    // MARK: Attachments of queued prompts
+
+    /// <summary>Where the bytes of queued prompts' attachments are kept, inside the chat's folder (so deleting the chat
+    /// deletes them too).</summary>
+    public const string QueuedFolder = "queued";
+
+    /// <summary>Keep the attachments of a prompt put on the chat's tasks ("Add to tasks"): each one's bytes under
+    /// queued/&lt;batch&gt;/, so the task can send them when its turn comes — after a relaunch too.</summary>
+    public IReadOnlyList<QueuedAttachment> SaveQueued(IReadOnlyList<MessageAttachment> attachments)
+    {
+        if (attachments.Count == 0) return [];
+        var batch = Guid.NewGuid().ToString("N")[..12];
+        var folder = Path.Combine(Directory, QueuedFolder, batch);
+        var output = new List<QueuedAttachment>();
+        lock (_lock)
+        {
+            System.IO.Directory.CreateDirectory(folder);
+            for (var i = 0; i < attachments.Count; i++)
+            {
+                var attachment = attachments[i];
+                var pasted = attachment.Digest?.Format == DigestFormat.Pasted;
+                var bytes = pasted ? TextUtil.Utf8NoBom.GetBytes(attachment.Digest!.Text) : attachment.Data;
+                var file = $"{i + 1}-{Convert.ToHexStringLower(SHA256.HashData(bytes))[..12]}.bin";
+                var path = Path.Combine(folder, file);
+                System.IO.File.WriteAllBytes(path + ".tmp", bytes);
+                System.IO.File.Move(path + ".tmp", path, overwrite: true);
+                var kind = pasted ? QueuedAttachment.PastedKind
+                    : attachment.Kind == AttachmentKind.Image ? QueuedAttachment.ImageKind : QueuedAttachment.FileKind;
+                output.Add(new QueuedAttachment(kind, attachment.Name, $"{QueuedFolder}/{batch}/{file}"));
+            }
+        }
+        return output;
+    }
+
+    /// <summary>A queued prompt's attachments, ready to send (read again as when they were attached); null when any of them
+    /// is gone from the disk, with the first missing name in <paramref name="missing"/>.</summary>
+    public IReadOnlyList<MessageAttachment>? LoadQueued(IReadOnlyList<QueuedAttachment> queued, out string? missing)
+    {
+        missing = null;
+        var output = new List<MessageAttachment>();
+        foreach (var item in queued)
+        {
+            byte[] bytes;
+            try
+            {
+                bytes = System.IO.File.ReadAllBytes(QueuedPath(item));
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException)
+            {
+                missing = item.Name;
+                return null;
+            }
+            output.Add(item.Kind switch
+            {
+                QueuedAttachment.PastedKind => AttachmentReader.Pasted(TextUtil.Utf8NoBom.GetString(bytes), item.Name),
+                QueuedAttachment.ImageKind => new MessageAttachment(AttachmentKind.Image, item.Name, bytes),
+                _ => new MessageAttachment(AttachmentKind.File, item.Name, bytes),
+            });
+        }
+        return output;
+    }
+
+    /// <summary>Delete what a queued prompt kept (its task was deleted).</summary>
+    public void RemoveQueued(IEnumerable<QueuedAttachment> queued)
+    {
+        lock (_lock)
+        {
+            foreach (var folder in queued.Select(SafeQueuedFolder).OfType<string>().Distinct(StringComparer.OrdinalIgnoreCase))
+            {
+                try
+                {
+                    if (System.IO.Directory.Exists(folder)) System.IO.Directory.Delete(folder, recursive: true);
+                }
+                catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { }
+            }
+        }
+    }
+
+    private string? SafeQueuedFolder(QueuedAttachment item)
+    {
+        try
+        {
+            var folder = Path.GetDirectoryName(QueuedPath(item));
+            // Only a batch folder (queued/<batch>), never the queued folder itself.
+            return folder is not null && !string.Equals(Path.GetFullPath(folder), Path.GetFullPath(Path.Combine(Directory, QueuedFolder)), StringComparison.OrdinalIgnoreCase)
+                ? folder
+                : null;
+        }
+        catch (ArgumentException)
+        {
+            return null;
+        }
+    }
+
+    /// <summary>The file a queued attachment's bytes are in; only ever inside this chat's queued folder.</summary>
+    private string QueuedPath(QueuedAttachment item)
+    {
+        var root = Path.GetFullPath(Path.Combine(Directory, QueuedFolder));
+        var path = Path.GetFullPath(Path.Combine(Directory, item.File.Replace('/', Path.DirectorySeparatorChar)));
+        if (!path.StartsWith(root + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase))
+            throw new ArgumentException("A queued attachment points outside its chat's folder.");
+        return path;
+    }
+
     /// <summary>Remove everything saved for the chat (the chat was deleted).</summary>
     public void RemoveAll()
     {

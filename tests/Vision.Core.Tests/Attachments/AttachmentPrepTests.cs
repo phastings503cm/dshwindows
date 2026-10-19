@@ -155,6 +155,42 @@ public sealed class AttachmentPrepTests : IDisposable
     }
 
     [Fact]
+    public void AQueuedPromptsAttachmentsAreKeptAndComeBackAsTheyWere()
+    {
+        var store = AttachmentStore.ForChat("chat-q", _root);
+        var paste = Lines(10_000);
+        var png = new byte[] { 0x89, 0x50, 0x4E, 0x47, 1, 2, 3 };
+        var kept = store.SaveQueued([
+            PastedText.Attachment(paste),
+            new MessageAttachment(AttachmentKind.File, "notes.md", "# Notes\nhello"u8.ToArray()),
+            new MessageAttachment(AttachmentKind.Image, "shot.png", png),
+        ]);
+        Assert.Equal(["pasted", "file", "image"], kept.Select(k => k.Kind));
+        Assert.All(kept, k => Assert.StartsWith("queued/", k.File));
+        // The chat's long-attachment index doesn't list them (they aren't sent yet).
+        Assert.Empty(store.Entries());
+
+        var loaded = store.LoadQueued(kept, out var missing)!;
+        Assert.Null(missing);
+        Assert.Equal(DigestFormat.Pasted, loaded[0].Digest!.Format);
+        Assert.Equal(10_000, loaded[0].Digest!.Lines);
+        Assert.Equal(paste, loaded[0].Digest!.Text);
+        Assert.Equal("pasted-text.txt", loaded[0].Name);
+        Assert.Equal((AttachmentKind.File, "notes.md", "# Notes\nhello"), (loaded[1].Kind, loaded[1].Name, Encoding.UTF8.GetString(loaded[1].Data)));
+        Assert.Null(loaded[1].Digest); // read again when the task runs, like a fresh attachment
+        Assert.Equal(png, loaded[2].Data);
+
+        // A path that would leave the chat's folder is never read.
+        Assert.Null(store.LoadQueued([new QueuedAttachment("file", "x", "../../escape.bin")], out missing));
+        Assert.Equal("x", missing);
+
+        store.RemoveQueued(kept);
+        Assert.Null(store.LoadQueued(kept, out missing));
+        Assert.Equal("pasted-text.txt", missing);
+        Assert.False(Directory.Exists(Path.Combine(store.Directory, AttachmentStore.QueuedFolder, kept[0].File.Split('/')[1])));
+    }
+
+    [Fact]
     public void ADifferentFileOfTheSameNameIsSavedUnderANumberedName()
     {
         var store = AttachmentStore.ForChat("chat-2", _root);

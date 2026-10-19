@@ -1,3 +1,5 @@
+using System.Text.RegularExpressions;
+
 namespace Vision.Core.Tests;
 
 /// <summary>New for the port: the queue file (atomic writes, restarts, tolerant decoding, corrupt-file
@@ -60,6 +62,29 @@ public sealed class TaskQueueStoreTests : IDisposable
         Assert.Contains("\"kind\": \"entered\"", json);
         Assert.Contains("\"enteredAt\": \"2026-09-24T10:32:05+00:00\"", json);
         Assert.DoesNotContain("\"cwd\"", json);   // nulls are left out
+    }
+
+    [Fact]
+    public void APromptTaskKeepsItsAttachmentsAcrossARestart()
+    {
+        var q = Open();
+        var a = q.Add("📎 Pasted text", "", chatId: "chat-1", asPrompt: true,
+            attachments: [new QueuedAttachment("pasted", "Pasted text", "queued/abc/1-0123456789ab.bin"), new QueuedAttachment("file", "report.pdf", "queued/abc/2-ba9876543210.bin")]);
+        var json = File.ReadAllText(QueueFile);
+        Assert.Contains("\"attachments\": [", json);
+        Assert.Contains("\"kind\": \"pasted\"", json);
+        Assert.Contains("\"file\": \"queued/abc/2-ba9876543210.bin\"", json);
+        var reloaded = Open().Find(a.Id)!;
+        Assert.Equal(a, reloaded);
+        Assert.Equal(["Pasted text", "report.pdf"], reloaded.Attachments.Select(x => x.Name));
+        // A task without any writes no "attachments" key; an unreadable entry is left out, an unknown kind reads as a file.
+        q.Add("plain", chatId: "chat-1", asPrompt: true);
+        Assert.Single(Regex.Matches(File.ReadAllText(QueueFile), "\"attachments\""));
+        File.WriteAllText(QueueFile, """
+            {"tasks":[{"id":"t1","title":"x","asPrompt":true,"attachments":[{"kind":"sound","name":"a.wav","file":"queued/b/1.bin"},{"name":"","file":"x"},null,{"kind":"image"}]}]}
+            """);
+        var odd = Open().Find("t1")!;
+        Assert.Equal([new QueuedAttachment("file", "a.wav", "queued/b/1.bin")], odd.Attachments);
     }
 
     [Fact]

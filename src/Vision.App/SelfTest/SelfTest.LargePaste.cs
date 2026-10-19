@@ -74,6 +74,20 @@ public sealed partial class SelfTest
             foreach (var label in view.SelfTestChipLabels) Note($"probe composer chip: {label}");
             Capture(window, "probe-paste-composer");
 
+            // 1b. Add to tasks (Ctrl+Enter, or Enter while the agent works) takes the chip with it (10-18 #11 × #5). The list
+            // is paused first, so the task waits instead of running against no model.
+            model.Host.PauseChatTasks(chat.Id);
+            view.SelfTestAddToTasks();
+            await Settle(300);
+            var queued = model.Host.Queue.Tasks.LastOrDefault(t => t.SessionId == chat.Id && t.AsPrompt);
+            Note($"probe queue: Add to tasks with the chip queued {(queued is null ? "NOTHING" : $"“{queued.Title}” with {queued.Attachments.Count} attachment(s) ({string.Join(", ", queued.Attachments.Select(a => a.Kind))})")}; " +
+                 $"{view.SelfTestAttachmentCount} chip(s) left in the composer");
+            if (queued is not { Attachments.Count: 1 } || view.SelfTestAttachmentCount != 0)
+                throw new InvalidOperationException("Add to tasks didn't queue the 10,214-line paste with its chip");
+            Capture(window, "probe-paste-queued");
+            model.Host.QueueRemove(queued.Id);
+            model.Host.ResumeChatTasks(chat.Id);
+
             // 2. The same text as a sent message (or one from a chat saved before large pastes became attachments).
             composer.Clear();
             await Settle(300);

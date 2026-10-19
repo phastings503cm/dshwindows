@@ -6,7 +6,8 @@ namespace Vision.Core;
 // MARK: - Task queue file format
 //
 // {"tasks": [{"id", "title", "details", "status", "enteredAt", "startedAt", "finishedAt", "rounds",
-// "promptTokens", "completionTokens", "sessionId", "cwd", "asPrompt", "log": [{"id", "at", "kind", "text"}]}]}
+// "promptTokens", "completionTokens", "sessionId", "cwd", "asPrompt", "attachments": [{"kind", "name", "file"}],
+// "log": [{"id", "at", "kind", "text"}]}]}
 //
 // Camel-case keys, statuses and log kinds as their lower-case names, ISO-8601 dates. Decoding is
 // tolerant because a failed decode would cost the user their whole queue: a missing field (a file
@@ -41,6 +42,8 @@ internal static class TaskQueueFile
             SessionId = t.SessionId,
             Cwd = t.Cwd,
             AsPrompt = t.AsPrompt ? true : null,
+            Attachments = t.Attachments.Count == 0 ? null
+                : t.Attachments.Select(a => new StoredAttachment { Kind = a.Kind, Name = a.Name, File = a.File }).ToList<StoredAttachment?>(),
             Log = JsonSerializer.SerializeToElement(
                 t.Log.Select(l => new StoredLine { Id = l.Id, At = l.At, Kind = l.Kind.RawValue(), Text = l.Text }).ToList(), Json),
         }).ToList<StoredTask?>(),
@@ -67,6 +70,11 @@ internal static class TaskQueueFile
             SessionId = t.SessionId,
             Cwd = t.Cwd,
             AsPrompt = t.AsPrompt == true,
+            // An attachment that can't be read is left out (the task still runs; WorkPromptAsync says what's missing).
+            Attachments = (t.Attachments ?? []).OfType<StoredAttachment>()
+                .Where(a => a is { Name.Length: > 0, File.Length: > 0 })
+                .Select(a => new QueuedAttachment(a.Kind is QueuedAttachment.ImageKind or QueuedAttachment.PastedKind ? a.Kind : QueuedAttachment.FileKind, a.Name!, a.File!))
+                .ToList(),
             Log = DecodeLog(t.Log),
         }).ToList();
     }
@@ -111,7 +119,15 @@ internal static class TaskQueueFile
         public string? SessionId { get; set; }
         public string? Cwd { get; set; }
         public bool? AsPrompt { get; set; }
+        public List<StoredAttachment?>? Attachments { get; set; }
         public JsonElement? Log { get; set; }
+    }
+
+    private sealed class StoredAttachment
+    {
+        public string? Kind { get; set; }
+        public string? Name { get; set; }
+        public string? File { get; set; }
     }
 
     private sealed class StoredLine
