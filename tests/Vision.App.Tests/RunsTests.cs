@@ -366,7 +366,7 @@ public sealed class RunsTests : IDisposable
         var handler = new WorkerHandler(_server);
         var host = MakeHost(handler, config =>
         {
-            config.Providers[0].Temperature = 0.6;
+            config.Providers.First(p => p.RouteId == config.ActiveRoute).Temperature = 0.6;
             config.Providers.Add(new ProviderProfile(ProviderKind.OpenAICompat, "Kimi Code", "https://api.kimi.com/coding/v1", "kimi-for-coding") { SubagentWorker = true });
         });
         try

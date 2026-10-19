@@ -50,6 +50,9 @@ public sealed partial class AgentHost
     private void PhasesBegin(SessionVM vm, string prompt)
     {
         if (!vm.PhasesEnabled) return;
+        // The first turn of a launch fetches what the org's harnesses learned (with a route through Guardian), so the
+        // estimates that follow start smart.
+        if (!_etaSynced) _ = SyncGuardianEtaAsync();
         var state = PhaseRunner.Begin(prompt, DateTimeOffset.Now, ProjectFiles(vm.WorkspacePath));
         state.LoopbackCap = ValidationRetryCap;
         vm.TurnFiles.Clear();
