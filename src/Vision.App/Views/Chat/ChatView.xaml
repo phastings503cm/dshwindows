@@ -9,7 +9,7 @@
     <UserControl.Resources>
         <!-- A message: its date and time on this PC's clock, then the role marker in the gutter and the text. -->
         <DataTemplate DataType="{x:Type model:MessageEntryVM}">
-            <Grid Margin="0,0,0,16">
+            <Grid x:Name="Row" Margin="0,0,0,16" Background="Transparent">
                 <Grid.ColumnDefinitions>
                     <ColumnDefinition Width="28" />
                     <ColumnDefinition Width="*" />
@@ -22,6 +22,9 @@
                            Text="{Binding At, Converter={StaticResource Stamp}}"
                            ToolTip="{Binding At, Converter={StaticResource Stamp}, ConverterParameter=full}"
                            Foreground="{DynamicResource TextFillColorTertiaryBrush}" />
+                <!-- Copy (10-19 #13): the whole message — a prompt as it was sent — shown while the pointer is over the row. -->
+                <chat:CopyButton x:Name="CopyRow" Grid.Column="1" HorizontalAlignment="Right" VerticalAlignment="Bottom" Height="20"
+                                 Margin="0,-6,0,1" Visibility="Hidden" ToolTip="Copy this message" />
                 <Grid x:Name="Marker" Grid.Row="1" Width="18" Height="18" VerticalAlignment="Top" HorizontalAlignment="Left" Margin="0,2,0,0"
                       ToolTip="{Binding At, Converter={StaticResource Stamp}, ConverterParameter=full}">
                     <Path x:Name="Sparkle" Data="{StaticResource SparkleGeometry}" Stretch="Uniform" Width="14" Height="14"
@@ -30,15 +33,10 @@
                 </Grid>
                 <StackPanel Grid.Row="1" Grid.Column="1">
                     <Border x:Name="Bubble" CornerRadius="8" HorizontalAlignment="Stretch">
-                        <Grid>
-                            <chat:MarkdownPresenter x:Name="Rich" Markdown="{Binding Text}" FontSize="14" />
-                            <!-- A user's message: its first lines when it is long (see MessageEntryVM.ShownText). -->
-                            <TextBox x:Name="Plain" Style="{StaticResource SelectableText}" Text="{Binding ShownText, Mode=OneWay}" FontSize="14"
-                                     Visibility="Collapsed" />
-                        </Grid>
+                        <!-- Markdown for replies and notices, plain text for prompts; a very long one collapses (10-19 #14). -->
+                        <chat:MessageBody x:Name="Body" Text="{Binding Text, Mode=OneWay}" Kind="Reply" FontSize="14" />
                     </Border>
-                    <!-- The whole of a long message opens in a window of its own (laid out in the transcript, a 10,000-line
-                         message is one row hundreds of screens tall). -->
+                    <!-- Beside the body's own Show more: the whole of a long prompt also opens in a window of its own. -->
                     <Button Style="{StaticResource SubtleButton}" HorizontalAlignment="Left" Padding="4,2" Margin="0,4,0,0"
                             Click="ShowAllText_Click" Visibility="{Binding IsLong, Converter={StaticResource BoolToVisibility}}"
                             ToolTip="Open the whole message in a window">
@@ -95,13 +93,25 @@
                 </StackPanel>
             </Grid>
             <DataTemplate.Triggers>
+                <Trigger SourceName="Row" Property="IsMouseOver" Value="True">
+                    <Setter TargetName="CopyRow" Property="Visibility" Value="Visible" />
+                </Trigger>
+                <Trigger SourceName="Row" Property="IsKeyboardFocusWithin" Value="True">
+                    <Setter TargetName="CopyRow" Property="Visibility" Value="Visible" />
+                </Trigger>
+                <Trigger SourceName="CopyRow" Property="chat:CopyButton.IsCopied" Value="True">
+                    <Setter TargetName="CopyRow" Property="Visibility" Value="Visible" />
+                </Trigger>
+                <DataTrigger Binding="{Binding Role}" Value="{x:Static model:MessageRole.Assistant}">
+                    <Setter TargetName="CopyRow" Property="ToolTip" Value="Copy this reply (or Ctrl+C in it with nothing selected)" />
+                </DataTrigger>
                 <DataTrigger Binding="{Binding Role}" Value="{x:Static model:MessageRole.User}">
                     <Setter TargetName="Bubble" Property="Background" Value="{DynamicResource CardBackgroundFillColorDefaultBrush}" />
                     <Setter TargetName="Bubble" Property="BorderBrush" Value="{DynamicResource CardStrokeColorDefaultBrush}" />
                     <Setter TargetName="Bubble" Property="BorderThickness" Value="1" />
                     <Setter TargetName="Bubble" Property="Padding" Value="12,8" />
-                    <Setter TargetName="Rich" Property="Visibility" Value="Collapsed" />
-                    <Setter TargetName="Plain" Property="Visibility" Value="Visible" />
+                    <Setter TargetName="Body" Property="Kind" Value="{x:Static core:LongTextKind.Prompt}" />
+                    <Setter TargetName="CopyRow" Property="ToolTip" Value="Copy this prompt as you sent it (or Ctrl+C in it with nothing selected)" />
                     <Setter TargetName="Sparkle" Property="Visibility" Value="Collapsed" />
                     <Setter TargetName="MarkerGlyph" Property="Visibility" Value="Visible" />
                     <Setter TargetName="MarkerGlyph" Property="Text" Value="{x:Static infra:Icons.Contact}" />
@@ -116,7 +126,7 @@
                     <Setter TargetName="MarkerGlyph" Property="Text" Value="{x:Static infra:Icons.Info}" />
                     <Setter TargetName="MarkerGlyph" Property="Foreground" Value="{DynamicResource SystemFillColorCautionBrush}" />
                     <Setter TargetName="Marker" Property="Margin" Value="0,9,0,0" />
-                    <Setter TargetName="Rich" Property="FontSize" Value="13" />
+                    <Setter TargetName="Body" Property="FontSize" Value="13" />
                 </DataTrigger>
                 <DataTrigger Binding="{Binding Role}" Value="{x:Static model:MessageRole.Error}">
                     <Setter TargetName="Bubble" Property="Background" Value="{DynamicResource SystemFillColorCriticalBackgroundBrush}" />
@@ -126,7 +136,7 @@
                     <Setter TargetName="MarkerGlyph" Property="Text" Value="{x:Static infra:Icons.Warning}" />
                     <Setter TargetName="MarkerGlyph" Property="Foreground" Value="{DynamicResource SystemFillColorCriticalBrush}" />
                     <Setter TargetName="Marker" Property="Margin" Value="0,9,0,0" />
-                    <Setter TargetName="Rich" Property="FontSize" Value="13" />
+                    <Setter TargetName="Body" Property="FontSize" Value="13" />
                 </DataTrigger>
             </DataTemplate.Triggers>
         </DataTemplate>
@@ -188,9 +198,8 @@
                     </ItemsControl>
                     <StackPanel x:Name="Details" Visibility="Collapsed">
                         <Separator Margin="0,6" />
-                        <TextBox Style="{StaticResource SelectableText}" Text="{Binding Output, Mode=OneWay}" FontFamily="{StaticResource MonoFont}"
-                                 FontSize="12" TextWrapping="NoWrap" MaxHeight="280" HorizontalScrollBarVisibility="Auto"
-                                 VerticalScrollBarVisibility="Auto" infra:WheelBubbling.IsEnabled="False" />
+                        <!-- In a box of its own height; a very long output shows its first lines (10-19 #14). -->
+                        <chat:MessageBody Text="{Binding Output, Mode=OneWay}" Kind="Output" FontFamily="{StaticResource MonoFont}" FontSize="12" />
                     </StackPanel>
                 </StackPanel>
             </Border>
