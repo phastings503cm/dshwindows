@@ -42,7 +42,7 @@ public sealed class GuardianServiceTests : IDisposable
     private sealed class FakeGuardian : HttpMessageHandler
     {
         public readonly List<(string Method, string Path, string Body, Dictionary<string, string> Headers)> Requests = [];
-        public Func<string, string, string, HttpResponseMessage>? Override;
+        public Func<string, string, string, HttpResponseMessage?>? Override;
         public bool TwoFactor;
 
         protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
