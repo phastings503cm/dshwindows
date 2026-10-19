@@ -72,13 +72,14 @@ public sealed partial class AppModel : ObservableObject
         Host.IsServerSwitching = () => Spark.IsSwitchingFor(Config.Providers.FirstOrDefault(p => p.RouteId == Config.ActiveRoute));
         // A chat waits only for its own model's box: another chat's box switching holds nothing back.
         Host.IsRouteSwitching = route => Spark.IsSwitchingFor(route);
-        // Agents that reported while the primary's box was busy switching models are heard as soon as it is done — another
-        // box switching holds nothing back. (Every status poll raises IsSwitching, changed or not, so only the step from
-        // switching to not switching counts.)
+        // Agents that reported while a chat's box was busy switching models are heard as soon as that box is done — whichever
+        // box it is (each chat checks its own box again). (Every status poll raises IsSwitching, changed or not, so only the
+        // step from switching to not switching counts.)
         var edge = new SwitchEdge();
         Spark.PropertyChanged += (_, e) =>
         {
-            if (e.PropertyName == nameof(SparkController.IsSwitching) && edge.Finished(Host.IsServerSwitching?.Invoke() == true)) Host.ResumeAfterServerSwitch();
+            if (e.PropertyName == nameof(SparkController.IsSwitching) && edge.Finished(Spark.Boxes.Where(b => b.IsSwitching).Select(b => b.Id)))
+                Host.ResumeAfterServerSwitch();
         };
         Host.OnSwapCommand = (arg, vm) => _ = Spark.HandleCommandAsync(arg, vm);
         // The agent's file writes drive the editor's live reload.

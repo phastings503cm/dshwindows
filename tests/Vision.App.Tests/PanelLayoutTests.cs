@@ -112,4 +112,19 @@ public sealed class SwitchEdgeTests
         var edge = new SwitchEdge();
         Assert.All(Enumerable.Range(0, 20), _ => Assert.False(edge.Finished(false)));
     }
+
+    [Fact]
+    public void AnyBoxFinishingCountsEvenWhileAnotherStillSwitches()
+    {
+        // Box B (a chat's own box, not the primary's) finishes while A is still switching: B's chats pick up now.
+        var edge = new SwitchEdge();
+        Assert.False(edge.Finished(["A"]));
+        Assert.False(edge.Finished(["A", "B"]));
+        Assert.True(edge.Finished(["A"]));
+        Assert.False(edge.Finished(["A"]));
+        // One box finishes as another starts, in the same poll.
+        Assert.True(edge.Finished(["C"]));
+        Assert.True(edge.Finished(Array.Empty<string>()));
+        Assert.False(edge.Finished(Array.Empty<string>()));
+    }
 }

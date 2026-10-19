@@ -621,7 +621,7 @@ public sealed partial class AgentHost : ObservableObject
         {
             if (ChatServerSwitching(vm))
             {
-                vm.Note("The Spark is switching models right now — send again once it says it's ready.");
+                RefuseWhileSwitching(vm, "The Spark is switching models right now — send again once it says it's ready.");
                 return null;
             }
             var display = "/" + skill.Slug + (args.Length == 0 ? "" : " " + args);
@@ -630,7 +630,7 @@ public sealed partial class AgentHost : ObservableObject
         }
         if (ChatServerSwitching(vm))
         {
-            vm.Note("The Spark is switching models right now — send again once it says it's ready (usually a few minutes).");
+            RefuseWhileSwitching(vm, "The Spark is switching models right now — send again once it says it's ready (usually a few minutes).");
             return null;
         }
         // A goal that paused because the agent needed the user: this message is the answer, so the goal
@@ -640,6 +640,26 @@ public sealed partial class AgentHost : ObservableObject
             return StartRun(vm, ct => RunTurnAsync(vm, text, attachments, goal: blocked, modelText: null, ct, resumingGoal: true, reply: text));
         return StartRun(vm, ct => RunTurnAsync(vm, text, attachments, goal: null, modelText: null, ct));
     }
+
+    /// <summary>Chats whose last Dispatch was refused because their model server is switching models (a queued prompt task
+    /// reads it: refused is not run, so the task goes back in line instead of being marked complete).</summary>
+    private readonly HashSet<string> _refusedWhileSwitching = new(StringComparer.Ordinal);
+
+    /// <summary>Chats whose prompt task is being dispatched right now (their refusal note speaks of the task, not of
+    /// sending again).</summary>
+    private readonly HashSet<string> _dispatchingTask = new(StringComparer.Ordinal);
+
+    /// <summary>The chat's model server is switching: what was sent is not run. A person is told to send again; a queued task
+    /// goes back in line and runs once the server is ready.</summary>
+    private void RefuseWhileSwitching(SessionVM vm, string forPerson)
+    {
+        _refusedWhileSwitching.Add(vm.Id);
+        vm.Note(_dispatchingTask.Contains(vm.Id) ? QueuedWhileSwitchingNotice : forPerson);
+    }
+
+    /// <summary>What a chat says when its next queued task meets a model switch (the task waits; nothing is lost).</summary>
+    public const string QueuedWhileSwitchingNotice =
+        "The Spark is switching models right now — this task goes back in line and starts once it's ready.";
 
     /// <summary>The user sent something the chat took up: the automatic continuations start counting again, and a Stop no
     /// longer holds the chat back. (A message that was refused — the Spark is switching models — changes neither.)</summary>
@@ -796,7 +816,7 @@ public sealed partial class AgentHost : ObservableObject
                 }
                 if (ChatServerSwitching(vm))
                 {
-                    vm.Note("The Spark is switching models right now — send again once it says it's ready.");
+                    RefuseWhileSwitching(vm, "The Spark is switching models right now — send again once it says it's ready.");
                     return;
                 }
                 if (goal.Text.Length == 0)

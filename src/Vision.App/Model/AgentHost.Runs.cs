@@ -678,9 +678,22 @@ public sealed partial class AgentHost
         _stoppedChats.Remove(vm.Id);
         PromptOutcome outcome;
         string? reason = null;
+        var refused = false;
         try
         {
-            var work = Dispatch(vm, task.PromptText, []);
+            _refusedWhileSwitching.Remove(vm.Id);
+            _dispatchingTask.Add(vm.Id);
+            Task? work;
+            try
+            {
+                work = Dispatch(vm, task.PromptText, []);
+            }
+            finally
+            {
+                _dispatchingTask.Remove(vm.Id);
+            }
+            // Refused (the chat's model server started switching models just now): it never ran.
+            refused = _refusedWhileSwitching.Remove(vm.Id);
             if (work is not null) await work;
             var record = _chatTaskRecord.Remove(task.Id, out var recordId) ? vm.PromptHistory.LastOrDefault(r => r.Id == recordId) : null;
             // A command ("/help", "/think high") has no prompt row: it simply ran.
@@ -691,6 +704,13 @@ public sealed partial class AgentHost
         {
             _pendingPromptSource.Remove(vm.Id);
             if (run.ActiveTaskId == task.Id) run.ActiveTaskId = null;
+        }
+        if (refused)
+        {
+            // Back in line, in its place: the list waits for the server (WorkPromptTaskAsync) and then runs it.
+            Queue.MarkStopped(task.Id, "Waiting — the model server was switching models; it runs once it's ready.");
+            QueueStateChanged();
+            return (WorkOutcome.Finished, null);
         }
         if (Queue.Find(task.Id)?.Status == QueueTaskStatus.Running)
             Queue.Finish(task.Id, ChatTaskRules.Status(outcome), outcome == PromptOutcome.Stopped ? "Stopped." : reason, vm.Id);

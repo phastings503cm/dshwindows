@@ -304,6 +304,44 @@ public sealed class RunsTests : IDisposable
     });
 
     [Fact]
+    public void AQueuedPromptWaitsForItsOwnChatsServerToFinishSwitching() => Run(async host =>
+    {
+        // 10-18 #11 × #9: the chat's own box (not the primary's) is switching models. The queued prompt waits for it — it is
+        // never marked complete without running.
+        var switching = true;
+        host.IsServerSwitching = () => false;
+        host.IsRouteSwitching = _ => switching;
+        var chat = Chat(host);
+        var a = host.AddToTasks(chat.Id, "task a")!;
+        var b = host.AddToTasks(chat.Id, "task b")!;
+        await Task.Delay(400);
+        Assert.Empty(_server.Seen);
+        Assert.Equal((QueueTaskStatus.Queued, QueueTaskStatus.Queued), (host.Queue.Find(a.Id)!.Status, host.Queue.Find(b.Id)!.Status));
+        Assert.True(host.IsQueueRunning(chat.Id));
+
+        switching = false;
+        await WaitUntil("both ran", () => host.Queue.Find(a.Id)?.Status == QueueTaskStatus.Complete && host.Queue.Find(b.Id)?.Status == QueueTaskStatus.Complete);
+        Assert.Equal(["task a", "task b"], UserRows(chat));
+    });
+
+    [Fact]
+    public void AQueuedPromptRefusedByASwitchJustStartingGoesBackInLine() => Run(async host =>
+    {
+        // The switch starts between the list's check and the send: the send is refused, and the task waits instead of being
+        // marked complete (the checks run in order: the list's wait, then the send's own).
+        var calls = 0;
+        host.IsServerSwitching = () => false;
+        host.IsRouteSwitching = _ => ++calls == 2;
+        var chat = Chat(host);
+        var a = host.AddToTasks(chat.Id, "task a")!;
+        await WaitUntil("it ran after all", () => host.Queue.Find(a.Id)?.Status == QueueTaskStatus.Complete);
+        Assert.Equal(["task a"], UserRows(chat));
+        Assert.Contains(chat.Entries.OfType<MessageEntryVM>(), m => m.Text == AgentHost.QueuedWhileSwitchingNotice);
+        Assert.Contains(host.Queue.Find(a.Id)!.Log, l => l.Text == "Waiting — the model server was switching models; it runs once it's ready.");
+        Assert.True(calls >= 4);
+    });
+
+    [Fact]
     public void PromptTasksWaitForResumeAfterARelaunch() => UiThread.Run(async () =>
     {
         var first = MakeHost();
