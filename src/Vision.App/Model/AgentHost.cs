@@ -492,12 +492,7 @@ public sealed partial class AgentHost : ObservableObject
         chat = new Vision.Windows.MachineChat(id, () => vm.Title, () => Config.MachineOwnAppsOnly)
         {
             // "Waiting for the mouse…" in the chat's status line while it waits its turn.
-            Status = text => _dispatcher.BeginInvoke(() =>
-            {
-                if (Session(id) is not { } session) return;
-                if (text is not null) session.Activity = session.Running ? text : null;
-                else if (session.Activity?.StartsWith("Waiting for", StringComparison.Ordinal) == true) session.Activity = null;
-            }),
+            Status = text => _dispatcher.BeginInvoke(() => Session(id)?.ShowMachineWait(text)),
         };
         _machineChats[id] = chat;
         return chat;

@@ -205,12 +205,20 @@ public sealed class SelfTest
     {
         try
         {
+            // A click that needs the real mouse while another chat has it: its card says so.
             chat.Running = true;
-            chat.Activity = MachineText.Waiting(WaitReason.OtherChat, "Build the game");
+            chat.StartTool("selftest-mouse", "mouse", "x=412 y=233 button=right");
+            chat.ShowMachineWait(MachineText.Waiting(WaitReason.OtherChat, "Build the game"));
             model.Select(chat.Id);
             model.Mode = WorkspaceMode.Chat;
             await Settle(800);
             Capture(owner, "chat-waiting-mouse");
+            var card = chat.Entries.OfType<ToolEntryVM>().Last();
+            if (card.Summary != "Waiting for the mouse — \u201CBuild the game\u201D is using it…")
+                throw new InvalidOperationException($"the waiting card says \"{card.Summary}\"");
+            chat.ShowMachineWait(null);
+            if (card.Summary is not null || chat.Activity is not null) throw new InvalidOperationException("the waiting line stayed after the wait");
+            chat.FinishTool("selftest-mouse", true, "Clicked right at (412,233). Screenshot to verify.", null);
         }
         catch (Exception error)
         {
