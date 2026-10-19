@@ -6,7 +6,7 @@ namespace Vision.Core;
 // MARK: - Task queue file format
 //
 // {"tasks": [{"id", "title", "details", "status", "enteredAt", "startedAt", "finishedAt", "rounds",
-// "promptTokens", "completionTokens", "sessionId", "cwd", "log": [{"id", "at", "kind", "text"}]}]}
+// "promptTokens", "completionTokens", "sessionId", "cwd", "asPrompt", "log": [{"id", "at", "kind", "text"}]}]}
 //
 // Camel-case keys, statuses and log kinds as their lower-case names, ISO-8601 dates. Decoding is
 // tolerant because a failed decode would cost the user their whole queue: a missing field (a file
@@ -40,6 +40,7 @@ internal static class TaskQueueFile
             CompletionTokens = t.CompletionTokens,
             SessionId = t.SessionId,
             Cwd = t.Cwd,
+            AsPrompt = t.AsPrompt ? true : null,
             Log = JsonSerializer.SerializeToElement(
                 t.Log.Select(l => new StoredLine { Id = l.Id, At = l.At, Kind = l.Kind.RawValue(), Text = l.Text }).ToList(), Json),
         }).ToList<StoredTask?>(),
@@ -65,6 +66,7 @@ internal static class TaskQueueFile
             CompletionTokens = t.CompletionTokens ?? 0,
             SessionId = t.SessionId,
             Cwd = t.Cwd,
+            AsPrompt = t.AsPrompt == true,
             Log = DecodeLog(t.Log),
         }).ToList();
     }
@@ -108,6 +110,7 @@ internal static class TaskQueueFile
         public long? CompletionTokens { get; set; }
         public string? SessionId { get; set; }
         public string? Cwd { get; set; }
+        public bool? AsPrompt { get; set; }
         public JsonElement? Log { get; set; }
     }
 
