@@ -208,15 +208,18 @@ public sealed class GuardianServiceTests : IDisposable
             (request.RequestUri!.AbsolutePath.StartsWith("/api/", StringComparison.Ordinal) ? _guardian : _model).SendAsync(request, cancellationToken);
     }
 
-    /// <summary>A chat on a model server of its own (not Guardian's), with the fake model answering.</summary>
-    private static SessionVM ChatOnOwnServer(AppConfig config, AgentHost host, FakeGuardian fake, FakeModelServer model)
+    /// <summary>A chat on a model server of its own (not Guardian's), with the fake model answering. It works in a project
+    /// folder under the test's own: a chat without a project would make its scratch folder in the real data folder.</summary>
+    private SessionVM ChatOnOwnServer(AppConfig config, AgentHost host, FakeGuardian fake, FakeModelServer model)
     {
         config.Activate(new ProviderProfile(ProviderKind.OpenAICompat, "stub", "http://stub.test/v1", "stub-model"));
         config.Preset = PermissionPreset.FullAccess.RawValue();
         config.ComputerToolsEnabled = false;
         model.Reset((_, _) => new FakeReply.Text("Done."));
         host.HttpHandlerForTesting = new Split(fake, model);
-        return host.NewSession(null);
+        var project = Path.Combine(_dir, "project");
+        Directory.CreateDirectory(project);
+        return host.NewSession(project);
     }
 
     [Fact]
