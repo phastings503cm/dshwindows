@@ -400,7 +400,7 @@ public sealed class QueuePanel : UserControl
         DockPanel.SetDock(spinner, Dock.Left);
         head.Children.Add(spinner);
         var titles = new StackPanel();
-        titles.Children.Add(Ui.Text($"Now · {work.Kind}" + (work.Round is { } round ? $" · round {round}" : ""), 11, FontWeights.SemiBold, "SystemFillColorSuccessBrush", wrap: false));
+        titles.Children.Add(Ui.Text($"Now · {work.Kind}", 11, FontWeights.SemiBold, "SystemFillColorSuccessBrush", wrap: false));
         var title = Ui.Text(work.Title.Trim(), 12.5, FontWeights.SemiBold);
         title.MaxHeight = 36;
         title.TextTrimming = TextTrimming.CharacterEllipsis;
@@ -409,11 +409,15 @@ public sealed class QueuePanel : UserControl
         head.Children.Add(titles);
         panel.Children.Add(head);
 
+        // "<phase> · round n · <elapsed> · est. <phrase>", as on the Mac.
         string PhaseLine()
         {
             var state = chat.TurnPhase;
-            if (state is null) return "running " + (DateTimeOffset.Now - work.StartedAt).FormattedDuration();
-            return (state.IsOver ? state.Headline : state.Phase.Label()) + " · " + PhaseText.RuntimeLine(state, DateTimeOffset.Now);
+            var parts = new List<string> { state is null ? "Working" : state.IsOver ? state.Headline : state.Phase.Label() };
+            if (chat.Goal?.Round is { } round) parts.Add($"round {round}");
+            parts.Add((state is { StartedAt: not null } ? state.Runtime(DateTimeOffset.Now) : DateTimeOffset.Now - work.StartedAt).FormattedDuration());
+            if (state?.EtaSeconds is { } eta) parts.Add("est. " + TurnEstimator.Phrase(eta));
+            return string.Join(" · ", parts);
         }
         var phase = Ui.Text(PhaseLine(), 11, brushKey: "TextFillColorSecondaryBrush", wrap: false);
         phase.Margin = new Thickness(22, 3, 0, 0);

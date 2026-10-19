@@ -151,10 +151,10 @@ public sealed class GuardianEtaClient
             {
                 ["text"] = record.Text,
                 ["at"] = record.At.ToUniversalTime().ToString("yyyy-MM-dd'T'HH:mm:ss.fff'Z'", System.Globalization.CultureInfo.InvariantCulture),
-                ["outcome"] = record.Outcome.RawValue(),
                 ["source"] = record.Source.RawValue(),
                 ["chatId"] = record.ChatId,
             };
+            if (NotebookOutcome(record.Outcome) is { } outcome) item["outcome"] = outcome;
             if (chatTitle is { Length: > 0 }) item["chatTitle"] = chatTitle;
             if (project is { Length: > 0 }) item["project"] = project;
             if (record.Model is { Length: > 0 } model) item["model"] = model;
@@ -168,6 +168,17 @@ public sealed class GuardianEtaClient
         using var response = await _http.SendAsync(request, cancellationToken).ConfigureAwait(false);
         await EnsureOkAsync(response, cancellationToken).ConfigureAwait(false);
     }
+
+    /// <summary>How the Prompt Notebook spells an ending (the Mac's words); null while it is still going (the start push).</summary>
+    public static string? NotebookOutcome(PromptOutcome outcome) => outcome switch
+    {
+        PromptOutcome.Completed => "completed",
+        PromptOutcome.Issues => "completed with issues",
+        PromptOutcome.NeedsYou => "needs you",
+        PromptOutcome.Failed => "failed",
+        PromptOutcome.Stopped => "stopped",
+        _ => null,
+    };
 
     // MARK: Wire helpers
 

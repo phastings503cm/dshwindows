@@ -552,7 +552,7 @@ public partial class ChatView : UserControl
         if (_session is not { } session) return;
         var text = Composer.Text.Trim();
         // While the agent works, Enter queues what you typed on this chat's tasks: it starts by itself after.
-        if (session.Running && text.Length > 0 && _attachments.Count == 0)
+        if (session.Running && text.Length > 0)
         {
             AddToTasks();
             return;
@@ -581,6 +581,11 @@ public partial class ChatView : UserControl
         if (_session is not { } session) return;
         var text = Composer.Text.Trim();
         if (text.Length == 0) return;
+        if (_attachments.Count > 0)
+        {
+            session.Note("A queued task can't carry attachments — send it when the agent is free, or remove the attachments.");
+            return;
+        }
         if (_model.Host.AddToTasks(session.Id, text) is null) return;
         Composer.Clear();
         SlashPopup.IsOpen = false;

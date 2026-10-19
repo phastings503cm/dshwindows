@@ -368,7 +368,8 @@ public sealed partial class AgentHost
     private async Task<(WorkOutcome, string?)> WorkPromptTaskAsync(string chatId, string taskId, ChatQueueRun run)
     {
         if (Session(chatId) is not { } vm) return (WorkOutcome.Stopped, null);
-        while (IsBusy(vm) || vm.PendingGates.Count > 0 || IsServerSwitching?.Invoke() == true)
+        // Free means: no turn, no permission question waiting, no background agent still working, no model switch under way.
+        while (IsBusy(vm) || vm.PendingGates.Count > 0 || vm.RunningBackgroundJobs.Count > 0 || IsServerSwitching?.Invoke() == true)
         {
             if (!QueueActive(chatId, run) || !Sessions.Contains(vm) || _chatTasksPaused.ContainsKey(chatId)) return (WorkOutcome.Stopped, null);
             await Task.Delay(QueueBusyPoll);
