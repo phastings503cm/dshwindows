@@ -52,6 +52,10 @@ public static class GuardianChatImport
             var content = GuardianJson.Text(message["content"]) ?? "";
             switch (GuardianJson.Text(message["role"])?.ToUpperInvariant())
             {
+                case "USER" when GuardianJson.Text(message["origin"]) == "system":
+                    // Something Guardian itself put in the chat, not a prompt.
+                    rows.Notice(content, at);
+                    break;
                 case "USER":
                     var names = (message["attachments"] as JsonArray ?? []).OfType<JsonObject>()
                         .Select(a => GuardianJson.Text(a["attachment"]?["name"]) ?? GuardianJson.Text(a["name"]))

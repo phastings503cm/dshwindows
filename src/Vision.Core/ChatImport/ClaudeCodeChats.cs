@@ -53,6 +53,9 @@ public static class ClaudeCodeChats
 
         // Pass 1: the tree, and the session's titles.
         var nodes = new Dictionary<string, (string? Parent, int Line)>(StringComparer.Ordinal);
+        // Parallel tool calls: their results are siblings, and the chain runs through only one of them.
+        var calls = new Dictionary<int, List<string>>();
+        var results = new Dictionary<int, List<string>>();
         string? customTitle = null, aiTitle = null, agentName = null, summaryTitle = null;
         string? leaf = null;
         var leafLine = -1;
@@ -78,6 +81,17 @@ public static class ClaudeCodeChats
             if (e.Flag("isSidechain")) return;
             var parent = e.Str("parentUuid") ?? e.Str("logicalParentUuid");
             nodes[uuid] = (parent, line);
+            var content = e.Get("message").Get("content");
+            if (type == "assistant")
+            {
+                var ids = content.Items().Where(b => b.Str("type") is "tool_use" or "server_tool_use").Select(b => b.Str("id")).OfType<string>().ToList();
+                if (ids.Count > 0) calls[line] = ids;
+            }
+            else if (type == "user" && content.ValueKind == JsonValueKind.Array && content.GetArrayLength() > 0
+                     && content.EnumerateArray().All(b => b.Str("type") == "tool_result"))
+            {
+                results[line] = content.EnumerateArray().Select(b => b.Str("tool_use_id")).OfType<string>().ToList();
+            }
             if (type is "user" or "assistant" && line > leafLine)
             {
                 leaf = uuid;
@@ -95,6 +109,11 @@ public static class ClaudeCodeChats
         // A chain that breaks off at an entry the file doesn't have (an older Claude Code, a damaged file) would lose the
         // start of the conversation: then every main-line entry counts, in file order.
         if (at is not null && !nodes.ContainsKey(at)) chain = nodes.Values.Select(n => n.Line).ToHashSet();
+        // A result off the chain that answers only calls on it belongs to the conversation (the sibling results of
+        // parallel calls) — without it those calls would read as never answered.
+        var called = calls.Where(c => chain.Contains(c.Key)).SelectMany(c => c.Value).ToHashSet(StringComparer.Ordinal);
+        foreach (var (line, ids) in results)
+            if (!chain.Contains(line) && ids.Count > 0 && ids.All(called.Contains)) chain.Add(line);
 
         // Pass 2: the rows, in file order.
         var rows = new ChatRowBuilder(modified, summaryOnly);
@@ -113,6 +132,13 @@ public static class ClaudeCodeChats
             {
                 case "user":
                     User(e, at, rows, ref images);
+                    break;
+                case "attachment":
+                    // A prompt typed while a turn ran, queued until it finished: said nowhere else.
+                    var attachment = e.Get("attachment");
+                    if (attachment.Str("type") == "queued_command" && !e.Flag("isMeta") && !attachment.Flag("isMeta")
+                        && attachment.Str("prompt") is { } queued && !queued.TrimStart().StartsWith('<'))
+                        rows.User(queued, at);
                     break;
                 case "assistant":
                     var message = e.Get("message");
@@ -231,8 +257,9 @@ public static class ClaudeCodeChats
         }
         if (Tag(text, "command-name") is { } command)
         {
+            // A slash command was never said to a model: a notice, not a prompt to replay.
             var args = Tag(text, "command-args");
-            rows.User(string.IsNullOrWhiteSpace(args) ? command : command + " " + args, at);
+            rows.Notice($"Ran {(string.IsNullOrWhiteSpace(args) ? command : command + " " + args)} in Claude Code.", at);
             return;
         }
         if (Tag(text, "bash-input") is { } bash)

@@ -35,6 +35,7 @@ public sealed class ChatImportWindow : Window
     private readonly StackPanel _chooseButtons;
     private readonly StackPanel _doneButtons;
     private readonly DockPanel _choose = new();
+    private readonly DockPanel _chipsRow = new();
     private readonly ScrollViewer _done = new() { Visibility = Visibility.Collapsed, VerticalScrollBarVisibility = ScrollBarVisibility.Auto };
 
     private ChatSource? _source;
@@ -82,12 +83,11 @@ public sealed class ChatImportWindow : Window
         header.Children.Add(intro);
         var add = Ui.Button("Add Export File…", AddFiles);
         add.ToolTip = "A Claude.ai or ChatGPT data export (.zip or conversations.json), or a Vision chat (.json) — or one Claude Code, Codex or OpenClaw session (.jsonl).";
-        var chipsRow = new DockPanel();
         DockPanel.SetDock(add, Dock.Right);
         add.VerticalAlignment = VerticalAlignment.Top;
-        chipsRow.Children.Add(add);
-        chipsRow.Children.Add(_chips);
-        header.Children.Add(chipsRow);
+        _chipsRow.Children.Add(add);
+        _chipsRow.Children.Add(_chips);
+        header.Children.Add(_chipsRow);
 
         var links = Ui.Stack(Orientation.Horizontal,
             Ui.LinkButton("Select New", SelectNew), Ui.LinkButton("Select All Shown", () => SelectShown(true)), Ui.LinkButton("Select None", () => SelectShown(false)),
@@ -510,6 +510,7 @@ public sealed class ChatImportWindow : Window
             panel.Children.Add(Ui.Status($"{chat.Title} ({chat.Source.Label()}): {reason}", "SystemFillColorCautionBrush"));
         _done.Content = panel;
         _choose.Visibility = Visibility.Collapsed;
+        _chipsRow.Visibility = Visibility.Collapsed;
         _done.Visibility = Visibility.Visible;
         _chooseButtons.Visibility = Visibility.Collapsed;
         _doneButtons.Visibility = Visibility.Visible;

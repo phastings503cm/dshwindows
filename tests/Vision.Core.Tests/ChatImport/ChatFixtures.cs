@@ -12,9 +12,10 @@ internal static class ChatFixtures
 
     public const string ClaudeSessionId = "5d1c0e2a-7b3f-4c1d-9e8a-0f1b2c3d4e5f";
 
-    /// <summary>One session: a prompt (with a reminder appended), a reply split into thinking/text/tool blocks, tool results
-    /// out of order, an abandoned (rewound) answer, a sidechain, a slash command and its output, a meta caveat, a background
-    /// task's notice, a compaction, an image, a synthetic API error, an interruption, titles, and a line that isn't JSON.</summary>
+    /// <summary>One session: a prompt (with a reminder appended), a reply split into thinking/text/tool blocks, parallel tool
+    /// calls whose results are siblings (only one on the chain), an abandoned (rewound) answer, a sidechain, a queued prompt,
+    /// a slash command and its output, a meta caveat, a background task's notice, a compaction, an image, a synthetic API
+    /// error, an interruption, titles, and a line that isn't JSON.</summary>
     public static readonly string ClaudeSession = string.Join("\n",
         """{"type":"queue-operation","operation":"enqueue","timestamp":"2026-10-01T09:00:00.000Z","sessionId":"S","content":"Fix the login bug"}""",
         """{"parentUuid":null,"isSidechain":false,"userType":"external","cwd":"C:\\code\\shop","sessionId":"S","version":"2.1.0","gitBranch":"main","type":"user","message":{"role":"user","content":"Fix the login bug in auth.ts\n<system-reminder>Today is a Tuesday.</system-reminder>"},"uuid":"u1","timestamp":"2026-10-01T09:00:01.000Z","origin":{"kind":"human"},"promptSource":"sdk"}""",
@@ -26,12 +27,14 @@ internal static class ChatFixtures
         """{"parentUuid":"u5","isSidechain":false,"type":"assistant","message":{"id":"msg_2","model":"claude-opus-4-5","role":"assistant","content":[{"type":"tool_use","id":"toolu_2","name":"Read","input":{"file_path":"C:\\code\\shop\\src\\auth.ts"}}]},"uuid":"u6","timestamp":"2026-10-01T09:00:07.000Z"}""",
         """{"parentUuid":"u6","isSidechain":false,"type":"assistant","message":{"id":"msg_2","model":"claude-opus-4-5","role":"assistant","content":[{"type":"tool_use","id":"toolu_3","name":"Grep","input":{"pattern":"session","path":"src"}}]},"uuid":"u7","timestamp":"2026-10-01T09:00:07.500Z"}""",
         """{"parentUuid":"u7","isSidechain":false,"type":"user","message":{"role":"user","content":[{"tool_use_id":"toolu_3","type":"tool_result","content":"No matches found","is_error":true}]},"uuid":"u8","timestamp":"2026-10-01T09:00:08.000Z"}""",
-        """{"parentUuid":"u8","isSidechain":false,"type":"user","message":{"role":"user","content":[{"tool_use_id":"toolu_2","type":"tool_result","content":[{"type":"text","text":"     1\texport function login() {}"}]}]},"uuid":"u9","timestamp":"2026-10-01T09:00:09.000Z"}""",
+        """{"parentUuid":"u7","isSidechain":false,"type":"user","message":{"role":"user","content":[{"tool_use_id":"toolu_2","type":"tool_result","content":[{"type":"text","text":"     1\texport function login() {}"}]}]},"uuid":"u9","timestamp":"2026-10-01T09:00:09.000Z"}""",
         """{"parentUuid":"u9","isSidechain":false,"type":"assistant","message":{"id":"msg_x","model":"claude-opus-4-5","role":"assistant","content":[{"type":"text","text":"ABANDONED ANSWER"}]},"uuid":"x1","timestamp":"2026-10-01T09:00:10.000Z"}""",
         """{"parentUuid":"u9","isSidechain":true,"type":"user","message":{"role":"user","content":"SIDECHAIN PROMPT"},"uuid":"sc1","timestamp":"2026-10-01T09:00:10.500Z"}""",
         """{"parentUuid":"u9","isSidechain":false,"type":"assistant","message":{"id":"msg_3","model":"claude-opus-4-5","role":"assistant","content":[{"type":"text","text":"Fixed: login now checks the session."}]},"uuid":"u10","timestamp":"2026-10-01T09:00:11.000Z"}""",
         """{"type":"custom-title","customTitle":"Login bug fix","sessionId":"S"}""",
-        """{"parentUuid":"u10","isSidechain":false,"type":"user","message":{"role":"user","content":"<command-name>/model</command-name>\n            <command-message>model</command-message>\n            <command-args>opus</command-args>"},"uuid":"u11","timestamp":"2026-10-01T09:05:00.000Z"}""",
+        """{"parentUuid":"u10","isSidechain":false,"type":"attachment","attachment":{"type":"queued_command","prompt":"also check the logout","commandMode":"prompt","timestamp":"2026-10-01T09:04:00.000Z"},"uuid":"q1","timestamp":"2026-10-01T09:04:00.000Z"}""",
+        """{"parentUuid":"q1","isSidechain":false,"type":"attachment","attachment":{"type":"queued_command","prompt":"<task-notification><summary>x</summary></task-notification>","commandMode":"task-notification"},"uuid":"q2","timestamp":"2026-10-01T09:04:01.000Z"}""",
+        """{"parentUuid":"q2","isSidechain":false,"type":"user","message":{"role":"user","content":"<command-name>/model</command-name>\n            <command-message>model</command-message>\n            <command-args>opus</command-args>"},"uuid":"u11","timestamp":"2026-10-01T09:05:00.000Z"}""",
         """{"parentUuid":"u11","isSidechain":false,"type":"user","message":{"role":"user","content":"<local-command-stdout>Set model to opus</local-command-stdout>"},"uuid":"u12","timestamp":"2026-10-01T09:05:01.000Z"}""",
         """{"parentUuid":"u12","isSidechain":false,"type":"user","isMeta":true,"message":{"role":"user","content":"Caveat: The messages below were generated by the user while running local commands."},"uuid":"u13","timestamp":"2026-10-01T09:05:02.000Z"}""",
         """{"parentUuid":"u13","isSidechain":false,"type":"user","message":{"role":"user","content":"<task-notification>\n<task-id>b1</task-id>\n<status>completed</status>\n<summary>Tests passed</summary>\n</task-notification>"},"uuid":"u14","timestamp":"2026-10-01T09:06:00.000Z","origin":{"kind":"task-notification"},"promptSource":"system"}""",
@@ -133,6 +136,11 @@ internal static class ChatFixtures
         temp.Write(sessions + "oc-1111.jsonl", OpenClawSession);
         temp.Write(sessions + "oc-sub.jsonl", OpenClawSession.Replace("oc-1111", "oc-sub"));
         temp.Write(sessions + "oc-old.jsonl.reset.2026-09-01T00-00-00.000Z", OpenClawSession.Replace("oc-1111", "oc-old"));
+        temp.Write(".openclaw/agents/main/session-sqlite-import-archive/archive-tier.oc-arch.jsonl.imported-1788222840776", string.Join("\n",
+            """{"type":"session","version":3,"id":"oc-arch","timestamp":"2026-08-01T03:00:00.000Z","cwd":"C:\\Users\\pat\\.openclaw\\workspace"}""",
+            """{"type":"message","id":"a1","parentId":null,"timestamp":"2026-08-01T03:00:01.000Z","message":{"role":"user","content":"[cron:j1 nightly-sweep] Sweep the queue"}}""",
+            """{"type":"message","id":"a2","parentId":"a1","timestamp":"2026-08-01T03:00:09.000Z","message":{"role":"assistant","content":[{"type":"text","text":"Nothing to close."}]}}"""));
+        temp.Write(".openclaw/agents/main/session-sqlite-import-archive/archive-tier.oc-arch.trajectory.jsonl.imported-1788222840777", "{}");
         temp.Write(sessions + "sessions.json", """
             {"agent:main:dashboard:abc":{"sessionId":"oc-1111","label":"Build box disk","updatedAt":1789041610000},
              "agent:main:subagent:def":{"sessionId":"oc-sub","label":"helper","updatedAt":1789041610000}}
@@ -153,6 +161,9 @@ internal static class ChatFixtures
             db.Execute("INSERT INTO session_windows VALUES (?, ?, ?, ?, ?, ?)", id, key, name, "1789040000000", updated.ToString(), "claude-opus-4-5");
             for (var i = 0; i < events.Length; i++) db.Execute("INSERT INTO transcript_events VALUES (?, ?, ?, ?)", id, i.ToString(), events[i], "1789040000000");
         }
+        db.Execute("CREATE TABLE session_nodes (session_key TEXT PRIMARY KEY, label TEXT, display_name TEXT, created_via TEXT)");
+        db.Execute("INSERT INTO session_nodes VALUES (?, ?, ?, ?)", "agent:main:dashboard:1", "Open tickets today", null, "operator");
+        db.Execute("INSERT INTO session_nodes VALUES (?, ?, ?, ?)", "agent:main:subagent:3", "", "helper", "spawn");
         Session("s-dash", "agent:main:dashboard:1", "Count the tickets", 1789041700000,
             """{"type":"session","version":3,"id":"s-dash","timestamp":"2026-09-10T12:01:00.000Z","cwd":"C:\\code\\desk"}""",
             """{"type":"message","id":"d1","parentId":null,"timestamp":"2026-09-10T12:01:01.000Z","message":{"role":"user","content":"How many tickets are open?"}}""",

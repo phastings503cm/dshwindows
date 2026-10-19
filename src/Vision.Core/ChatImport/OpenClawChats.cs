@@ -7,8 +7,10 @@ namespace Vision.Core;
 /// events in order, each the JSON line older versions wrote to <c>agents\&lt;agent&gt;\sessions\&lt;id&gt;.jsonl</c>, indexed by
 /// <c>sessions.json</c>). Both are read. The events are pi-agent session lines: <c>session</c> (id, cwd), <c>message</c> (user,
 /// assistant with text and tool calls, toolResult), <c>compaction</c>, <c>custom_message</c>, <c>model_change</c>, linked by
-/// <c>parentId</c> — the conversation is the chain that ends at the last message. Subagent sessions are left out (their
-/// results are in the parent's chat); scheduled runs are listed but not ticked. Deleted and reset sessions aren't offered.</summary>
+/// <c>parentId</c> — the conversation is the chain that ends at the last leaf (or message). Reset generations
+/// (<c>&lt;id&gt;.jsonl.reset.*</c>) and the pre-SQLite archive (<c>session-sqlite-import-archive</c>) are read too; deleted
+/// (zstd) sessions aren't. Cron runs, subagents and other runs are listed but not ticked, behind "Show scheduled and
+/// scripted runs". The rules and words are Vision for macOS's.</summary>
 public static class OpenClawChats
 {
     /// <summary>The OpenClaw state folders in a home: OPENCLAW_STATE_DIR, ~/.openclaw, profiles (~/.openclaw-work) and the
@@ -39,7 +41,7 @@ public static class OpenClawChats
         return found;
     }
 
-    /// <summary>A place sessions are kept: an agent's SQLite store, or its sessions folder.</summary>
+    /// <summary>A place sessions are kept: an agent's SQLite store, or a folder of its transcript files.</summary>
     public sealed record Store(string Agent, string Path, bool IsSqlite);
 
     public static IReadOnlyList<Store> Stores(string stateDir)
@@ -54,8 +56,9 @@ public static class OpenClawChats
                 var agent = System.IO.Path.GetFileName(folder);
                 var sqlite = System.IO.Path.Combine(folder, "agent", "openclaw-agent.sqlite");
                 if (File.Exists(sqlite)) stores.Add(new Store(agent, sqlite, true));
-                var sessions = System.IO.Path.Combine(folder, "sessions");
-                if (Directory.Exists(sessions)) stores.Add(new Store(agent, sessions, false));
+                // Older transcripts, reset generations and the pre-SQLite archive are files.
+                foreach (var name in new[] { "sessions", "session-sqlite-import-archive" })
+                    if (System.IO.Path.Combine(folder, name) is var files && Directory.Exists(files)) stores.Add(new Store(agent, files, false));
             }
         }
         catch (Exception error) when (error is IOException or UnauthorizedAccessException)
@@ -68,18 +71,38 @@ public static class OpenClawChats
     // MARK: - SQLite (2026.8 and later)
 
     /// <summary>A conversation listed in an agent's SQLite store.</summary>
-    public sealed record SqliteSession(string Id, string Key, string? DisplayName, DateTimeOffset? Created, DateTimeOffset? Updated, string? Model);
+    /// <param name="Via">session_nodes.created_via: operator, cron, spawn, run, …</param>
+    public sealed record SqliteSession(string Id, string Key, string? DisplayName, DateTimeOffset? Created, DateTimeOffset? Updated, string? Model,
+                                       string? Via = null, string Agent = "main");
 
-    public static IReadOnlyList<SqliteSession> ListSqlite(string database)
+    public static IReadOnlyList<SqliteSession> ListSqlite(string database, string agent = "main")
     {
         var sessions = new List<SqliteSession>();
         using var db = SqliteReader.OpenReadOnly(database);
         if (!db.HasTable("session_windows") || !db.HasTable("transcript_events")) return sessions;
-        db.Query("SELECT session_id, session_key, display_name, created_at, updated_at, model FROM session_windows ORDER BY updated_at DESC", row =>
+        void Add(SqliteReader.Row row)
         {
             if (row.Text(0) is not { } id) return;
-            sessions.Add(new SqliteSession(id, row.Text(1) ?? "", row.Text(2), Millis(row.Int(3)), Millis(row.Int(4)), row.Text(5)));
-        });
+            sessions.Add(new SqliteSession(id, row.Text(1) ?? "", row.Text(2), Millis(row.Int(3)), Millis(row.Int(4)), row.Text(5), row.Text(6), agent));
+        }
+        // The session's node names it best (its label) and says how it was made; an older store has no nodes table.
+        try
+        {
+            if (db.HasTable("session_nodes"))
+            {
+                db.Query("""
+                    SELECT w.session_id, w.session_key, COALESCE(NULLIF(n.label, ''), NULLIF(n.display_name, ''), NULLIF(w.display_name, '')),
+                           w.created_at, w.updated_at, w.model, n.created_via
+                    FROM session_windows w LEFT JOIN session_nodes n ON n.session_key = w.session_key ORDER BY w.updated_at DESC
+                    """, Add);
+                return sessions;
+            }
+        }
+        catch (IOException)
+        {
+            sessions.Clear(); // a node table without those columns
+        }
+        db.Query("SELECT session_id, session_key, display_name, created_at, updated_at, model, NULL FROM session_windows ORDER BY updated_at DESC", Add);
         return sessions;
     }
 
@@ -109,23 +132,66 @@ public static class OpenClawChats
                 using (doc) visit(doc.RootElement, i);
             }
         }
-        return Convert(Each, session.Id, session.DisplayName, session.Key, session.Model, session.Updated ?? session.Created ?? DateTimeOffset.UtcNow,
-            database, summaryOnly);
+        return Convert(Each, new Kind(session.Id, session.DisplayName, session.Key, session.Via, session.Agent, false), session.Model,
+            session.Updated ?? session.Created ?? DateTimeOffset.UtcNow, database, summaryOnly);
     }
 
     private static DateTimeOffset? Millis(long? value) => value is > 0 ? ChatRowBuilder.Epoch(value.Value) : null;
 
-    /// <summary>Not a conversation of its own: a subagent's.</summary>
-    public static bool IsSubagent(string key) => key.Contains(":subagent:", StringComparison.Ordinal);
+    /// <summary>Work nobody typed, from its key or how it was made: a cron run, a subagent (spawned by another session), a
+    /// run — listed behind "Show scheduled and scripted runs" (Vision for macOS's rule).</summary>
+    public static bool IsAutomated(string? key, string? via = null) =>
+        key is { } k && (k.Contains(":cron:", StringComparison.Ordinal) || k.Contains(":subagent:", StringComparison.Ordinal)
+                         || k.Contains(":spawn:", StringComparison.Ordinal) || k.Contains(":run:", StringComparison.Ordinal))
+        || via is "cron" or "spawn" or "run";
 
-    /// <summary>A scheduled run (cron) or an automation's.</summary>
-    public static bool IsAutomated(string key, string? displayName) =>
-        key.Contains(":cron:", StringComparison.Ordinal) || displayName is { } name && (name.StartsWith("Cron:", StringComparison.Ordinal) || name.StartsWith("Automation:", StringComparison.Ordinal));
+    /// <summary>"[cron:&lt;id&gt; &lt;name&gt;] …" (how a cron run's prompt starts) → the job's name.</summary>
+    internal static string? CronName(string? prompt)
+    {
+        if (prompt is null || !prompt.StartsWith("[cron:", StringComparison.Ordinal)) return null;
+        var close = prompt.IndexOf(']');
+        if (close < 0) return null;
+        var parts = prompt[6..close].Split(' ', 2);
+        return parts.Length == 2 && parts[1].Trim().Length > 0 ? parts[1].Trim() : null;
+    }
+
+    /// <summary>The preview's remark for a session: "Before a reset", "Cron run", "Subagent", "Chat" or "Session" (and
+    /// " · agent &lt;name&gt;" for an agent other than main).</summary>
+    internal static string Remark(string? key, string? via, string agent, bool reset, bool cron)
+    {
+        var kind = reset ? "Before a reset"
+            : key?.Contains(":cron:", StringComparison.Ordinal) == true || cron ? "Cron run"
+            : key?.Contains(":subagent:", StringComparison.Ordinal) == true || via == "spawn" ? "Subagent"
+            : key?.Contains(":dashboard:", StringComparison.Ordinal) == true ? "Chat"
+            : "Session";
+        return agent == "main" ? kind : $"{kind} · agent {agent}";
+    }
+
+    /// <summary>What a session is, as far as its store or file says.</summary>
+    private sealed record Kind(string FallbackId, string? Label, string? Key, string? Via, string Agent, bool Reset);
 
     // MARK: - JSON Lines (before 2026.8)
 
-    /// <summary>A sessions folder's live transcripts (<c>&lt;id&gt;.jsonl</c> — not the .reset/.deleted/.bak copies), with the
-    /// key and label <c>sessions.json</c> gives each.</summary>
+    /// <summary>A transcript file: a session (<c>&lt;id&gt;.jsonl</c>), a reset generation (<c>&lt;id&gt;.jsonl.reset.&lt;time&gt;</c>) or the
+    /// pre-SQLite archive's (<c>….jsonl.imported-&lt;ms&gt;</c>) — not trajectories, checkpoints, deleted (zstd) or .bak copies.</summary>
+    internal static bool IsTranscriptFile(string name)
+    {
+        if (!name.Contains(".jsonl", StringComparison.Ordinal)) return false;
+        foreach (var skip in new[] { ".trajectory.", ".checkpoint.", ".deleted.", ".zst", ".bak", "trajectory-path" })
+            if (name.Contains(skip, StringComparison.Ordinal)) return false;
+        return name.EndsWith(".jsonl", StringComparison.Ordinal) || name.Contains(".jsonl.reset.", StringComparison.Ordinal)
+               || name.Contains(".jsonl.imported-", StringComparison.Ordinal);
+    }
+
+    /// <summary>"archive-tier.&lt;id&gt;.jsonl.imported-…" or "&lt;id&gt;.jsonl.reset.…" → the id in the name.</summary>
+    internal static string IdFromFileName(string name)
+    {
+        var stem = name.StartsWith("archive-tier.", StringComparison.Ordinal) ? name["archive-tier.".Length..] : name;
+        var at = stem.IndexOf(".jsonl", StringComparison.Ordinal);
+        return at < 0 ? stem : stem[..at];
+    }
+
+    /// <summary>A folder's transcript files, with the key and label <c>sessions.json</c> gives each (when it has one).</summary>
     public static IReadOnlyList<(string Path, string Key, string? Label)> ListJsonl(string sessionsFolder)
     {
         var index = new Dictionary<string, (string Key, string? Label)>(StringComparer.Ordinal);
@@ -148,9 +214,10 @@ public static class OpenClawChats
         var files = new List<(string, string, string?)>();
         try
         {
-            foreach (var file in Directory.EnumerateFiles(sessionsFolder, "*.jsonl"))
+            foreach (var file in Directory.EnumerateFiles(sessionsFolder))
             {
-                var id = Path.GetFileNameWithoutExtension(file);
+                if (!IsTranscriptFile(Path.GetFileName(file))) continue;
+                var id = IdFromFileName(Path.GetFileName(file));
                 var (key, label) = index.TryGetValue(id, out var known) ? known : ("", null);
                 files.Add((file, key, label));
             }
@@ -162,7 +229,8 @@ public static class OpenClawChats
         return files;
     }
 
-    public static ImportedChat? ReadJsonl(string path, string key = "", string? label = null, bool summaryOnly = false, CancellationToken cancellationToken = default)
+    public static ImportedChat? ReadJsonl(string path, string key = "", string? label = null, bool summaryOnly = false, CancellationToken cancellationToken = default,
+                                          string agent = "main")
     {
         DateTimeOffset modified;
         try
@@ -173,13 +241,15 @@ public static class OpenClawChats
         {
             modified = DateTimeOffset.UtcNow;
         }
-        return Convert(visit => JsonLines.Read(path, visit, cancellationToken), Path.GetFileNameWithoutExtension(path), label, key, null, modified, path, summaryOnly);
+        var name = Path.GetFileName(path);
+        var kind = new Kind(IdFromFileName(name), label, key.Length == 0 ? null : key, null, agent, name.Contains(".jsonl.reset.", StringComparison.Ordinal));
+        return Convert(visit => JsonLines.Read(path, visit, cancellationToken), kind, null, modified, path, summaryOnly);
     }
 
     // MARK: - Events
 
-    private static ImportedChat? Convert(Action<Action<JsonElement, int>> each, string fallbackId, string? title, string key, string? model,
-                                         DateTimeOffset fallbackTime, string from, bool summaryOnly)
+    private static ImportedChat? Convert(Action<Action<JsonElement, int>> each, Kind kind, string? model, DateTimeOffset fallbackTime, string from,
+                                         bool summaryOnly)
     {
         // Pass 1: the tree.
         var parents = new Dictionary<string, (string? Parent, int Index)>(StringComparer.Ordinal);
@@ -241,16 +311,19 @@ public static class OpenClawChats
             }
         });
         if (rows.Messages == 0) return null;
-        id ??= fallbackId;
-        var notes = new List<string>();
+        id ??= kind.FallbackId;
+        var cron = CronName(rows.FirstPrompt);
+        var notes = new List<string> { Remark(kind.Key, kind.Via, kind.Agent, kind.Reset, cron is not null) };
         if (images > 0) notes.Add(images == 1 ? "1 image not imported" : $"{images} images not imported");
-        var automated = IsAutomated(key, title);
-        if (automated) notes.Insert(0, "Cron run");
+        var automated = IsAutomated(kind.Key, kind.Via) || cron is not null;
+        var title = !string.IsNullOrWhiteSpace(kind.Label) ? kind.Label
+            : cron is not null ? "Cron: " + cron
+            : null;
         return new ImportedChat
         {
             Source = ChatSource.OpenClaw,
             SourceId = id,
-            Title = !string.IsNullOrWhiteSpace(title) ? ChatRowBuilder.OneLine(title, 120) : ChatRowBuilder.TitleFrom(rows.FirstPrompt, "OpenClaw session " + ClaudeCodeChats.Short(id)),
+            Title = title is not null ? ChatRowBuilder.OneLine(title, 120) : ChatRowBuilder.TitleFrom(rows.FirstPrompt, "OpenClaw session"),
             Rows = rows.Rows,
             Project = IsOpenClawFolder(cwd) ? null : cwd,
             Model = model,

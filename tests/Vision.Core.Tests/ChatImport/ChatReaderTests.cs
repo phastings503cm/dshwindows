@@ -29,7 +29,8 @@ public sealed class ChatReaderTests
             @"tool Read [C:\code\shop\src\auth.ts] → 1 export function login() {}",
             "tool Grep [session] → failed: No matches found (error)",
             "assistant: Fixed: login now checks the session.",
-            "user: /model opus",
+            "user: also check the logout",
+            "notice: Ran /model opus in Claude Code.",
             "notice: Set model to opus",
             "notice: Background task completed: Tests passed",
             "compaction: This session is being continued from a previous conversation. Summary: fixed login.",
@@ -48,10 +49,10 @@ public sealed class ChatReaderTests
         Assert.Equal(DateTimeOffset.Parse("2026-10-01T09:00:01Z"), chat.StartedAt);
         Assert.Equal(DateTimeOffset.Parse("2026-10-01T09:12:30Z"), chat.UpdatedAt);
         // Times are the source's, row by row.
-        Assert.Equal(DateTimeOffset.Parse("2026-10-01T09:05:00Z"), chat.Rows[6].At);
+        Assert.Equal(DateTimeOffset.Parse("2026-10-01T09:04:00Z"), chat.Rows[6].At);
         // Tool output kept without the harness's reminders; the compaction counts what it folded.
         Assert.Equal("12: export function login() {", chat.Rows[2].Output);
-        Assert.Equal("4", chat.Rows[9].ArgSummary);
+        Assert.Equal("4", chat.Rows[10].ArgSummary);
         Assert.Equal(["1 subagent transcript left out (its result is in the chat)", "1 image not imported"], chat.Notes);
         // Nothing from the rewound answer or the sidechain.
         Assert.DoesNotContain(chat.Rows, r => r.Text?.Contains("ABANDONED") == true || r.Text?.Contains("SIDECHAIN") == true);
@@ -103,11 +104,11 @@ public sealed class ChatReaderTests
             "assistant: I'll list them.",
             "tool exec_command [ls] → README.md",
             "tool exec_command [cat missing.txt] → failed: cat: missing.txt: No such file or directory (error)",
-            "tool apply_patch [*** Begin Patch *** Add File: notes.md +hi *** End Patch] → Success. Updated the following files:",
+            "tool apply_patch [Add File: notes.md] → Success. Updated the following files:",
             "assistant: There are two entries: README.md and src.",
             "compaction: Summary: listed the files.",
             "user: Now delete notes.md\n\n[image]",
-            "notice: Interrupted by the user.",
+            "notice: The turn was interrupted in Codex.",
         ], chat.Rows.Select(Line).ToArray());
         Assert.Equal(ChatFixtures.CodexId, chat.SourceId);
         Assert.Equal("Shop file listing", chat.Title); // the last thread name given
@@ -174,16 +175,26 @@ public sealed class ChatReaderTests
     }
 
     [Fact]
-    public void OpenClawScanLeavesOutSubagentsAndResetCopies()
+    public void OpenClawScanListsResetGenerationsTheArchiveAndRunsBehindTheToggle()
     {
         using var temp = new TempDirectory();
         var state = ChatFixtures.WriteOpenClawJsonl(temp);
 
-        var found = ChatImportScanner.OpenClaw(new ChatImportLocations(temp.Path, OpenClawStateDirs: [state]));
+        var found = ChatImportScanner.OpenClaw(new ChatImportLocations(temp.Path, OpenClawStateDirs: [state]))
+            .ToDictionary(c => c.SourceId);
 
-        var only = Assert.Single(found);
-        Assert.Equal("oc-1111", only.SourceId);
-        Assert.False(only.Automated);
+        Assert.Equal(["oc-1111", "oc-arch", "oc-old", "oc-sub"], found.Keys.Order().ToArray()); // no trajectory
+        Assert.False(found["oc-1111"].Automated);
+        Assert.Equal("Chat", found["oc-1111"].Note);
+        Assert.Equal("Before a reset", found["oc-old"].Note);
+        Assert.False(found["oc-old"].Automated);
+        Assert.True(found["oc-sub"].Automated); // a subagent's session: listed, not ticked
+        Assert.Equal("Subagent", found["oc-sub"].Note);
+        Assert.False(found["oc-sub"].SelectedByDefault);
+        // A cron run is known by its first prompt too.
+        Assert.Equal("Cron: nightly-sweep", found["oc-arch"].Title);
+        Assert.True(found["oc-arch"].Automated);
+        Assert.Equal("Cron run", found["oc-arch"].Note);
     }
 
     [SqliteFact]
@@ -194,12 +205,16 @@ public sealed class ChatReaderTests
 
         var found = ChatImportScanner.OpenClaw(new ChatImportLocations(temp.Path, OpenClawStateDirs: [state]));
 
-        Assert.Equal(["Cron: ticket sweep", "Count the tickets"], found.Select(c => c.Title).ToArray()); // the subagent's is left out
-        var cron = found[0];
+        // Newest first; a node's label names the chat; the subagent's session is listed as a run.
+        Assert.Equal(["helper", "Cron: ticket sweep", "Open tickets today"], found.Select(c => c.Title).ToArray());
+        Assert.True(found[0].Automated);
+        Assert.Equal("Subagent", found[0].Note);
+        var cron = found[1];
         Assert.True(cron.Automated);
         Assert.False(cron.SelectedByDefault);
         Assert.Equal("Cron run", cron.Note); // the Mac's word
-        var chat = found[1].Load!(default).GetAwaiter().GetResult()!;
+        Assert.False(found[2].Automated);
+        var chat = found[2].Load!(default).GetAwaiter().GetResult()!;
         Assert.Equal(["user: How many tickets are open?", "assistant: Twelve are open."], chat.Rows.Select(Line).ToArray());
         Assert.Equal(@"C:\code\desk", chat.Project);
         Assert.Equal(DateTimeOffset.Parse("2026-09-10T12:01:05Z"), chat.UpdatedAt);

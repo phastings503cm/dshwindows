@@ -160,7 +160,7 @@ public static class CodexChats
                 rows.User(text, at);
                 break;
             case "turn_aborted":
-                rows.Notice("Interrupted by the user.", at);
+                rows.Notice("The turn was interrupted in Codex.", at);
                 break;
         }
     }
@@ -179,7 +179,12 @@ public static class CodexChats
                 rows.ToolCall(item.Str("call_id"), item.Str("name") ?? "tool", ChatRowBuilder.Arguments(item.Get("arguments")), at);
                 break;
             case "custom_tool_call":
-                rows.ToolCall(item.Str("call_id"), item.Str("name") ?? "tool", ChatRowBuilder.Arguments(item.Get("input")), at);
+                var tool = item.Str("name") ?? "tool";
+                var input = item.Get("input");
+                rows.ToolCall(item.Str("call_id"), tool,
+                    tool == "apply_patch" && input.ValueKind == JsonValueKind.String && PatchFiles(input.GetString()!) is { Length: > 0 } files
+                        ? files
+                        : ChatRowBuilder.Arguments(input), at);
                 break;
             case "local_shell_call":
                 rows.ToolCall(item.Str("call_id"), "shell", ChatRowBuilder.Arguments(item.Get("action")), at);
@@ -232,6 +237,19 @@ public static class CodexChats
             if (marker >= 0) return (output[(marker + "\nOutput:\n".Length)..], failed);
         }
         return (output, failed);
+    }
+
+    /// <summary>The files a patch touches: "Add File: notes.md, Update File: src/app.py" (Vision for macOS's line).</summary>
+    internal static string PatchFiles(string patch)
+    {
+        var files = new List<string>();
+        foreach (var raw in patch.Split('\n'))
+        {
+            var line = raw.Trim();
+            foreach (var verb in new[] { "Add File: ", "Update File: ", "Delete File: " })
+                if (line.StartsWith("*** " + verb, StringComparison.Ordinal)) files.Add(verb + line[(4 + verb.Length)..].Trim());
+        }
+        return ChatRowBuilder.OneLine(string.Join(", ", files), ChatRowBuilder.MaxArgSummary);
     }
 
     /// <summary>Codex's exec output says "Process exited with code N" (or "Exit code: N"); anything but 0 is a failure.</summary>

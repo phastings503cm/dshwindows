@@ -308,6 +308,8 @@ public sealed partial class AgentHost : ObservableObject
     public void Hydrate(SessionVM vm)
     {
         if (vm.Entries.Count > 0) return;
+        // Replaying history isn't activity: an old (or imported) chat keeps its place in the list when it is opened.
+        var updated = vm.UpdatedAt;
         foreach (var row in Log.LoadItems(vm.Id))
         {
             switch (row.Kind)
@@ -332,6 +334,7 @@ public sealed partial class AgentHost : ObservableObject
                     break;
             }
         }
+        vm.UpdatedAt = updated;
         // A goal that paused for an answer before the app closed is still waiting for it.
         if (vm.BlockedGoal is null && PausedGoalIn(vm.Entries) is { } paused) vm.BlockedGoal = paused;
         // The Prompts timeline: read from its file, or backfilled from what was just replayed.

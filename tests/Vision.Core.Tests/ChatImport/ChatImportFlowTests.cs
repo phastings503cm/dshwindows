@@ -32,6 +32,7 @@ public sealed class ChatImportFlowTests
                 """),
             "/api/chats/c1/messages?before=m3&limit=200" => FakeHttpHandler.Json("""
                 {"messages":[
+                  {"id":"m0","role":"USER","origin":"system","content":"Daily numbers check started","createdAt":"2026-09-01T09:59:00.000Z","attachments":[]},
                   {"id":"m1","role":"USER","content":"Q3 numbers?","createdAt":"2026-09-01T10:00:00.000Z","attachments":[{"attachment":{"id":"a1","name":"q3.xlsx","contentType":"application/vnd.ms-excel"}}]},
                   {"id":"m2","role":"ASSISTANT","content":"Q3 was flat.","createdAt":"2026-09-01T10:00:20.000Z","attachments":[],
                    "toolCalls":[{"id":"t0","name":"read_file","args":{"path":"q3.xlsx"},"output":"locked","status":"error","startedAt":"2026-09-01T10:00:05.000Z"}]}],
@@ -59,6 +60,7 @@ public sealed class ChatImportFlowTests
         Assert.Equal("Bob", chats[0].OwnerName);
         Assert.Equal(
         [
+            "notice: Daily numbers check started",
             "user: Q3 numbers?\n\n[Attached: q3.xlsx]",
             "tool read_file [q3.xlsx] → failed: locked (error)",
             "assistant: Q3 was flat.",
@@ -68,7 +70,7 @@ public sealed class ChatImportFlowTests
         ], chat!.Rows.Select(r => r.Kind == "tool" ? $"tool {r.ToolName} [{r.ArgSummary}] → {r.Text}{(r.IsError ? " (error)" : "")}" : $"{r.Kind}: {r.Text}").ToArray());
         Assert.Equal(ChatSource.Guardian, chat.Source);
         Assert.Equal("c1", chat.SourceId);
-        Assert.Equal(DateTimeOffset.Parse("2026-09-01T10:30:05Z"), chat.Rows[4].At); // a tool at the time it started
+        Assert.Equal(DateTimeOffset.Parse("2026-09-01T10:30:05Z"), chat.Rows[5].At); // a tool at the time it started
         Assert.Equal(Address, chat.From);
         // Every call carried the token and the org; nothing else was asked for.
         Assert.All(handler.Requests, r =>
@@ -380,6 +382,9 @@ public sealed class ChatImportFlowTests
         var tool = Assert.Single(ChatSearch.Run(log, "Bash"));
         Assert.Equal("tool", Assert.Single(tool.Matches).Kind);
         Assert.Equal(ChatSource.Vision, ChatSearch.Run(log, "budget").Single().Source);
+        // Accents and case don't matter.
+        log.RecordItem("v1", "assistant", "Lunch at the Café Rouge");
+        Assert.Equal("Budget review", Assert.Single(ChatSearch.Run(log, "cafe rouge")).Session.Title);
     }
 
     [Fact]

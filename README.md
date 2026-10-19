@@ -707,23 +707,25 @@ what is there, or skip it.
 
 ## Importing chats
 
-**File › Import Chats…** (also in **Settings › Import & Export**) brings the conversations you had elsewhere
-into Vision as chats you can carry on with any model: Claude Code's sessions (`.claude\projects`), Codex's
-(`.codex\sessions`), OpenClaw's (its SQLite store or session files), a Claude.ai or ChatGPT data export (add
-the `.zip`), a session file or a chat exported from Vision, and — when you're signed in — your Guardian chats
-and the Vision chats you saved there. The list shows each one's source, title, date, size and folder, with the
-new ones ticked (scheduled and scripted runs — OpenClaw's cron runs, headless Claude Code and Codex sessions —
-and chats shared with you are listed but not ticked). A chat keeps its own times; tool calls become tool rows
-(what ran, on what, and its output), which any model reads as a written summary; a chat whose folder is on
-this PC opens in that project. Subagent transcripts, rewound branches and images are left out, and the chat's
-first line says where it came from. Importing again adds only chats that aren't here yet; a chat exported
-from either Vision keeps its id and where it really came from, so it is one chat on every computer. Nothing is changed where chats are read from, and nothing leaves the PC
-except the calls to Guardian.
+**File › Import Chats…** (also in **Settings › Import & Export**) brings the conversations you had elsewhere into
+Vision as chats you can carry on with any model: Claude Code's sessions (`.claude\projects`), Codex's
+(`.codex\sessions`), OpenClaw's (its SQLite store, older session files, reset generations and its pre-SQLite
+archive), a Claude.ai or ChatGPT data export (add the `.zip`), a session file or a chat exported from Vision, and
+— when you're signed in — your Guardian chats and the Vision chats you saved there. The list shows each one's
+source, title, date, size and folder, with the new ones ticked (scheduled and scripted runs — OpenClaw's cron runs
+and subagent sessions, headless Claude Code and Codex sessions — sit behind *Show scheduled and scripted runs*,
+and chats shared with you aren't ticked). A chat keeps its own times; tool calls become tool rows (what ran, on
+what, and its output), which any model reads as a written summary; a chat whose folder is on this PC opens in that
+project. Claude Code's subagent transcripts, rewound branches and images are left out; parallel tool calls keep
+all their results; a slash command becomes a note, not a prompt, and the chat's first line says where it came
+from. Importing again adds only chats that aren't here yet; a chat exported from either Vision keeps its id and
+where it really came from, so it is one chat on every computer. Nothing is changed where chats are read from, and
+nothing leaves the PC except the calls to Guardian.
 
-**File › Export Chat** (or right-click a chat) saves it as Markdown or as JSON that either Vision imports
-again (the same files Vision for macOS writes); **File › Send Chat to Guardian** keeps a copy in your account. **File › Search All Chats…** (Ctrl+Alt+F) finds words in every
-chat's title and messages — tool calls and their output too — with a filter by where the chat came from;
-each hit opens the chat at that message.
+**File › Export Chat** (or right-click a chat) saves it as Markdown or as JSON that either Vision imports again
+(the same files Vision for macOS writes); **File › Send Chat to Guardian** keeps a copy in your account. **File ›
+Search All Chats…** (Ctrl+Alt+F) finds words in every chat's title and messages — tool calls and their output too
+— with a filter by where the chat came from; each hit opens the chat at that message.
 
 ## Remembered notes
 

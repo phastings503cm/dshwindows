@@ -64,13 +64,13 @@ public static class ChatImportScanner
                     IReadOnlyList<OpenClawChats.SqliteSession> sessions;
                     try
                     {
-                        sessions = OpenClawChats.ListSqlite(store.Path);
+                        sessions = OpenClawChats.ListSqlite(store.Path, store.Agent);
                     }
                     catch (IOException)
                     {
                         continue;
                     }
-                    var wanted = sessions.Where(s => !OpenClawChats.IsSubagent(s.Key)).ToList();
+                    var wanted = sessions;
                     var done = 0;
                     foreach (var session in wanted)
                     {
@@ -86,12 +86,12 @@ public static class ChatImportScanner
                 }
                 else
                 {
-                    var files = OpenClawChats.ListJsonl(store.Path).Where(f => !OpenClawChats.IsSubagent(f.Key)).ToList();
+                    var files = OpenClawChats.ListJsonl(store.Path);
                     var byPath = files.ToDictionary(f => f.Path, StringComparer.Ordinal);
                     var listed = ScanFiles(files.Select(f => f.Path).ToList(), "OpenClaw", cache, progress, cancellationToken, (path, summary, token) =>
                     {
                         var (_, key, label) = byPath[path];
-                        return OpenClawChats.ReadJsonl(path, key, label, summary, token);
+                        return OpenClawChats.ReadJsonl(path, key, label, summary, token, store.Agent);
                     });
                     foreach (var candidate in listed)
                         if (seen.Add(candidate.SourceId)) found.Add(candidate);
@@ -166,7 +166,7 @@ public static class ChatImportScanner
 public sealed class ChatScanCache
 {
     /// <summary>Raised when what a summary holds changes, so old entries are read again.</summary>
-    private const int Version = 2;
+    private const int Version = 3;
 
     public sealed record Entry
     {

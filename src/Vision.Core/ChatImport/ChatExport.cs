@@ -128,9 +128,9 @@ public static class ChatExport
     }
 }
 
-/// <summary>One search over every chat on this PC — titles and the text of their messages, tool calls and outputs — with a
-/// source filter (only Claude Code chats, only Guardian's…). Every word must appear in the chat; title matches first, then
-/// the most recent.</summary>
+/// <summary>One search over every chat on this PC — titles and the text of their messages, tool calls and the start of their
+/// output — with a source filter (only Claude Code chats, only Guardian's…). Every word must appear in the chat, case and
+/// accents ignored; title matches first, then the most recent.</summary>
 public static class ChatSearch
 {
     public sealed record Match(int Seq, string Kind, string Snippet, DateTimeOffset At);
@@ -160,7 +160,7 @@ public static class ChatSearch
             var title = session.Title;
             // Every word somewhere in the chat: its title or any row.
             var found = new bool[terms.Count];
-            for (var t = 0; t < terms.Count; t++) found[t] = title.Contains(terms[t], StringComparison.OrdinalIgnoreCase);
+            for (var t = 0; t < terms.Count; t++) found[t] = Find(title, terms[t]) >= 0;
             var matches = new List<Match>();
             var count = 0;
             foreach (var row in rows)
@@ -179,7 +179,7 @@ public static class ChatSearch
                 if (matches.Count < MaxMatchesPerChat) matches.Add(new Match(row.Seq, row.Kind, Snippet(row, terms), row.At));
             }
             if (!found.All(f => f)) continue;
-            var titleMatch = terms.All(t => title.Contains(t, StringComparison.OrdinalIgnoreCase));
+            var titleMatch = terms.All(t => Find(title, t) >= 0);
             results.Add(new Result(session, from, titleMatch, matches, count));
         }
         return results.OrderByDescending(r => r.TitleMatch).ThenByDescending(r => r.Session.UpdatedAt).Take(maxChats).ToList();
@@ -214,23 +214,30 @@ public static class ChatSearch
         return terms.Distinct(StringComparer.OrdinalIgnoreCase).ToList();
     }
 
+    /// <summary>A tool's output is searched this far (Vision for macOS's limit too).</summary>
+    public const int SearchedOutput = 4_000;
+
+    /// <summary>Case and accents ignored: "cafe" finds "Café".</summary>
+    private const CompareOptions Loose = CompareOptions.IgnoreCase | CompareOptions.IgnoreNonSpace;
+
+    internal static int Find(string? text, string term) => text is null ? -1 : CultureInfo.InvariantCulture.CompareInfo.IndexOf(text, term, Loose);
+
     private static bool Contains(LogItemRow row, string term) =>
-        row.Text?.Contains(term, StringComparison.OrdinalIgnoreCase) == true
-        || row.Kind == "tool" && (row.ArgSummary?.Contains(term, StringComparison.OrdinalIgnoreCase) == true
-                                  || row.ToolName?.Contains(term, StringComparison.OrdinalIgnoreCase) == true
-                                  || row.Output?.Contains(term, StringComparison.OrdinalIgnoreCase) == true);
+        Find(row.Text, term) >= 0
+        || row.Kind == "tool" && (Find(row.ArgSummary, term) >= 0 || Find(row.ToolName, term) >= 0
+                                  || Find(row.Output is { Length: > SearchedOutput } head ? head[..SearchedOutput] : row.Output, term) >= 0);
 
     /// <summary>About 160 characters around the first term found, on one line.</summary>
     internal static string Snippet(LogItemRow row, IReadOnlyList<string> terms)
     {
         var sources = row.Kind == "tool"
-            ? new[] { $"{row.ToolName} {row.ArgSummary}".Trim(), row.Text ?? "", row.Output ?? "" }
+            ? new[] { $"{row.ToolName} {row.ArgSummary}".Trim(), row.Text ?? "", row.Output is { Length: > SearchedOutput } output ? output[..SearchedOutput] : row.Output ?? "" }
             : new[] { row.Text ?? "" };
         foreach (var text in sources)
         {
             foreach (var term in terms)
             {
-                var at = text.IndexOf(term, StringComparison.OrdinalIgnoreCase);
+                var at = Find(text, term);
                 if (at < 0) continue;
                 var start = Math.Max(0, at - 60);
                 var end = Math.Min(text.Length, at + term.Length + 100);
