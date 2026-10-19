@@ -167,6 +167,9 @@ public sealed class SelfTest
             window.ShowPlanPanel(false);
             chat.Running = false;
 
+            // The turn's phases, the task list's "Now" card, the Prompts timeline and the background-activity menu.
+            await CaptureRuns(window, model);
+
             // The README's pictures: one task worked step by step — mid-way with its plan beside it, then done.
             var showcase = FillShowcase(model);
             model.Select(showcase.Id);
@@ -367,6 +370,178 @@ public sealed class SelfTest
         finally
         {
             try { scanning.Close(); } catch (Exception) { }
+        }
+    }
+
+    /// <summary>A turn worked through its phases — executing with its estimate and stamped steps, then its results card with
+    /// evidence — beside the task list whose first task is that turn's plan (subagents on two servers working its steps),
+    /// prompts queued after it, the Prompts tab and All prompts, a prompt's results, and the background-activity menu.</summary>
+    private async Task CaptureRuns(MainWindow window, AppModel model)
+    {
+        try
+        {
+            var chat = model.NewChat();
+            chat.Title = "Low-stock warnings";
+            var start = DateTimeOffset.Now.AddMinutes(-3);
+            var prompt = "Add a low-stock warning to the stock report: anything under its reorder level comes first, marked. Cover it with tests.";
+            chat.AppendMessage(MessageRole.User, prompt, start);
+            chat.AppendMessage(MessageRole.Assistant, "I'll add reorder levels, put the warnings first in the report, and test it.", start.AddSeconds(8));
+            chat.SetTodos(
+            [
+                new TodoItem("1", "Add reorder levels and BelowReorderLevel()", TodoStatus.Completed),
+                new TodoItem("2", "Put low-stock items first in the report", TodoStatus.InProgress),
+                new TodoItem("3", "Write tests for the low-stock report"),
+            ]);
+            chat.AddFinishedTool("p1", "edit", "src/Stock.cs", "+19 −1", null, true, start.AddSeconds(40));
+            chat.StartTool("p2", "run_shell_command", "dotnet test", start.AddMinutes(2));
+            var now = DateTimeOffset.Now;
+            chat.UpsertAgent(new AgentRunInfo("r1", "Write tests for the report", "worker", false, now.AddSeconds(-50))
+            {
+                Route = "Spark 2", Model = "qwen3-coder-30b-a3b", Assignment = "Write tests for the low-stock report", Activity = "edit: tests/StockTests.cs", Steps = 4,
+                PromptTokens = 9_200, CompletionTokens = 1_100,
+            });
+            chat.UpsertAgent(new AgentRunInfo("r2", "Review the report change", "review", true, now.AddSeconds(-20))
+            {
+                Route = "Kimi Code", Model = "kimi-for-coding", Activity = "read_file: src/StockReport.cs", Steps = 2,
+                Placement = "tried first: Spark 3: http://192.168.1.43:8000/v1 didn't answer",
+            });
+            chat.UpsertBackgroundJob(new BackgroundAgentJob("bg-1", "Review the report change", now.AddSeconds(-20)));
+            var phase = new TurnPhaseState();
+            phase.BeginPlanning(TaskKind.CodeEdit, 1.6, start);
+            phase.Draft = "I'll add reorder levels, put the warnings first in the report, and test it.";
+            phase.BeginExecution("• Add reorder levels and BelowReorderLevel()\n• Put low-stock items first in the report\n• Write tests for the low-stock report",
+                240, "learned from 5 similar tasks", start.AddSeconds(9));
+            phase.AddStep("Edit src/Stock.cs", start.AddSeconds(40));
+            phase.AddStep("Agent Write tests for the report", start.AddSeconds(70));
+            phase.AddStep("Run dotnet test", start.AddMinutes(2));
+            chat.TurnPhase = phase;
+            chat.TurnModel = "qwen3-coder-30b-a3b";
+            chat.TurnRoute = "DGX Spark / vLLM";
+            chat.TurnPromptTokens = 24_310;
+            chat.TurnCompletionTokens = 2_045;
+            chat.Goal = new GoalState("Low-stock warnings first in the report, with tests", 2, start);
+            chat.Running = true;
+            chat.NotifyPhaseChanged();
+
+            // Earlier prompts in this chat, with every ending the timeline shows; then the one running now.
+            var records = new List<PromptRecord>
+            {
+                new() { ChatId = chat.Id, Text = "What does the stock report print today?", At = start.AddDays(-1).AddHours(-2), Outcome = PromptOutcome.Completed,
+                        FinishedAt = start.AddDays(-1).AddHours(-2).AddSeconds(41), EtaSeconds = 75, Model = "qwen3-coder-30b-a3b", Route = "DGX Spark / vLLM",
+                        CompletionNote = "It prints one line per SKU, sorted by SKU, with the level.", PromptTokens = 8_100, CompletionTokens = 420 },
+                new() { ChatId = chat.Id, Text = "Fix the negative stock bug and add a regression test", Source = PromptSource.Goal, At = start.AddHours(-3), Outcome = PromptOutcome.Completed,
+                        FinishedAt = start.AddHours(-3).AddMinutes(4).AddSeconds(12), EtaSeconds = 210, Attempts = 2, Rounds = 3, Model = "qwen3-coder-30b-a3b", Route = "DGX Spark / vLLM",
+                        Evidence =
+                        [
+                            new Evidence(EvidenceKind.RunOutput, "Ran dotnet test", "exit 0 — 14 passed", start.AddHours(-3).AddMinutes(4)),
+                            new Evidence(EvidenceKind.File, "2 files changed", "Stock.cs, StockTests.cs", start.AddHours(-3).AddMinutes(4)),
+                        ],
+                        CompletionNote = "Validated against the plan: 3 of 3 steps done.", EntryText = "🎯 /goal Fix the negative stock bug and add a regression test" },
+                new() { ChatId = chat.Id, Text = "Deploy the staging build", At = start.AddHours(-2), Outcome = PromptOutcome.NeedsYou, FinishedAt = start.AddHours(-2).AddSeconds(50),
+                        Reason = "The DEPLOY_TOKEN credential is set to Never.", Source = PromptSource.Task },
+                new() { ChatId = chat.Id, Text = "Rename Stock to Inventory everywhere", At = start.AddHours(-1), Outcome = PromptOutcome.Stopped, FinishedAt = start.AddHours(-1).AddSeconds(30),
+                        Reason = "Stopped before it finished." },
+                new() { ChatId = chat.Id, Text = "Explain the build error", At = start.AddMinutes(-30), Outcome = PromptOutcome.Issues, FinishedAt = start.AddMinutes(-29),
+                        Reason = "the reply reports an error (Error:)", EtaSeconds = 75 },
+                new() { ChatId = chat.Id, Text = prompt, Source = PromptSource.Goal, At = start, Outcome = PromptOutcome.Running, EtaSeconds = 240, TurnId = phase.TurnId },
+            };
+            chat.PromptHistory.AddRange(records);
+            chat.PromptHistoryLoaded = true;
+            chat.CurrentPromptId = records[^1].Id;
+
+            // Prompts queued after it with "Add to tasks" (held, so nothing starts here).
+            model.Host.Queue.Add("Update the README build section", "Update the README build section with the new report flag", cwd: model.Project, chatId: chat.Id, asPrompt: true);
+            model.Host.Queue.Add("/release-notes v0.9", "/release-notes v0.9", cwd: model.Project, chatId: chat.Id, asPrompt: true);
+            model.Host.PauseChatTasks(chat.Id);
+
+            model.Select(chat.Id);
+            window.ShowQueuePanel(true);
+            await Settle(1200);
+            Capture(window, "phase-running");
+
+            // Done: validated against its plan, with the evidence it produced.
+            chat.FinishTool("p2", true, "exit 0 — 17 passed", "Passed!  - Failed: 0, Passed: 17, Skipped: 0, Total: 17");
+            chat.SetTodos(
+            [
+                new TodoItem("1", "Add reorder levels and BelowReorderLevel()", TodoStatus.Completed),
+                new TodoItem("2", "Put low-stock items first in the report", TodoStatus.Completed),
+                new TodoItem("3", "Write tests for the low-stock report", TodoStatus.Completed),
+            ]);
+            chat.UpsertAgent(new AgentRunInfo("r1", "Write tests for the report", "worker", false, now.AddSeconds(-50))
+                { Route = "Spark 2", Model = "qwen3-coder-30b-a3b", Status = AgentRunStatus.Done, FinishedAt = now, Steps = 6, Report = "Three tests added." });
+            chat.UpsertAgent(new AgentRunInfo("r2", "Review the report change", "review", true, now.AddSeconds(-20))
+                { Route = "Kimi Code", Model = "kimi-for-coding", Status = AgentRunStatus.Done, FinishedAt = now, Steps = 3, Report = "No problems found." });
+            chat.UpsertBackgroundJob(new BackgroundAgentJob("bg-1", "Review the report change", now.AddSeconds(-20)) { Status = BackgroundAgentStatus.Done, FinishedAt = now });
+            chat.AppendMessage(MessageRole.Assistant, "Done — low-stock items now lead the report, marked LOW. `dotnet test`: 17 passed, 0 failed.");
+            var finished = DateTimeOffset.Now;
+            phase.Phase = TurnPhase.Validation;
+            phase.FilesChanged = 3;
+            phase.AddEvidence(new Evidence(EvidenceKind.RunOutput, "Ran dotnet test", "exit 0 — 17 passed\nPassed!  - Failed: 0, Passed: 17, Skipped: 0, Total: 17", finished.AddSeconds(-6)));
+            phase.AddEvidence(new Evidence(EvidenceKind.File, "3 files changed", "Stock.cs, StockReport.cs, StockTests.cs", finished.AddSeconds(-5)));
+            phase.AddEvidence(new Evidence(EvidenceKind.Check, "The model's closing summary", "Done — low-stock items now lead the report, marked LOW. dotnet test: 17 passed, 0 failed.", finished.AddSeconds(-4)));
+            phase.BeginResults("Validated against the plan: 3 of 3 steps done.", finished);
+            chat.Goal = null;
+            chat.Running = false;
+            var current = records[^1];
+            current.Outcome = PromptOutcome.Completed;
+            current.FinishedAt = finished;
+            current.Evidence = [.. phase.Evidence];
+            current.CompletionNote = "Validated against the plan: 3 of 3 steps done.\n\nDone — low-stock items now lead the report, marked LOW.";
+            current.Rounds = 2;
+            current.PromptTokens = 31_874;
+            current.CompletionTokens = 2_912;
+            chat.CurrentPromptId = null;
+            chat.NotifyPhaseChanged();
+            chat.NotifyPromptsChanged();
+            window.ShowQueuePanel(false);
+            await Settle(1000);
+            Capture(window, "phase-results");
+
+            window.ShowPromptsPanel(records[1].Id);
+            await Settle(1000);
+            Capture(window, "prompts");
+            window.ShowQueuePanel(false);
+
+            var all = new AllPromptsWindow(model, new PromptActions(_ => { }, _ => { })) { Owner = window };
+            all.Select(records[1].Id);
+            await ShowAndCapture(all, "all-prompts");
+            await ShowAndCapture(new PromptResultsWindow(records[1], chat.Title) { Owner = window }, "prompt-results");
+
+            // The background-activity menu, with a chat working (main agent, a subagent on a worker, a background reviewer).
+            chat.Running = true;
+            chat.TurnPhase = phase.Clone();
+            chat.TurnPhase.Phase = TurnPhase.Execution;
+            chat.TurnPhase.FinishedAt = null;
+            chat.Goal = new GoalState("Low-stock warnings first in the report, with tests", 2, start);
+            chat.UpsertAgent(new AgentRunInfo("r3", "Write tests for the report", "worker", false, DateTimeOffset.Now.AddSeconds(-50))
+            {
+                Route = "Spark 2", Model = "qwen3-coder-30b-a3b", Assignment = "Write tests for the low-stock report", Activity = "edit: tests/StockTests.cs", Steps = 4,
+                PromptTokens = 9_200, CompletionTokens = 1_100,
+            });
+            chat.UpsertAgent(new AgentRunInfo("r4", "Review the report change", "review", true, DateTimeOffset.Now.AddSeconds(-20))
+            {
+                Route = "Kimi Code", Model = "kimi-for-coding", Activity = "read_file: src/StockReport.cs", Steps = 2,
+                Placement = "tried first: Spark 3: didn't answer",
+            });
+            var menu = window.SelfTestActivityMenu();
+            if (menu.Parent is System.Windows.Controls.Primitives.Popup popup) popup.Child = null;
+            var host = new Window
+            {
+                Owner = window, Width = 500, SizeToContent = SizeToContent.Height, WindowStyle = WindowStyle.ToolWindow, Title = "Background activity",
+                Content = new System.Windows.Controls.Border { Child = menu, Padding = new Thickness(12) },
+            };
+            host.SetResourceReference(Window.BackgroundProperty, "SolidBackgroundFillColorBaseBrush");
+            await ShowAndCapture(host, "activity-menu");
+            host.Content = null;
+            window.RestoreActivityMenu(menu);
+            chat.Running = false;
+            chat.Goal = null;
+            chat.ClearFinishedAgents();
+            foreach (var agent in chat.Agents.ToList()) chat.UpsertAgent(agent with { Status = AgentRunStatus.Done, FinishedAt = DateTimeOffset.Now });
+        }
+        catch (Exception error)
+        {
+            Fail("runs", error);
         }
     }
 

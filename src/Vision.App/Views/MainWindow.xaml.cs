@@ -33,7 +33,11 @@ public partial class MainWindow : Window
     private SettingsWindow? _settings;
     private VaultWindow? _vault;
     private readonly QueuePanel _queuePanel;
+    private readonly PromptsPanel _promptsPanel;
+    private readonly RunPanelHost _runPanel;
     private readonly PlanPanel _planPanel;
+    private readonly ActivityMenu _activityMenu;
+    private readonly System.Windows.Threading.DispatcherTimer _activityTimer = new() { Interval = TimeSpan.FromSeconds(1) };
 
     public MainWindow(AppModel model)
     {
@@ -45,9 +49,18 @@ public partial class MainWindow : Window
         _codeView = new CodeModeView(model);
         _emptyState = new EmptyStateView(model);
         Sidebar.Attach(model);
-        _queuePanel = new QueuePanel(model);
+        _queuePanel = new QueuePanel(model) { ShowsCloseButton = false };
         _queuePanel.CloseRequested += () => SetQueuePanel(false);
-        QueueHost.Content = _queuePanel;
+        _promptsPanel = new PromptsPanel(model, PromptActions);
+        // The right column: the task list and the Prompts timeline, one tab each.
+        _runPanel = new RunPanelHost(_queuePanel, _promptsPanel);
+        _runPanel.CloseRequested += () => SetQueuePanel(false);
+        QueueHost.Content = _runPanel;
+        _activityMenu = new ActivityMenu(model);
+        _activityMenu.Dismiss += () => ActivityPopup.IsOpen = false;
+        ActivityPopup.Child = _activityMenu;
+        _activityTimer.Tick += (_, _) => UpdateActivityButton();
+        _activityTimer.Start();
         _planPanel = new PlanPanel(model);
         _planPanel.CloseRequested += () => SetPlanPanel(false);
         PlanHost.Content = _planPanel;
@@ -252,6 +265,83 @@ public partial class MainWindow : Window
         StopLabel.Text = session is { Stopping: true } ? "Stopping…" : "Stop";
     }
 
+    /// <summary>The top bar's live count of what is working (main agents, subagents, task lists).</summary>
+    private void UpdateActivityButton()
+    {
+        var count = Model.Host.ActivityCount();
+        ActivityBadge.Visibility = count > 0 ? Visibility.Visible : Visibility.Collapsed;
+        ActivityCount.Text = count.ToString();
+        ActivityGlyph.SetResourceReference(TextBlock.ForegroundProperty, count > 0 ? "SystemFillColorSuccessBrush" : "TextFillColorPrimaryBrush");
+        ActivityButton.ToolTip = count == 0
+            ? "Background activity (Ctrl+Shift+A) — nothing is working right now"
+            : $"Background activity (Ctrl+Shift+A) — {count} working: see what, on which model, assigned to what";
+    }
+
+    private void ToggleActivity()
+    {
+        ActivityPopup.IsOpen = !ActivityPopup.IsOpen;
+        if (ActivityPopup.IsOpen) _activityMenu.Refresh();
+    }
+
+    /// <summary>The self-test renders the menu as it would show.</summary>
+    public ActivityMenu SelfTestActivityMenu()
+    {
+        _activityMenu.Refresh();
+        return _activityMenu;
+    }
+
+    /// <summary>The self-test hands the menu back after rendering it elsewhere.</summary>
+    public void RestoreActivityMenu(ActivityMenu menu) => ActivityPopup.Child = menu;
+
+    /// <summary>What the Prompts panel and All prompts do with a prompt: jump to it in its chat, or quote it in the composer.</summary>
+    private PromptActions PromptActions => new(JumpToPrompt, AddPromptToComposer);
+
+    private void JumpToPrompt(PromptRecord record)
+    {
+        if (Model.Host.Session(record.ChatId) is not { } vm)
+        {
+            Dialog.Info("That chat is gone", "The chat this prompt was sent in has been deleted, so there is nothing to jump to.");
+            return;
+        }
+        Model.OpenSession(vm.Id);
+        Activate();
+        Dispatcher.BeginInvoke(System.Windows.Threading.DispatcherPriority.Loaded, () =>
+        {
+            if (Model.Host.EntryIdFor(record, vm) is { } entryId && _chatView.ScrollToEntry(entryId)) return;
+            vm.Note($"That prompt (“{TextUtil.Prefix(record.FirstLine, 60)}”) is no longer in the transcript — it was compacted away. Its record is in Prompts (Ctrl+Shift+H).");
+        });
+    }
+
+    private void AddPromptToComposer(PromptRecord record)
+    {
+        if (Model.Host.Session(record.ChatId) is { } vm && vm.Id != Model.Host.SelectedId) Model.OpenSession(vm.Id);
+        if (Model.Host.Selected is null) return;
+        Activate();
+        Dispatcher.BeginInvoke(System.Windows.Threading.DispatcherPriority.Loaded, () => _chatView.InsertText(PromptTimeline.Quote(record)));
+    }
+
+    /// <summary>Show the right column on a tab; the same shortcut again hides it.</summary>
+    private void ToggleRunTab(RunTab tab)
+    {
+        if (QueueShown && _runPanel.Tab == tab)
+        {
+            SetQueuePanel(false);
+            return;
+        }
+        _runPanel.Show(tab);
+        if (!QueueShown) SetQueuePanel(true);
+    }
+
+    /// <summary>Show the Prompts tab (the self-test drives it).</summary>
+    public void ShowPromptsPanel(string? select = null)
+    {
+        _runPanel.Show(RunTab.Prompts);
+        SetQueuePanel(true);
+        _promptsPanel.Select(select);
+    }
+
+    private void ShowAllPrompts() => AllPromptsWindow.Show(this, Model, PromptActions);
+
     private void UpdateQueueButton()
     {
         var running = Model.Host.QueueRunningCount;
@@ -271,7 +361,7 @@ public partial class MainWindow : Window
         Model.Config.QueuePanelOpen = open;
         // Too narrow a window for both: the one you just asked for wins (the plan is set aside, and returns when the queue closes).
         var setPlanAside = open && PlanShown && Body.ActualWidth > 0 && RoomForPanels() < PanelLayout.PlanMin + PanelLayout.QueueMin;
-        _queuePanel.Visibility = open ? Visibility.Visible : Visibility.Collapsed;
+        _runPanel.Visibility = open ? Visibility.Visible : Visibility.Collapsed;
         QueueSplitter.Visibility = open ? Visibility.Visible : Visibility.Collapsed;
         QueueColumn.MinWidth = open ? PanelLayout.QueueMin : 0;
         QueueColumn.Width = new GridLength(open ? PanelLayout.Clamp(Model.Config.QueuePanelWidth, PanelLayout.QueueMin, PanelLayout.QueueMax) : 0);
@@ -293,7 +383,7 @@ public partial class MainWindow : Window
     private bool _planHeldBack;
 
     private bool PlanShown => _planPanel.Visibility == Visibility.Visible;
-    private bool QueueShown => _queuePanel.Visibility == Visibility.Visible;
+    private bool QueueShown => _runPanel.Visibility == Visibility.Visible;
 
     /// <summary>The sidebar's width as it is now or is about to be (its column only reports the new width after the next
     /// layout pass).</summary>
@@ -327,10 +417,14 @@ public partial class MainWindow : Window
         if (QueueShown) QueueColumn.Width = new GridLength(fit.Queue);
     }
 
-    private void ToggleQueuePanel() => SetQueuePanel(_queuePanel.Visibility != Visibility.Visible);
+    private void ToggleQueuePanel() => ToggleRunTab(RunTab.Tasks);
 
     /// <summary>Show or hide the task list panel (the self-test drives it).</summary>
-    public void ShowQueuePanel(bool open) => SetQueuePanel(open);
+    public void ShowQueuePanel(bool open)
+    {
+        if (open) _runPanel.Show(RunTab.Tasks);
+        SetQueuePanel(open);
+    }
 
     /// <summary>Open the queue's add card and use it (the self-test drives it: the card has to survive being opened again and again).</summary>
     public void SelfTestAddQueueTasks(params string[] titles) => _queuePanel.SelfTestAddTasks(titles);
@@ -569,6 +663,9 @@ public partial class MainWindow : Window
         Bind(Key.OemPeriod, ModifierKeys.Control | ModifierKeys.Shift, Model.StopAll);
         Bind(Key.M, ModifierKeys.Control | ModifierKeys.Shift, ShowMemory);
         Bind(Key.Q, ModifierKeys.Control | ModifierKeys.Shift, ToggleQueuePanel);
+        Bind(Key.H, ModifierKeys.Control | ModifierKeys.Shift, () => ToggleRunTab(RunTab.Prompts));
+        Bind(Key.H, ModifierKeys.Control | ModifierKeys.Alt, ShowAllPrompts);
+        Bind(Key.A, ModifierKeys.Control | ModifierKeys.Shift, ToggleActivity);
         Bind(Key.P, ModifierKeys.Control | ModifierKeys.Shift, TogglePlanPanel);
         Bind(Key.K, ModifierKeys.Control | ModifierKeys.Shift, ShowVault);
         Bind(Key.D1, ModifierKeys.Control, () => Model.Mode = WorkspaceMode.Chat);
@@ -658,7 +755,8 @@ public partial class MainWindow : Window
         "Ctrl+Shift+N\tNew chat without a project",
         "Ctrl+O\tOpen folder",
         "Ctrl+L\tFocus the chat input",
-        "Enter\tSend  ·  Shift+Enter: new line",
+        "Enter\tSend  ·  Shift+Enter: new line  ·  while the agent works, Enter adds it to this chat's tasks",
+        "Ctrl+Enter\tAdd to tasks: it starts by itself when the work before it finishes",
         "Ctrl+.\tStop the agent  ·  Ctrl+Shift+.: stop all",
         "Ctrl+1 / Ctrl+2\tChat / Code",
         "Ctrl+P\tGo to file",
@@ -669,7 +767,10 @@ public partial class MainWindow : Window
         "Ctrl+S / Ctrl+Shift+S\tSave / Save all",
         "Ctrl+W\tClose editor",
         "Ctrl+Shift+M\tMemory & skills",
-        "Ctrl+Shift+Q\tTask list (this chat's)",
+        "Ctrl+Shift+Q\tTask list (this chat's): what it is doing now, and what is queued",
+        "Ctrl+Shift+H\tPrompts (this chat's): every prompt it sent, and how it ended",
+        "Ctrl+Alt+H\tAll prompts, across chats",
+        "Ctrl+Shift+A\tBackground activity: what is working, on which model",
         "Ctrl+Shift+P\tPlan panel (what the agent is working through)",
         "Ctrl+Shift+K\tCredentials vault",
         "Ctrl+,\tSettings",
@@ -840,6 +941,9 @@ public partial class MainWindow : Window
     private void Memory_Click(object sender, RoutedEventArgs e) => ShowMemory();
     private void Vault_Click(object sender, RoutedEventArgs e) => ShowVault();
     private void ToggleQueue_Click(object sender, RoutedEventArgs e) => ToggleQueuePanel();
+    private void TogglePrompts_Click(object sender, RoutedEventArgs e) => ToggleRunTab(RunTab.Prompts);
+    private void AllPrompts_Click(object sender, RoutedEventArgs e) => ShowAllPrompts();
+    private void Activity_Click(object sender, RoutedEventArgs e) => ToggleActivity();
     private void TogglePlan_Click(object sender, RoutedEventArgs e) => TogglePlanPanel();
     private void Memories_Click(object sender, RoutedEventArgs e) => ShowMemories();
     private void ImportOpenClaw_Click(object sender, RoutedEventArgs e) => ShowOpenClawImport();

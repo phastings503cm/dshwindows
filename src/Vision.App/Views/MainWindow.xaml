@@ -46,6 +46,8 @@
                         <MenuItem Header="Toggle _Terminal" InputGestureText="Ctrl+`" Click="ToggleTerminal_Click" />
                         <MenuItem Header="Toggle C_hat Panel" InputGestureText="Ctrl+Shift+C" Click="ToggleChatPanel_Click" />
                         <MenuItem Header="Toggle _Plan Panel" InputGestureText="Ctrl+Shift+P" Click="TogglePlan_Click" />
+                        <MenuItem Header="P_rompts (this chat's)" InputGestureText="Ctrl+Shift+H" Click="TogglePrompts_Click" />
+                        <MenuItem Header="Background _Activity" InputGestureText="Ctrl+Shift+A" Click="Activity_Click" />
                         <Separator />
                         <MenuItem Header="Go to _File…" InputGestureText="Ctrl+P" Click="GoToFile_Click" />
                         <MenuItem Header="Focus Chat _Input" InputGestureText="Ctrl+L" Click="FocusComposer_Click" />
@@ -56,6 +58,7 @@
                         <Separator />
                         <MenuItem Header="Task _List" InputGestureText="Ctrl+Shift+Q" Click="ToggleQueue_Click" />
                         <MenuItem Header="Task _Log…" Click="QueueLog_Click" />
+                        <MenuItem Header="All _Prompts…" InputGestureText="Ctrl+Alt+H" Click="AllPrompts_Click" />
                         <MenuItem Header="Credentials _Vault…" InputGestureText="Ctrl+Shift+K" Click="Vault_Click" />
                         <Separator />
                         <MenuItem Header="_Memory &amp; Skills…" InputGestureText="Ctrl+Shift+M" Click="Memory_Click" />
@@ -127,6 +130,24 @@
                             <TextBlock x:Name="StopLabel" Text="Stop" />
                         </StackPanel>
                     </Button>
+                    <!-- Everything working right now, with the model each runs on: a live count. -->
+                    <Button x:Name="ActivityButton" Style="{StaticResource IconButton}" Margin="4,0,0,0"
+                            ToolTip="Background activity (Ctrl+Shift+A) — what is working right now, on which model, assigned to what"
+                            AutomationProperties.Name="Background activity" Click="Activity_Click">
+                        <StackPanel Orientation="Horizontal">
+                            <TextBlock x:Name="ActivityGlyph" Style="{StaticResource Glyph}" FontSize="14" Text="{x:Static infra:Icons.Bolt}" />
+                            <Border x:Name="ActivityBadge" CornerRadius="7" Padding="5,0" Margin="5,0,0,0" MinWidth="16" Visibility="Collapsed"
+                                    Background="{DynamicResource SystemFillColorSuccessBrush}" VerticalAlignment="Center">
+                                <TextBlock x:Name="ActivityCount" FontSize="10.5" FontWeight="Bold" Foreground="White" HorizontalAlignment="Center"
+                                           FontFamily="{Binding FontFamily, RelativeSource={RelativeSource AncestorType=Window}}" />
+                            </Border>
+                        </StackPanel>
+                    </Button>
+                    <Popup x:Name="ActivityPopup" PlacementTarget="{Binding ElementName=ActivityButton}" Placement="Bottom" StaysOpen="False"
+                           AllowsTransparency="True" VerticalOffset="4" HorizontalOffset="-380" />
+                    <Button x:Name="PromptsButton" Style="{StaticResource IconButton}" Content="{x:Static infra:Icons.History}" Margin="2,0,0,0"
+                            ToolTip="Prompts (Ctrl+Shift+H) — every prompt this chat has sent, and how it ended"
+                            AutomationProperties.Name="Prompts" Click="TogglePrompts_Click" />
                     <Button x:Name="PlanButton" Style="{StaticResource IconButton}" Margin="4,0,0,0"
                             ToolTip="Plan (Ctrl+Shift+P) — what the agent is working through"
                             AutomationProperties.Name="Plan" Click="TogglePlan_Click">
