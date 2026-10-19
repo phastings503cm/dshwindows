@@ -93,6 +93,15 @@ public static class Menus
                     config.MakePrimary(route);
                     model.Host.ResetRouteCache();
                 }, provider.IsPrivateRoute ? Icons.Lock : Icons.Shield, isChecked: route == chosen);
+                // A Sensitive chat can't pick a route its policy refuses (Claude Code; online ones when masked use is off).
+                if (session is not null && model.Host.AdmissionFor(session, provider) is { Allowed: false, Refusal: { } refusal })
+                {
+                    item.IsEnabled = route == chosen;
+                    item.ToolTip = refusal;
+                    ToolTipService.SetShowOnDisabled(item, true);
+                    menu.Items.Add(item);
+                    continue;
+                }
                 item.ToolTip = (session is not null
                                    ? route == chosen ? "This chat's model. " : "Use this model in this chat (other chats keep theirs; new chats in this project start with it). "
                                    : role == RouteRole.Primary ? "The primary model: it answers you. " : "Make this the primary model. ") +
@@ -117,6 +126,43 @@ public static class Menus
         menu.Items.Add(Item("Configure Models…", () => model.ShowSettings(SettingsTab.Models), Icons.Settings));
         if (!spark.IsConfigured) menu.Items.Add(Item("Connect a Spark Swapper…", () => model.ShowSwapperGuide(), Icons.Connect));
         menu.Items.Add(Item("Run Setup Wizard…", model.ShowWizard));
+        return menu;
+    }
+
+    /// <summary>The sensitivity menu of the header's chip: this chat Sensitive or Standard (or its project's default), the
+    /// project's default, and what the policy means.</summary>
+    public static ContextMenu Sensitivity(AppModel model, SessionVM? session)
+    {
+        var menu = new ContextMenu();
+        var host = model.Host;
+        var project = session is not null ? session.WorkspacePath : model.Project;
+        var projectSensitive = model.Config.IsSensitiveProject(project);
+        if (session is not null)
+        {
+            menu.Items.Add(Header("This chat"));
+            var sensitive = Item("Sensitive", () => host.SetChatSensitive(session, true), Icons.Lock, isChecked: session.Sensitive == true);
+            sensitive.ToolTip = RouteAdmission.Describe(true, null, model.Config.SensitiveAllowsShielded);
+            menu.Items.Add(sensitive);
+            var standard = Item("Standard", () => host.SetChatSensitive(session, false), Icons.Shield, isChecked: session.Sensitive == false);
+            standard.ToolTip = RouteAdmission.Describe(false, null);
+            menu.Items.Add(standard);
+            menu.Items.Add(Item($"Project default ({RouteAdmission.Label(projectSensitive)})", () => host.SetChatSensitive(session, null),
+                isChecked: session.Sensitive is null));
+            menu.Items.Add(new Separator());
+        }
+        var name = project is { } p ? System.IO.Path.GetFileName(p.TrimEnd('\\', '/')) : "chats without a project";
+        menu.Items.Add(Header(project is null ? "Chats without a project" : $"Project {name}"));
+        menu.Items.Add(Item("New and undecided chats are Sensitive", () => host.SetProjectSensitive(project, !projectSensitive),
+            isChecked: projectSensitive));
+        menu.Items.Add(new Separator());
+        var shielded = Item("Sensitive chats may use online models, masked", () =>
+        {
+            model.Config.SensitiveAllowsShielded = !model.Config.SensitiveAllowsShielded;
+        }, isChecked: model.Config.SensitiveAllowsShielded);
+        shielded.ToolTip = "On: a Sensitive chat may use an online model, with every sensitive detail masked by the shield before anything is sent. " +
+                           "Off: Sensitive chats use private models only (your own servers, Bedrock in your AWS account, Guardian).";
+        menu.Items.Add(shielded);
+        menu.Items.Add(Item("Shield settings…", () => model.ShowSettings(SettingsTab.Models), Icons.Settings));
         return menu;
     }
 

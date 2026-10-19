@@ -186,6 +186,7 @@ public partial class SidebarView : UserControl
             MessageEntryVM m => "> " + m.Text.Replace("\n", "\n> "),
             ToolEntryVM t => $"- {t.Label} `{t.Preview}` → {t.Summary ?? (t.IsOk == false ? "failed" : "ok")}",
             CompactionEntryVM c => $"--- compacted {c.Removed} earlier messages ---",
+            CheckpointEntryVM k => $"- {k.Title} {k.LineSummary}{(k.HasStatus ? " · " + k.Status : "")}".TrimEnd(),
             _ => null,
         }).Where(s => s is not null));
         try { Clipboard.SetText(text); } catch (Exception) { }

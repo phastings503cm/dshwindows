@@ -249,6 +249,7 @@ public sealed partial class AgentHost : ObservableObject
         _pendingPromptSource.Remove(id);
         AttachmentStoreFor(id).RemoveAll();
         _pendingShield.Remove(id);
+        ForgetPowerState(id);
         if (Session(id) is { } vm) Sessions.Remove(vm);
         // A chat without a project takes its scratch folder with it, to the Recycle Bin: its task list, which worked in the
         // chat (and so in that folder), has just gone too.
@@ -284,6 +285,7 @@ public sealed partial class AgentHost : ObservableObject
                 // The chat's own model and thinking level (null in a chat from before they were stored).
                 RouteId = row.Route,
                 Thinking = ThinkingLevels.FromRaw(row.Thinking),
+                Sensitive = row.Sensitive,
             };
             Sessions.Add(vm);
         }
@@ -329,6 +331,10 @@ public sealed partial class AgentHost : ObservableObject
                     break;
                 case "compaction":
                     vm.Entries.Add(new CompactionEntryVM(int.TryParse(row.ArgSummary, out var removed) ? removed : 0, row.Text ?? "", row.At));
+                    break;
+                case "checkpoint" when row.ArgSummary is { Length: > 0 } turnId:
+                    // "Files changed (N)": the checkpoint is read from disk (null when it was pruned).
+                    vm.Entries.Add(new CheckpointEntryVM(turnId, row.Text ?? "Files changed", row.At) { Turn = Checkpoints.Load(vm.Id, turnId) });
                     break;
             }
         }
@@ -424,6 +430,13 @@ public sealed partial class AgentHost : ObservableObject
         if (SubagentServers.Section(servers) is { Length: > 0 } serverSection)
             prompt += "\n\n--- Subagent servers ---\n" + serverSection +
                       " When a task needs sensitive data, set `sensitive: true` on agent or delegate: it then runs only on a private server.";
+        // The person's MCP servers that apply here, by name (their own instructions are data, not passed on).
+        if (Mcp.PromptSection(vm.WorkspacePath) is { } mcpSection) prompt += "\n\n" + mcpSection;
+        var sensitive = IsSensitive(vm);
+        if (sensitive)
+            prompt += "\n\n--- Sensitive chat ---\nThe person marked this chat Sensitive. Keep its sensitive details (names, contact details, " +
+                      "credentials, client and patient information) inside this chat: never put them into web fetches, MCP tools or anything else " +
+                      "that sends them outside, unless the person asks for exactly that. Every subagent task counts as sensitive.";
         _systemPrompts[sessionId] = prompt;
 
         // Background processes: the model's own long-running programs (game engines, dev servers,
@@ -459,6 +472,8 @@ public sealed partial class AgentHost : ObservableObject
                 _dispatcher.InvokeAsync(() => AgentQueueTask(title, details, front, start, sessionId)).Task));
             extra.Add(new ProposeSkillTool(vm.WorkspacePath, SkillLocations));
         }
+        // The person's MCP servers' tools (built-ins and the tools above keep their names).
+        extra.AddRange(Mcp.ToolsFor(vm.WorkspacePath, McpGrantsFor(sessionId), builtins.Names.Concat(extra.Select(t => t.Name)).ToList()));
         var registry = builtins.Adding(extra);
 
         if (!_grants.TryGetValue(sessionId, out var grants)) _grants[sessionId] = grants = new ComputerGrants();
@@ -495,6 +510,8 @@ public sealed partial class AgentHost : ObservableObject
             Roster = RosterFor(sessionId),
             AgentTypes = agents,
             Cache = CacheFor(sessionId),
+            Checkpoints = CheckpointSlotFor(sessionId),
+            Sensitive = sensitive,
         };
         _engines[sessionId] = engine;
         return engine;
@@ -798,6 +815,18 @@ public sealed partial class AgentHost : ObservableObject
                 AgentsCommand(vm);
                 break;
 
+            case SlashCommand.Rewind:
+                RewindCommand(vm);
+                break;
+
+            case SlashCommand.Mcp:
+                McpCommand(vm);
+                break;
+
+            case SlashCommand.Sensitive sensitive:
+                SensitiveCommand(sensitive.Argument, vm);
+                break;
+
             case SlashCommand.Goal goal:
                 if (goal.Text.Trim().ToLowerInvariant() is "stop" or "cancel" or "off" or "clear" or "drop" or "forget")
                 {
@@ -940,6 +969,8 @@ public sealed partial class AgentHost : ObservableObject
         if (!automatic && (!resumingGoal || vm.TurnPhase is not { IsOver: false })) PhasesBegin(vm, modelText ?? goal ?? text);
         var source = goal is not null ? PromptSource.Goal : modelText is not null && text.StartsWith('/') ? PromptSource.Skill : PromptSource.Typed;
         if (!automatic) BeginPrompt(vm, text, source);
+        // What the turn's tools change is recorded, so the turn can be rewound.
+        BeginCheckpoint(vm, goal ?? text);
         // How it ended, for its timeline row and the chat's task list.
         var outcome = PromptOutcome.Completed;
         string? reason = null;
@@ -1011,6 +1042,7 @@ public sealed partial class AgentHost : ObservableObject
             Log.Touch(sessionId);
             vm.UpdatedAt = DateTimeOffset.Now;
             SortSessions();
+            FinishCheckpoint(vm);
             if (!automatic) FinishPrompt(vm, outcome, reason);
             AfterWork(vm, outcome);
         }
@@ -1039,6 +1071,8 @@ public sealed partial class AgentHost : ObservableObject
         // Prime the model transcript from the timeline when it's missing (a chat from an earlier launch),
         // before this turn's entry is added so its text isn't sent twice.
         if (!_transcripts.ContainsKey(sessionId)) _transcripts[sessionId] = ReplayMessages(vm.Entries);
+        // A Sensitive chat never sends on a route it may not use (checked before anything is shown as sent).
+        if (SensitiveRefusal(vm) is { } refusal) throw new SensitiveRouteException(refusal);
         var firstBadges = attachments.Select(a => AttachmentBadge.Of(a)).ToList();
         var userEntryId = vm.AppendMessage(MessageRole.User, displayText, attachments: firstBadges);
         Log.RecordItem(sessionId, "user", displayText, attachments: firstBadges);
@@ -1047,6 +1081,8 @@ public sealed partial class AgentHost : ObservableObject
         if (vm.Preset != PermissionPreset.Plan) vm.ProposedPlan = null;
         // Notes that bear on this message ride along with it (a few, only when relevant — never a dump).
         if (recallQuery is not null && RecallBlockFor(vm, recallQuery) is { } recalled) modelText = recalled + "\n\n" + modelText;
+        // The person rewound a turn since the last one: the model reads those files again instead of trusting its memory.
+        if (_rewindNotes.Remove(sessionId, out var rewound)) modelText = rewound + "\n\n" + modelText;
         if (vm.Title == "New chat")
         {
             var first = displayText.Split('\n').FirstOrDefault() ?? displayText;
@@ -1068,7 +1104,7 @@ public sealed partial class AgentHost : ObservableObject
         var shell = Config.ResolvedAgentShell;
         var key = new EngineKey(ProfileKey(profile), window, thinking, vm.Preset, skillState.Signature,
                                 Config.ComputerToolsEnabled, VisionOn(profile), shell.Executable, Vault.Revision,
-                                vm.Goal is not null, MemorySignature(vm), AgentsStampFor(vm), RoutingStamp(profile), IsUnattended(sessionId));
+                                vm.Goal is not null, MemorySignature(vm), AgentsStampFor(vm), RoutingStamp(profile, vm), IsUnattended(sessionId));
         if (_engineKeys.TryGetValue(sessionId, out var previous))
         {
             // The chat was moved to another model (its model menu): say which one answers from here on.
@@ -1597,6 +1633,7 @@ public sealed partial class AgentHost : ObservableObject
     {
         _shuttingDown = true;
         foreach (var id in _runs.Keys.Concat(_backgroundPools.Keys).Distinct().ToList()) StopSession(id);
+        StopMcp();
     }
 
     private bool _shuttingDown;
@@ -1763,6 +1800,8 @@ public sealed partial class AgentHost : ObservableObject
                 // The removed count rides in ArgSummary so a reloaded divider still says how much
                 // was folded away.
                 CompactionEntryVM c => new LogItemRow(sessionId, seq, "compaction", c.Summary, "compaction", c.Removed.ToString(), null, false, entry.At),
+                // The turn's id rides in ArgSummary; the checkpoint itself is on disk.
+                CheckpointEntryVM k => new LogItemRow(sessionId, seq, "checkpoint", k.StoredTitle, "checkpoint", k.TurnId, null, false, entry.At),
                 _ => new LogItemRow(sessionId, seq, "todos", null, null, null, null, false, entry.At),
             };
             output.Add(row);

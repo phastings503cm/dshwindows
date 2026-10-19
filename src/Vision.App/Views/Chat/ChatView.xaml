@@ -325,6 +325,86 @@
             </DataTemplate.Triggers>
         </DataTemplate>
 
+        <!-- "Files changed (N)" under a turn that changed files: the files with their counts, each opening its diff, and
+             "Rewind this turn" (10-19 #20). -->
+        <DataTemplate DataType="{x:Type model:CheckpointEntryVM}">
+            <Border x:Name="Card" Margin="28,0,0,12" CornerRadius="8" BorderThickness="1" Padding="8,6"
+                    Background="{DynamicResource CardBackgroundFillColorDefaultBrush}" BorderBrush="{DynamicResource CardStrokeColorDefaultBrush}">
+                <StackPanel>
+                    <DockPanel>
+                        <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Center">
+                            <Button x:Name="RewindButton" Style="{StaticResource SubtleButton}" Padding="8,2" Click="RewindTurn_Click"
+                                    Visibility="{Binding CanRewind, Converter={StaticResource BoolToVisibility}}"
+                                    ToolTip="Put these files back the way they were before this turn (asks first if any changed since)">
+                                <StackPanel Orientation="Horizontal">
+                                    <TextBlock Style="{StaticResource Glyph}" FontSize="11" Text="{x:Static infra:Icons.Undo}" Margin="0,1,6,0"
+                                               Foreground="{DynamicResource AccentTextFillColorPrimaryBrush}" />
+                                    <TextBlock Text="Rewind this turn" FontSize="12" Foreground="{DynamicResource AccentTextFillColorPrimaryBrush}" />
+                                </StackPanel>
+                            </Button>
+                            <Button Style="{StaticResource SubtleButton}" Padding="8,2" Click="UndoRewind_Click"
+                                    Visibility="{Binding CanUndo, Converter={StaticResource BoolToVisibility}}"
+                                    ToolTip="Put back what the rewind replaced">
+                                <TextBlock Text="Undo rewind" FontSize="12" Foreground="{DynamicResource AccentTextFillColorPrimaryBrush}" />
+                            </Button>
+                            <Button Style="{StaticResource SubtleButton}" Padding="8,2" Click="ViewCheckpoint_Click"
+                                    ToolTip="See each file's changes, and the chat's other turns (/rewind)">
+                                <TextBlock Text="Changes…" FontSize="12" Foreground="{DynamicResource AccentTextFillColorPrimaryBrush}" />
+                            </Button>
+                        </StackPanel>
+                        <Grid Background="Transparent" Cursor="Hand" MouseLeftButtonUp="CheckpointHeader_Click">
+                            <StackPanel Orientation="Horizontal">
+                                <TextBlock Style="{StaticResource Glyph}" FontSize="12" Text="{x:Static infra:Icons.History}" Margin="0,0,8,0"
+                                           VerticalAlignment="Center" Foreground="{DynamicResource TextFillColorSecondaryBrush}"
+                                           ToolTip="{Binding At, Converter={StaticResource Stamp}}" />
+                                <TextBlock Text="{Binding Title}" FontSize="12" FontWeight="SemiBold" VerticalAlignment="Center"
+                                           Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
+                                <TextBlock Text="{Binding LineSummary}" Style="{StaticResource MonoText}" FontSize="11.5" Margin="8,0,0,0"
+                                           VerticalAlignment="Center" Foreground="{DynamicResource TextFillColorTertiaryBrush}" />
+                                <TextBlock Text="{Binding Status, StringFormat=' · {0}'}" Style="{StaticResource MetaText}" VerticalAlignment="Center"
+                                           Visibility="{Binding HasStatus, Converter={StaticResource BoolToVisibility}}" />
+                                <TextBlock x:Name="Chevron" Style="{StaticResource Glyph}" FontSize="9" Text="{x:Static infra:Icons.ChevronRight}"
+                                           Margin="8,1,0,0" VerticalAlignment="Center" Foreground="{DynamicResource TextFillColorTertiaryBrush}" />
+                            </StackPanel>
+                        </Grid>
+                    </DockPanel>
+                    <ItemsControl x:Name="Details" ItemsSource="{Binding Files}" Margin="20,6,0,0" Visibility="Collapsed">
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate DataType="{x:Type model:CheckpointFileVM}">
+                                <Button Style="{StaticResource SubtleButton}" Padding="4,2" HorizontalAlignment="Left" HorizontalContentAlignment="Left"
+                                        Click="CheckpointFile_Click" ToolTip="{Binding Tooltip}">
+                                    <StackPanel Orientation="Horizontal">
+                                        <Ellipse x:Name="Dot" Width="7" Height="7" Margin="0,0,7,0" VerticalAlignment="Center"
+                                                 Fill="{DynamicResource SystemFillColorCautionBrush}" />
+                                        <TextBlock Text="{Binding RelativePath}" Style="{StaticResource MonoText}" FontSize="11.5" />
+                                        <TextBlock Text="{Binding Counts}" Style="{StaticResource MetaText}" Margin="10,0,0,0" />
+                                        <TextBlock Text="{Binding Change, StringFormat=' · {0}'}" Style="{StaticResource MetaText}" />
+                                    </StackPanel>
+                                </Button>
+                                <DataTemplate.Triggers>
+                                    <DataTrigger Binding="{Binding IsCreated}" Value="True">
+                                        <Setter TargetName="Dot" Property="Fill" Value="{DynamicResource SystemFillColorSuccessBrush}" />
+                                    </DataTrigger>
+                                    <DataTrigger Binding="{Binding IsDeleted}" Value="True">
+                                        <Setter TargetName="Dot" Property="Fill" Value="{DynamicResource SystemFillColorCriticalBrush}" />
+                                    </DataTrigger>
+                                </DataTemplate.Triggers>
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+                </StackPanel>
+            </Border>
+            <DataTemplate.Triggers>
+                <DataTrigger Binding="{Binding IsExpanded}" Value="True">
+                    <Setter TargetName="Details" Property="Visibility" Value="Visible" />
+                    <Setter TargetName="Chevron" Property="Text" Value="{x:Static infra:Icons.ChevronDown}" />
+                </DataTrigger>
+                <DataTrigger Binding="{Binding Turn}" Value="{x:Null}">
+                    <Setter TargetName="Card" Property="Opacity" Value="0.7" />
+                </DataTrigger>
+            </DataTemplate.Triggers>
+        </DataTemplate>
+
         <!-- The turn's phases: Planning → Execution → Validation → Results, and the results card when it is done. -->
         <DataTemplate DataType="{x:Type chat:PhaseFooter}">
             <chat:PhaseCardView Visibility="{Binding IsVisible, Converter={StaticResource BoolToVisibility}}" />

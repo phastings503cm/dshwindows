@@ -718,6 +718,12 @@ public sealed partial class AgentHost
                 {
                     throw;
                 }
+                catch (SensitiveRouteException)
+                {
+                    // A Sensitive chat on a model it may not use: retrying can't help — the person picks another model.
+                    if (!kickedOff && reply is not null) vm.BlockedGoal = goal;
+                    throw;
+                }
                 catch (Exception error)
                 {
                     if (ct.IsCancellationRequested) throw new OperationCanceledException(ct);

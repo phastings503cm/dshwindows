@@ -27,6 +27,15 @@ public sealed partial class AgentHost
     private ShieldOptions? ShieldFor(string? sessionId)
     {
         var privacy = Config.Privacy;
+        // A Sensitive chat is masked on every route that isn't private, whatever the switch says (the policy's "through the shield").
+        var sensitive = sessionId is not null && Session(sessionId) is { } chat && IsSensitive(chat);
+        if (sensitive)
+        {
+            var categories = privacy.Mask && privacy.Categories != SensitiveCategories.None ? privacy.Categories : PrivacySettings.Default.Categories;
+            privacy = privacy with { Mask = true, Secrets = categories.HasFlag(SensitiveCategories.Secrets), Emails = categories.HasFlag(SensitiveCategories.Emails),
+                                     Phones = categories.HasFlag(SensitiveCategories.Phones), Ids = categories.HasFlag(SensitiveCategories.Ids),
+                                     Ips = categories.HasFlag(SensitiveCategories.Ips), Terms = categories.HasFlag(SensitiveCategories.CustomTerms) || privacy.Terms };
+        }
         IReadOnlyList<string> vault;
         try
         {
@@ -92,11 +101,13 @@ public sealed partial class AgentHost
 
     /// <summary>Changes when what a chat's engine is built with around the model does (the shield's settings, the backups,
     /// the subagent servers and their privacy), so the engine is rebuilt exactly then.</summary>
-    private string RoutingStamp(ProviderProfile chatRoute)
+    private string RoutingStamp(ProviderProfile chatRoute, SessionVM? vm = null)
     {
         var backups = string.Join(",", RouteRoster.Backups(Config.Providers, chatRoute.RouteId).Select(b => b.RouteId + (b.IsPrivateRoute ? "+p" : "")));
         var servers = string.Join(",", SubagentServersNow().Select(s => s.Label + (s.IsPrivate ? "+p" : "")));
-        return $"{Config.Privacy}|{chatRoute.IsPrivateRoute}|{chatRoute.IsInteractiveOnly}|{backups}|{servers}";
+        // A chat's sensitivity changes its shield and its prompt; the MCP servers' tools change its tool list.
+        var power = vm is null ? "" : $"|s={IsSensitive(vm)}/{Config.SensitiveAllowsShielded}|mcp={Mcp.Revision}";
+        return $"{Config.Privacy}|{chatRoute.IsPrivateRoute}|{chatRoute.IsInteractiveOnly}|{backups}|{servers}{power}";
     }
 
     /// <summary>The subagent servers (workers) as the model is told about them, with their privacy.</summary>

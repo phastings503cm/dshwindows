@@ -637,6 +637,13 @@ public partial class ChatView : UserControl
             return;
         }
         if ((text.Length == 0 && _attachments.Count == 0) || session.Running) return;
+        // A Sensitive chat on a model it may not use: say why, and keep what was typed (a command still runs: /sensitive off).
+        if (SlashCommand.Parse(text) is null && _model.Host.SensitiveRefusal(session) is { } refusal)
+        {
+            session.Note(refusal, MessageRole.Error);
+            ScrollIfPinned();
+            return;
+        }
         var payload = _attachments.Select(c => c.Attachment).ToList();
         Composer.Clear();
         _attachments.Clear();

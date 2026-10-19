@@ -116,6 +116,17 @@
                                        Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
                         </StackPanel>
                     </Button>
+                    <!-- The chat's sensitivity policy (10-19 #20): Sensitive = private models only, or online ones masked. -->
+                    <Button x:Name="SensitiveButton" Style="{StaticResource SubtleButton}" Margin="2,0" Click="SensitiveButton_Click"
+                            AutomationProperties.Name="Sensitivity">
+                        <StackPanel Orientation="Horizontal">
+                            <TextBlock x:Name="SensitiveGlyph" Style="{StaticResource Glyph}" FontSize="13" Text="{x:Static infra:Icons.Shield}" Margin="0,0,6,0"
+                                       Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
+                            <TextBlock x:Name="SensitiveLabel" Text="Standard" />
+                            <TextBlock Style="{StaticResource Glyph}" FontSize="9" Text="{x:Static infra:Icons.ChevronDown}" Margin="6,1,0,0"
+                                       Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
+                        </StackPanel>
+                    </Button>
                     <Button x:Name="PresetButton" Style="{StaticResource SubtleButton}" Margin="2,0" Click="PresetButton_Click">
                         <StackPanel Orientation="Horizontal">
                             <TextBlock x:Name="PresetGlyph" Style="{StaticResource Glyph}" FontSize="13" Margin="0,0,6,0" />

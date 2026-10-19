@@ -78,12 +78,14 @@ public partial class MainWindow : Window
                 Dispatcher.BeginInvoke(ConfirmSparkSwap);
         };
         model.Host.ContextInfoChanged += UpdateModelLabel;
+        model.Host.SensitivityChanged += UpdateSensitivity;
         model.SettingsRequested += (tab, action) => ShowSettings(tab, action);
         model.WizardRequested += ShowWizard;
         model.BedrockGuideRequested += ShowBedrockGuide;
         model.SwapperGuideRequested += ShowSwapperGuide;
         model.PlanGuideRequested += ShowPlanGuide;
         model.MemoryRequested += ShowMemory;
+        model.RewindRequested += ShowRewind;
         model.ExternalImportRequested += ShowExternalImport;
         model.MemoriesRequested += ShowMemories;
         model.OpenClawImportRequested += ShowOpenClawImport;
@@ -166,6 +168,10 @@ public partial class MainWindow : Window
             case nameof(AppConfig.Preset):
                 UpdatePreset();
                 break;
+            case nameof(AppConfig.SensitiveAllowsShielded):
+            case nameof(AppConfig.SensitiveProjects):
+                UpdateSensitivity();
+                break;
             case nameof(AppConfig.ExternalImportOffered):
                 // Taken up from Settings or Memory & Skills as well as from the card itself.
                 if (Model.Config.ExternalImportOffered) ImportCard.Visibility = Visibility.Collapsed;
@@ -185,6 +191,7 @@ public partial class MainWindow : Window
         if (e.PropertyName is nameof(SessionVM.Running) or nameof(SessionVM.Stopping)) UpdateRunning();
         if (e.PropertyName is nameof(SessionVM.Preset)) UpdatePreset();
         if (e.PropertyName is nameof(SessionVM.RouteId)) UpdateModelLabel();
+        if (e.PropertyName is nameof(SessionVM.Sensitive) or nameof(SessionVM.Cwd)) UpdateSensitivity();
         if (e.PropertyName is nameof(SessionVM.Title)) UpdateTitle();
         if (e.PropertyName is nameof(SessionVM.Todos) or nameof(SessionVM.Outline) or nameof(SessionVM.Running)) UpdatePlanButton();
     }
@@ -246,6 +253,34 @@ public partial class MainWindow : Window
             ? "No model configured — run the setup wizard"
             : $"{provider.DisplayName}\n{provider.BaseUrl}" + (provider.IsPrivateRoute ? "\nPrivate" : "\nNot private: sensitive details are masked") +
               (Model.Spark.IsSwitchingFor(provider) ? $"\n{Model.Spark.BoxFor(provider)?.Name} is switching models…" : "");
+        UpdateSensitivity();
+    }
+
+    /// <summary>The header's sensitivity chip: "Sensitive" (a lock, amber — red when the chat's model can't be used) or
+    /// "Standard", with the policy in its tooltip.</summary>
+    private void UpdateSensitivity()
+    {
+        var session = Model.Host.Selected;
+        var sensitive = session is not null ? Model.Host.IsSensitive(session) : Model.Config.IsSensitiveProject(Model.Project);
+        SensitiveLabel.Text = RouteAdmission.Label(sensitive);
+        SensitiveGlyph.Text = sensitive ? Icons.Lock : Icons.Shield;
+        var refused = session is not null && Model.Host.SensitiveRefusal(session) is not null;
+        SensitiveGlyph.Foreground = !sensitive
+            ? ThemeService.Brush("TextFillColorSecondaryBrush", System.Windows.Media.Colors.Gray)
+            : refused
+                ? ThemeService.Brush("SystemFillColorCriticalBrush", System.Windows.Media.Colors.IndianRed)
+                : ThemeService.Brush("SystemFillColorCautionBrush", System.Windows.Media.Colors.DarkOrange);
+        SensitiveButton.ToolTip = session is not null
+            ? Model.Host.SensitivityDescription(session)
+            : RouteAdmission.Describe(sensitive, null, Model.Config.SensitiveAllowsShielded);
+    }
+
+    private void SensitiveButton_Click(object sender, RoutedEventArgs e)
+    {
+        var menu = Menus.Sensitivity(Model, Model.Host.Selected);
+        menu.PlacementTarget = SensitiveButton;
+        menu.Placement = PlacementMode.Bottom;
+        menu.IsOpen = true;
     }
 
     private void UpdatePreset()
@@ -875,6 +910,13 @@ public partial class MainWindow : Window
     {
         var window = new MemoryWindow(Model) { Owner = this };
         window.ShowDialog();
+    }
+
+    /// <summary>The Rewind window: a chat's recent turns that changed files, their diffs, Rewind.</summary>
+    public void ShowRewind(SessionVM session, string? turnId, string? file)
+    {
+        var window = new RewindWindow(Model, session, turnId, file) { Owner = this };
+        window.Show();
     }
 
     private MemoriesWindow? _memories;
