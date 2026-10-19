@@ -270,10 +270,13 @@ public sealed class QueuePanel : UserControl
         // What the chat is doing now comes first: the running prompt's or /goal's plan, its steps and who works them.
         var work = chat is null ? null : Host.CurrentWorkFor(chat);
         if (chat is not null && work is not null) _list.Children.Add(NowCard(chat, work));
+        // Idle: how the last prompt ended, and the plan it left, stay in view.
+        else if (chat is { TurnPhase: { IsOver: true } last } && chat.PromptHistory.LastOrDefault() is { } previous)
+            _list.Children.Add(LastCard(chat, last, previous));
         if (chat is not null && Host.ChatTasksPaused(chatId!) is { } paused && Queue.QueuedCountFor(chatId) > 0)
             _list.Children.Add(PausedBanner(chatId!, paused));
         if (chat is null) _list.Children.Add(NoChat());
-        else if (tasks.Count == 0 && !_adding && work is null) _list.Children.Add(EmptyState());
+        else if (tasks.Count == 0 && !_adding && work is null && chat.TurnPhase is not { IsOver: true }) _list.Children.Add(EmptyState());
         else
         {
             var upNext = tasks.Where(t => t.Status == QueueTaskStatus.Queued || (t.Status == QueueTaskStatus.Running && t.Id != work?.TaskId)).ToList();
@@ -458,6 +461,51 @@ public sealed class QueuePanel : UserControl
         var card = new Border { Child = panel, Padding = new Thickness(10, 8, 8, 9), Margin = new Thickness(0, 0, 0, 6), CornerRadius = new CornerRadius(8), BorderThickness = new Thickness(1) };
         card.SetResourceReference(Border.BackgroundProperty, "SubtleFillColorSecondaryBrush");
         card.SetResourceReference(Border.BorderBrushProperty, "SystemFillColorSuccessBrush");
+        return card;
+    }
+
+    /// <summary>The chat is idle: its last prompt, how it ended, and the steps of the plan it worked.</summary>
+    private UIElement LastCard(SessionVM chat, TurnPhaseState state, PromptRecord record)
+    {
+        var panel = new StackPanel();
+        var (glyph, brush) = record.Outcome switch
+        {
+            PromptOutcome.Completed => (Icons.Completed, "SystemFillColorSuccessBrush"),
+            PromptOutcome.Issues or PromptOutcome.NeedsYou => (Icons.Warning, "SystemFillColorCautionBrush"),
+            PromptOutcome.Failed => (Icons.Error, "SystemFillColorCriticalBrush"),
+            _ => (Icons.Stop, "TextFillColorTertiaryBrush"),
+        };
+        var head = new DockPanel();
+        var icon = Ui.Glyph(glyph, 12, brush);
+        icon.Margin = new Thickness(0, 2, 9, 0);
+        icon.VerticalAlignment = VerticalAlignment.Top;
+        DockPanel.SetDock(icon, Dock.Left);
+        head.Children.Add(icon);
+        var titles = new StackPanel();
+        titles.Children.Add(Ui.Text($"Last · {record.Headline}" + (record.DurationSeconds is { } took ? $" · took {took.FormattedDuration()}" : ""), 11, FontWeights.SemiBold, brush, wrap: false));
+        var title = Ui.Text(record.FirstLine, 12.5);
+        title.MaxHeight = 36;
+        title.TextTrimming = TextTrimming.CharacterEllipsis;
+        title.ToolTip = TextUtil.Prefix(record.Text, 1_000);
+        titles.Children.Add(title);
+        head.Children.Add(titles);
+        panel.Children.Add(head);
+        if (chat.Todos.Count > 0)
+        {
+            var steps = new StackPanel { Margin = new Thickness(21, 5, 0, 0) };
+            foreach (var step in chat.Todos)
+            {
+                var done = step.Status == TodoStatus.Completed;
+                var line = Ui.Text((done ? "✓ " : "○ ") + step.Content, 11, brushKey: done ? "TextFillColorTertiaryBrush" : "TextFillColorSecondaryBrush", wrap: false);
+                line.TextTrimming = TextTrimming.CharacterEllipsis;
+                steps.Children.Add(line);
+            }
+            panel.Children.Add(steps);
+        }
+        var card = new Border { Child = panel, Padding = new Thickness(10, 8, 8, 9), Margin = new Thickness(0, 0, 0, 6), CornerRadius = new CornerRadius(8), BorderThickness = new Thickness(1) };
+        card.SetResourceReference(Border.BackgroundProperty, "LayerFillColorAltBrush");
+        card.SetResourceReference(Border.BorderBrushProperty, "CardStrokeColorDefaultBrush");
+        card.ToolTip = state.Steps.LastOrDefault()?.Text;
         return card;
     }
 

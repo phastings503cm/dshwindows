@@ -30,7 +30,7 @@ public sealed class ActivityMenu : UserControl
         _model = model;
         Width = 470;
         var header = new DockPanel { Margin = new Thickness(14, 10, 10, 6) };
-        var stopAll = Ui.LinkButton("Stop everything", () => Host.StopAll());
+        var stopAll = Ui.LinkButton("Stop all", () => Host.StopAll());
         stopAll.ToolTip = "Stop every agent and task list (Ctrl+Shift+.)";
         DockPanel.SetDock(stopAll, Dock.Right);
         header.Children.Add(stopAll);

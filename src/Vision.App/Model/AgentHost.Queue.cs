@@ -27,6 +27,8 @@ public sealed partial class AgentHost
         public Task? Loop { get; set; }
         /// <summary>The task being worked right now (null while waiting for the chat to be free).</summary>
         public string? ActiveTaskId { get; set; }
+        /// <summary>Started by itself for a task added with "Add to tasks" (not with Start): it says nothing when it runs dry.</summary>
+        public bool Auto { get; init; }
     }
 
     /// <summary>Chat id → its list's run, while it runs or winds down.</summary>
@@ -212,7 +214,7 @@ public sealed partial class AgentHost
             ChatNote(vm, "This chat's task list has nothing waiting — add a task first.");
             return;
         }
-        var run = new ChatQueueRun();
+        var run = new ChatQueueRun { Auto = !resumeOnLaunch };
         _chatQueues[chatId] = run;
         Config.SetQueueResume(chatId, resumeOnLaunch);
         QueueStateChanged();
@@ -264,7 +266,7 @@ public sealed partial class AgentHost
         Queue.Requeue(taskId, toFront: true);
         Hydrate(vm);
         if (IsQueueRunning(chatId)) ChatNote(vm, $"“{task.Title}” is next on this chat's task list.");
-        else StartQueue(chatId);
+        else StartQueue(chatId, resumeOnLaunch: !task.AsPrompt);
     }
 
     /// <summary>True while <paramref name="run"/> is still in charge of <paramref name="chatId"/>'s list.</summary>
@@ -337,7 +339,7 @@ public sealed partial class AgentHost
                         break;
                 }
             }
-            if (QueueActive(chatId, run) && Queue.Stats(chatId) is { Finished: true } s)
+            if (QueueActive(chatId, run) && !run.Auto && Queue.Stats(chatId) is { Finished: true } s)
                 ChatNote(chatId, $"Task list done: {s.Completed} complete, {s.Failed} failed, {s.Blocked} blocked.");
         }
         catch (Exception error)
@@ -815,6 +817,9 @@ public sealed partial class AgentHost
         return null;
     }
 
+    /// <summary>How a prompt the model never received reads in the transcript.</summary>
+    public const string UndeliveredPrefix = "Not delivered to the model: ";
+
     /// <summary>Turn a user entry the model never received into a notice.</summary>
     private void MarkUndelivered(SessionVM vm, string entryId)
     {
@@ -826,7 +831,7 @@ public sealed partial class AgentHost
             break;
         }
         if (index < 0 || vm.Entries[index] is not MessageEntryVM { Role: MessageRole.User } message) return;
-        vm.Entries[index] = new MessageEntryVM(MessageRole.Notice, $"Not delivered to the model: {message.Text}", at: message.At);
+        vm.Entries[index] = new MessageEntryVM(MessageRole.Notice, UndeliveredPrefix + message.Text, at: message.At);
         Log.Resync(vm.Id, LogRows(vm.Entries, vm.Id));
         vm.NotifyContentChanged();
     }

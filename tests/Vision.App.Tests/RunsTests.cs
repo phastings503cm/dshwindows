@@ -280,7 +280,13 @@ public sealed class RunsTests : IDisposable
 
         host.ResumeChatTasks(chat.Id);
         await WaitUntil("both ran", () => host.Queue.Find(a.Id)?.Status == QueueTaskStatus.Complete && host.Queue.Find(b.Id)?.Status == QueueTaskStatus.Complete);
-        Assert.Equal(["slow one", "task b", "task a"], UserRows(chat));
+        // The stopped prompt never reached the model, so its row says so; the queued ones ran in their new order.
+        Assert.Equal(["task b", "task a"], UserRows(chat));
+        Assert.Contains(chat.Entries.OfType<MessageEntryVM>(), m => m.Text == "Not delivered to the model: slow one");
+        // Its record still finds that row.
+        var stopped = chat.PromptHistory.First(r => r.Text == "slow one");
+        Assert.Equal(PromptOutcome.Stopped, stopped.Outcome);
+        Assert.NotNull(host.EntryIdFor(stopped, chat));
         gate.TrySetResult();
     });
 
@@ -378,7 +384,9 @@ public sealed class RunsTests : IDisposable
             var request = Assert.Single(worker);
             Assert.Equal("kimi-for-coding", (string)request["model"]!);
             Assert.Null(request["temperature"]);  // the main route's 0.6 is the main route's
-            Assert.Contains(handler.Bodies, b => b.Host == "stub.test" && JsonNode.Parse(b.Body)!["temperature"] is not null);
+            var main = handler.Bodies.Where(b => b.Host == "stub.test").Select(b => JsonNode.Parse(b.Body)!.AsObject()).ToList();
+            Assert.True(main.Any(b => b["temperature"] is not null),
+                "the main requests carry the main route's temperature; their keys: " + string.Join(" | ", main.Select(b => string.Join(",", b.Select(p => p.Key)))));
             var run = Assert.Single(chat.Agents);
             Assert.Equal(("Kimi Code", "kimi-for-coding", "kimi-for-coding on Kimi Code"), (run.Route, run.Model, run.PlacementLabel));
             Assert.Null(run.Placement);
