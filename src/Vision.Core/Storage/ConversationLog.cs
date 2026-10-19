@@ -25,8 +25,8 @@ public sealed record LogSession
     /// Null = not chosen yet (an older chat: it takes the primary when it next sends). The same fields as Vision for macOS.</summary>
     public string? Route { get; set; }
     public string? Thinking { get; set; }
-    /// <summary>This chat's sensitivity: true = Sensitive, false = Standard, null = its project's default (see
-    /// <see cref="RouteAdmission"/>). The same field as Vision for macOS.</summary>
+    /// <summary>The chat is Sensitive (see <see cref="SensitivityPolicy"/>): true, or null = not (stored only when it is, like
+    /// Vision for macOS).</summary>
     public bool? Sensitive { get; set; }
 }
 
@@ -94,11 +94,12 @@ public sealed class ConversationLog
         Persist(id);
     }
 
-    /// <summary>Store the chat's own sensitivity (null = follow its project's default).</summary>
-    public void SetSensitive(string id, bool? sensitive)
+    /// <summary>Store whether the chat is Sensitive.</summary>
+    public void SetSensitive(string id, bool sensitive)
     {
-        if (!_rows.TryGetValue(id, out var row) || row.Sensitive == sensitive) return;
-        row.Sensitive = sensitive;
+        bool? stored = sensitive ? true : null;
+        if (!_rows.TryGetValue(id, out var row) || row.Sensitive == stored) return;
+        row.Sensitive = stored;
         Persist(id);
     }
 

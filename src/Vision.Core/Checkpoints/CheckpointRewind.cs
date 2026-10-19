@@ -2,203 +2,198 @@ namespace Vision.Core;
 
 // MARK: - Rewinding a turn
 //
-// Each file the turn changed goes back to how it was before the turn: rewritten from the store, deleted (the turn created
-// it) or recreated (the turn deleted it). A file that changed again since the turn ended — by the person, another turn, a
-// build — is a conflict: the plan lists it, and it is overwritten only when the person says so. What each file held just
-// before the rewind is kept, so the rewind itself can be undone.
+// Every file the turn changed goes back to what it held before the turn (a file the turn created is removed). A file
+// that changed again since the turn — by you, by a later turn — is a conflict: rewinding it would throw that change away,
+// so the person decides (rewind it anyway, or leave it). A file whose content wasn't kept can't be rewound and is left
+// alone. The rewind is itself recorded as a turn of its own, so it can be rewound in turn. The words and the rules are
+// Vision for macOS's (Rewind.swift).
 
-public enum RewindAction
+/// What rewinding does to one file.
+/// <param name="Restore">The content to put back (null = remove the file: the turn created it).</param>
+/// <param name="Conflict">Why it would throw away a later change ("changed since this turn"); null = safe.</param>
+/// <param name="Skipped">Why it can't be rewound at all; null = it can.</param>
+/// <param name="AlreadyThere">It already holds what it held before the turn: nothing to do.</param>
+public sealed record RewindItem(CheckpointFile File, string? Restore, string? Conflict, string? Skipped, bool AlreadyThere)
 {
-    /// <summary>Write back the content it had before the turn.</summary>
-    Restore,
-    /// <summary>The turn created it: delete it.</summary>
-    Delete,
-    /// <summary>Already as it was before the turn.</summary>
-    Nothing,
-    /// <summary>Can't: too large to have been kept, or its snapshot was pruned.</summary>
-    Unavailable,
+    public string Path => File.Path;
 }
-
-/// <summary>What rewinding does to one file. <paramref name="Conflict"/>: it changed since the turn ended (or a background
-/// agent changed it after the turn, so nobody can tell).</summary>
-public sealed record RewindItem(CheckpointFile File, RewindAction Action, bool Conflict, string? Current);
 
 public sealed record RewindPlan(TurnCheckpoint Turn, IReadOnlyList<RewindItem> Items)
 {
-    public IReadOnlyList<RewindItem> Conflicts => Items.Where(i => i.Conflict && i.Action is RewindAction.Restore or RewindAction.Delete).ToList();
-    public IReadOnlyList<RewindItem> Unavailable => Items.Where(i => i.Action == RewindAction.Unavailable).ToList();
-    public int Actionable => Items.Count(i => i.Action is RewindAction.Restore or RewindAction.Delete);
+    /// The files a rewind changes without a question.
+    public IReadOnlyList<RewindItem> Safe => Items.Where(i => i.Conflict is null && i.Skipped is null && !i.AlreadyThere).ToList();
+    /// The files that changed since the turn.
+    public IReadOnlyList<RewindItem> Conflicts => Items.Where(i => i.Conflict is not null && i.Skipped is null && !i.AlreadyThere).ToList();
+    /// The files that can't be rewound.
+    public IReadOnlyList<RewindItem> Skipped => Items.Where(i => i.Skipped is not null).ToList();
+    /// Nothing left to put back.
+    public bool IsEmpty => Safe.Count == 0 && Conflicts.Count == 0;
 }
 
-/// <summary>What a rewind did.</summary>
-public sealed record RewindResult(int Restored, int Deleted, int Skipped, IReadOnlyList<string> Failed)
+/// What a rewind did.
+public sealed class RewindResult
 {
-    public int Changed => Restored + Deleted;
+    /// Files put back to their earlier content.
+    public List<string> Restored { get; } = [];
+    /// Files the turn created, removed.
+    public List<string> Removed { get; } = [];
+    /// Files left as they are (changed since and kept, or not rewindable).
+    public List<string> Left { get; } = [];
+    /// Files that couldn't be written, and why.
+    public Dictionary<string, string> Failed { get; } = new(StringComparer.Ordinal);
 
-    /// <summary>"Rewound 3 files to before this turn." (with what was skipped or failed) — the same words on every harness.</summary>
-    public string Summary
-    {
-        get
-        {
-            var text = Changed == 0 ? "Nothing to rewind: the files are already as they were before this turn."
-                : $"Rewound {Changed} {(Changed == 1 ? "file" : "files")} to before this turn.";
-            if (Skipped > 0) text += $" Left {Skipped} {(Skipped == 1 ? "file" : "files")} that changed since as {(Skipped == 1 ? "it is" : "they are")}.";
-            if (Failed.Count > 0) text += $" Couldn't write {string.Join(", ", Failed.Select(System.IO.Path.GetFileName))}.";
-            return text;
-        }
-    }
+    public int ChangedCount => Restored.Count + Removed.Count;
 }
 
 public static class CheckpointRewind
 {
-    /// <summary>What rewinding <paramref name="turn"/> would do, looking at the files as they are now.</summary>
+    /// What rewinding <paramref name="turn"/> would do now, file by file.
     public static RewindPlan Plan(CheckpointStore store, TurnCheckpoint turn)
     {
         var items = new List<RewindItem>();
         foreach (var file in turn.Changed)
         {
-            var current = Current(file.Path);
-            if (current == file.Before)
-            {
-                items.Add(new RewindItem(file, RewindAction.Nothing, false, current));
-                continue;
-            }
-            if (file.Before is not null && (file.TooLarge || !store.Has(file.Before)))
-            {
-                items.Add(new RewindItem(file, RewindAction.Unavailable, false, current));
-                continue;
-            }
-            var conflict = !file.AfterKnown || current != file.After;
-            var action = file.Before is null ? (current is null ? RewindAction.Nothing : RewindAction.Delete) : RewindAction.Restore;
-            items.Add(new RewindItem(file, action, conflict && action != RewindAction.Nothing, current));
+            var skipped = file.Skipped;
+            if (skipped is null && file.Before is { } before && !store.Has(before)) skipped = "its earlier content is no longer kept";
+            string? conflict = null;
+            var already = false;
+            var (now, readable) = Current(file.Path);
+            if (!readable) skipped ??= "it can't be read now";
+            else if (now == file.Before) already = true;
+            else if (file.IsLate || now != file.After) conflict = now is null ? "deleted since this turn" : "changed since this turn";
+            items.Add(new RewindItem(file, file.Before, conflict, skipped, already));
         }
         return new RewindPlan(turn, items);
     }
 
-    /// <summary>Carry out <paramref name="plan"/>: every file that can go back does, except a conflict when
-    /// <paramref name="overwriteConflicts"/> is false. The turn's manifest records the rewind (and what the files held, so
-    /// it can be undone).</summary>
-    public static RewindResult Apply(CheckpointStore store, RewindPlan plan, bool overwriteConflicts, DateTimeOffset? at = null)
+    /// Put the files back. A conflict is rewound only with <paramref name="includeConflicts"/>. <paramref name="recorder"/>,
+    /// when given, records the rewind as a turn of its own. The turn is marked rewound (its record stays, for the diff and
+    /// for the rewind's own undo).
+    public static RewindResult Apply(CheckpointStore store, RewindPlan plan, bool includeConflicts, TurnRecorder? recorder = null,
+                                     DateTimeOffset? at = null)
     {
-        int restored = 0, deleted = 0, skipped = 0;
-        var failed = new List<string>();
-        var from = new Dictionary<string, string?>(StringComparer.Ordinal);
+        var result = new RewindResult();
         foreach (var item in plan.Items)
         {
-            if (item.Action is not (RewindAction.Restore or RewindAction.Delete)) continue;
-            if (item.Conflict && !overwriteConflicts)
+            if (item.AlreadyThere) continue;
+            if (item.Skipped is not null || (item.Conflict is not null && !includeConflicts))
             {
-                skipped++;
+                result.Left.Add(item.Path);
                 continue;
             }
-            var path = item.File.Path;
+            recorder?.BeforeChange(item.Path, "rewind");
             try
             {
-                // Keep what is there now, so the rewind can be undone.
-                if (TurnRecorder.ReadOrNull(path) is { } now) from[path] = store.Put(now);
-                else from[path] = null;
-                lock (FileText.LockFor(path))
+                lock (FileText.LockFor(item.Path))
                 {
-                    if (item.Action == RewindAction.Delete)
+                    if (item.Restore is { } hash)
                     {
-                        if (File.Exists(path)) File.Delete(path);
-                        deleted++;
+                        if (store.Get(hash) is not { } bytes)
+                        {
+                            result.Failed[item.Path] = "its earlier content is no longer kept";
+                            continue;
+                        }
+                        WriteAtomically(item.Path, bytes);
+                        result.Restored.Add(item.Path);
                     }
                     else
                     {
-                        var bytes = store.Get(item.File.Before!) ?? throw new IOException("its snapshot is gone");
-                        WriteAtomically(path, bytes);
-                        restored++;
+                        if (File.Exists(item.Path)) File.Delete(item.Path);
+                        result.Removed.Add(item.Path);
                     }
                 }
             }
             catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException)
             {
-                failed.Add(path);
+                result.Failed[item.Path] = ex.Message;
             }
         }
         var turn = plan.Turn;
-        if (restored + deleted > 0)
-        {
-            turn.RewoundAt = at ?? DateTimeOffset.Now;
-            turn.RewoundCount = restored + deleted;
-            turn.RewoundFrom = from;
-            try
-            {
-                store.Save(turn);
-            }
-            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
-            {
-                // The files went back; only the record of it is missing.
-            }
-        }
-        return new RewindResult(restored, deleted, skipped, failed);
-    }
-
-    /// <summary>Undo a rewind: put back what each file held just before it.</summary>
-    public static RewindResult Undo(CheckpointStore store, TurnCheckpoint turn)
-    {
-        if (turn.RewoundFrom is not { Count: > 0 } from) return new RewindResult(0, 0, 0, []);
-        int restored = 0, deleted = 0;
-        var failed = new List<string>();
-        foreach (var (path, hash) in from)
-        {
-            try
-            {
-                lock (FileText.LockFor(path))
-                {
-                    if (hash is null)
-                    {
-                        if (File.Exists(path)) File.Delete(path);
-                        deleted++;
-                    }
-                    else
-                    {
-                        WriteAtomically(path, store.Get(hash) ?? throw new IOException("its snapshot is gone"));
-                        restored++;
-                    }
-                }
-            }
-            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException)
-            {
-                failed.Add(path);
-            }
-        }
-        turn.RewoundAt = null;
-        turn.RewoundCount = 0;
-        turn.RewoundFrom = null;
+        turn.RewoundAt = at ?? DateTimeOffset.Now;
+        turn.UpdatedAt = turn.RewoundAt.Value;
         try
         {
             store.Save(turn);
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
-            // Recorded next time.
+            // The files went back; only the record of it is missing.
         }
-        return new RewindResult(restored, deleted, 0, failed);
+        return result;
     }
 
-    /// <summary>The unified diff of one file across the turn (empty for a binary file or one whose snapshot is gone).</summary>
+    /// What the chat says after a rewind: "↺ Rewound “Fix the build”: put back 2 files (a.cs, b.cs) and removed 1 file it
+    /// created (c.cs). Left 1 file as they are (d.cs)."
+    public static string Summary(RewindResult result, string title, string? root)
+    {
+        string Names(List<string> paths) =>
+            string.Join(", ", paths.Take(4).Select(p => Display(p, root))) + (paths.Count > 4 ? $" and {paths.Count - 4} more" : "");
+        static string Files(int n) => n == 1 ? "1 file" : $"{n} files";
+        var parts = new List<string>();
+        if (result.Restored.Count > 0) parts.Add($"put back {Files(result.Restored.Count)} ({Names(result.Restored)})");
+        if (result.Removed.Count > 0) parts.Add($"removed {Files(result.Removed.Count)} it created ({Names(result.Removed)})");
+        var text = $"↺ Rewound “{title}”: " + (parts.Count == 0 ? "nothing needed changing" : string.Join(" and ", parts)) + ".";
+        if (result.Left.Count > 0) text += $" Left {Files(result.Left.Count)} as they are ({Names(result.Left)}).";
+        if (result.Failed.Count > 0)
+            text += " Couldn't rewind " + string.Join(", ", result.Failed.OrderBy(f => f.Key, StringComparer.Ordinal).Take(3)
+                .Select(f => $"{Display(f.Key, root)} ({f.Value})")) + ".";
+        return text;
+    }
+
+    /// What the model is told with the next message, so it doesn't trust what it remembers of those files.
+    public static string ModelNote(RewindResult result, string title, string? root)
+    {
+        var paths = result.Restored.Concat(result.Removed).Select(p => Display(p, root));
+        return $"[Automatic message: the user rewound the file changes of an earlier turn (“{title}”). " +
+               $"These files are back to how they were before it: {string.Join(", ", paths)}. " +
+               "Re-read them before relying on what you remember of their contents.]";
+    }
+
+    /// The confirmation's words: what goes back, what was created and goes, what changed since, what can't.
+    public static string Confirmation(RewindPlan plan, string? root)
+    {
+        string Names(IReadOnlyList<RewindItem> items) =>
+            string.Join(", ", items.Take(5).Select(i => Display(i.Path, root))) + (items.Count > 5 ? $" and {items.Count - 5} more" : "");
+        static string S(int n) => n == 1 ? "" : "s";
+        var parts = new List<string>();
+        var restore = plan.Safe.Where(i => i.Restore is not null).ToList();
+        var remove = plan.Safe.Where(i => i.Restore is null).ToList();
+        if (restore.Count > 0) parts.Add($"{restore.Count} file{S(restore.Count)} go back to how they were before this turn ({Names(restore)}).");
+        if (remove.Count > 0) parts.Add($"{remove.Count} file{S(remove.Count)} it created {(remove.Count == 1 ? "is" : "are")} removed ({Names(remove)}).");
+        if (plan.Conflicts.Count > 0)
+            parts.Add($"{plan.Conflicts.Count} file{S(plan.Conflicts.Count)} changed since this turn ({Names(plan.Conflicts)}): " +
+                      $"rewinding {(plan.Conflicts.Count == 1 ? "it" : "them")} throws those later changes away.");
+        if (plan.Skipped.Count > 0) parts.Add($"{plan.Skipped.Count} can't be rewound ({Names(plan.Skipped)}).");
+        return string.Join("\n\n", parts);
+    }
+
+    /// The unified diff of one file across the turn, or a sentence saying why there is none.
     public static string Diff(CheckpointStore store, CheckpointFile file, string? root = null)
     {
-        var name = root is not null ? Relative(root, file.Path) : Path.GetFileName(file.Path);
-        if (file.TooLarge) return $"{name}: too large to keep a copy of ({AttachmentFormat.Bytes(Math.Max(file.BeforeBytes, file.AfterBytes))}).";
+        var name = Display(file.Path, root);
+        if (file.Skipped is { } skipped && (file.Before is null || file.After is null || !store.Has(file.Before) || !store.Has(file.After)))
+            return $"No diff: {skipped}.";
         var before = file.Before is { } b ? store.Get(b) : [];
-        var after = file.After is { } a ? store.Get(a) : file.AfterKnown ? [] : TurnRecorder.ReadOrNull(file.Path) ?? [];
-        if (before is null || after is null) return $"{name}: its snapshot is no longer kept.";
+        var after = file.IsLate ? TurnRecorder.ReadOrNull(file.Path) ?? [] : file.After is { } a ? store.Get(a) : [];
+        if (before is null) return "The earlier content is no longer kept.";
+        if (after is null) return "The turn's content is no longer kept.";
         var beforeText = FileText.Decode(before)?.Text;
         var afterText = FileText.Decode(after)?.Text;
-        if (beforeText is null || afterText is null) return $"{name}: binary file ({AttachmentFormat.Bytes(before.LongLength)} → {AttachmentFormat.Bytes(after.LongLength)}).";
-        var diff = LineDiff.Unified(beforeText, afterText, file.Before is null ? "/dev/null" : "a/" + name, file.AfterKnown && file.After is null ? "/dev/null" : "b/" + name);
-        return diff.Length == 0 ? $"{name}: no changes." : diff;
+        if (beforeText is null || afterText is null)
+            return $"Binary file: {AttachmentFormat.Bytes(before.LongLength)} → {AttachmentFormat.Bytes(after.LongLength)}.";
+        var diff = LineDiff.Unified(beforeText, afterText, file.Before is null ? "/dev/null" : "a/" + name,
+            file.After is null && !file.IsLate ? "/dev/null" : "b/" + name);
+        return diff.Length == 0 ? "No line changes." : diff;
     }
 
-    public static string Relative(string root, string path)
+    /// A path shown relative to the project when it is inside it (forward slashes), else as it is.
+    public static string Display(string path, string? root)
     {
+        if (string.IsNullOrEmpty(root)) return path;
         try
         {
             var relative = Path.GetRelativePath(root, path);
-            return relative.StartsWith("..", StringComparison.Ordinal) ? path : relative.Replace('\\', '/');
+            return relative.StartsWith("..", StringComparison.Ordinal) || Path.IsPathRooted(relative) ? path : relative.Replace('\\', '/');
         }
         catch (Exception ex) when (ex is ArgumentException or NotSupportedException)
         {
@@ -206,7 +201,13 @@ public static class CheckpointRewind
         }
     }
 
-    private static string? Current(string path) => TurnRecorder.ReadOrNull(path) is { } bytes ? CheckpointStore.Hash(bytes) : null;
+    /// The hash of what is at <paramref name="path"/> now (null = no file), and whether it could be read.
+    private static (string? Hash, bool Readable) Current(string path)
+    {
+        if (Directory.Exists(path)) return (null, false);
+        if (!File.Exists(path)) return (null, true);
+        return TurnRecorder.ReadOrNull(path) is { } bytes ? (CheckpointStore.Hash(bytes), true) : (null, false);
+    }
 
     private static void WriteAtomically(string path, byte[] bytes)
     {

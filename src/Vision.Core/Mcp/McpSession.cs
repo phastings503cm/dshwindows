@@ -55,6 +55,8 @@ public sealed class McpSession : IAsyncDisposable
     public string? ServerVersion { get; private set; }
     public string? Instructions { get; private set; }
     public string? ProtocolVersion { get; private set; }
+    /// <summary>The server offers resources (its initialize answer said so).</summary>
+    public bool HasResources { get; private set; }
     public bool Closed { get; private set; }
 
     /// <summary>The server said its tool list changed.</summary>
@@ -81,6 +83,7 @@ public sealed class McpSession : IAsyncDisposable
             ServerVersion = Text(info, "version");
         }
         Instructions = Text(result, "instructions");
+        HasResources = result["capabilities"] is JsonObject capabilities && capabilities["resources"] is JsonObject;
         await NotifyAsync("notifications/initialized", null, cancellationToken).ConfigureAwait(false);
     }
 
@@ -108,6 +111,33 @@ public sealed class McpSession : IAsyncDisposable
             if (string.IsNullOrEmpty(cursor)) break;
         }
         return tools;
+    }
+
+    /// <summary>The server's resources, one per line ("uri — name: description"), or the text of the one at <paramref name="uri"/>.</summary>
+    public async Task<string> ResourcesAsync(string? uri, CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(uri))
+        {
+            var lines = new List<string>();
+            string? cursor = null;
+            for (var page = 0; page < 20; page++)
+            {
+                var result = await RequestAsync("resources/list", cursor is null ? new JsonObject() : new JsonObject { ["cursor"] = cursor },
+                    cancellationToken).ConfigureAwait(false) as JsonObject;
+                foreach (var item in (result?["resources"] as JsonArray ?? []).OfType<JsonObject>())
+                {
+                    var description = Text(item, "description") is { Length: > 0 } d ? ": " + d : "";
+                    lines.Add($"{Text(item, "uri")} — {Text(item, "name") ?? ""}{description}");
+                }
+                cursor = result is null ? null : Text(result, "nextCursor");
+                if (string.IsNullOrEmpty(cursor)) break;
+            }
+            return lines.Count == 0 ? "(no resources)" : string.Join("\n", lines);
+        }
+        var read = await RequestAsync("resources/read", new JsonObject { ["uri"] = uri }, cancellationToken, limited: false).ConfigureAwait(false) as JsonObject;
+        var parts = (read?["contents"] as JsonArray ?? []).OfType<JsonObject>()
+            .Select(c => Text(c, "text") ?? $"[{Text(c, "uri")} ({Text(c, "mimeType") ?? "binary"}) — not text]").ToList();
+        return parts.Count == 0 ? "(empty)" : string.Join("\n", parts);
     }
 
     /// <summary>Call a tool; the result object ("content", "isError", "structuredContent").</summary>

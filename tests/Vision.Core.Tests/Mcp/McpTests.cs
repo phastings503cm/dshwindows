@@ -1,12 +1,11 @@
 using System.Net;
 using System.Text;
-using System.Text.Json;
 using System.Text.Json.Nodes;
 
 namespace Vision.Core.Tests;
 
-/// <summary>MCP servers (10-19 #20): the protocol, the tools as the model sees them, the transports, the manager, and
-/// importing what Claude Code, Claude Desktop and Cursor have.</summary>
+/// <summary>MCP servers (10-19 #20): the protocol, the tools as the model sees them, the transports, the manager, the settings
+/// file (Vision for macOS's) and importing what Claude Code, Claude Desktop and Cursor have.</summary>
 [Collection(SerialStaticState.Name)]
 public sealed class McpTests : IDisposable
 {
@@ -27,26 +26,20 @@ public sealed class McpTests : IDisposable
     [Fact]
     public async Task ASessionInitializesListsAndCallsTools()
     {
-        var server = new McpLoopbackServer { Name = "demo" };
-        var transport = new LoopbackMcpTransport(server);
+        var transport = new LoopbackMcpTransport(new McpLoopbackServer { Name = "demo" });
         await using var session = new McpSession(transport);
         await session.ConnectAsync(default);
 
         Assert.Equal("demo", session.ServerName);
-        Assert.Equal(McpSession.LatestProtocolVersion, session.ProtocolVersion);
         Assert.Equal(McpSession.LatestProtocolVersion, transport.ProtocolVersion);
-        var initialize = transport.Sent[0];
-        Assert.Equal("initialize", initialize["method"]!.GetValue<string>());
-        Assert.Equal("Vision", initialize["params"]!["clientInfo"]!["name"]!.GetValue<string>());
+        Assert.Equal("Vision", transport.Sent[0]["params"]!["clientInfo"]!["name"]!.GetValue<string>());
         Assert.Equal("notifications/initialized", transport.Sent[1]["method"]!.GetValue<string>());
         Assert.Null(transport.Sent[1]["id"]);
 
         var tools = await session.ListToolsAsync(default);
         Assert.Equal(["echo", "add"], tools.Select(t => t.Name));
         Assert.True(tools[0].ReadOnly);
-
-        var result = await session.CallToolAsync("add", new JsonObject { ["a"] = 2, ["b"] = 3 }, default);
-        Assert.Equal("5", McpTool.Present(result).Output);
+        Assert.Equal("5", McpTool.Present(await session.CallToolAsync("add", new JsonObject { ["a"] = 2, ["b"] = 3 }, default)).Output);
     }
 
     [Fact]
@@ -55,8 +48,7 @@ public sealed class McpTests : IDisposable
         await using var session = new McpSession(new LoopbackMcpTransport(new McpLoopbackServer()));
         await session.ConnectAsync(default);
         var error = await Assert.ThrowsAsync<McpException>(() => session.CallToolAsync("missing", new JsonObject(), default));
-        Assert.Equal("Unknown tool: missing", error.Message);
-        Assert.Equal(-32602, error.Code);
+        Assert.Equal(("Unknown tool: missing", -32602), (error.Message, error.Code));
     }
 
     [Fact]
@@ -73,19 +65,16 @@ public sealed class McpTests : IDisposable
         await changed.Task.WaitAsync(TimeSpan.FromSeconds(5));
         for (var i = 0; i < 50 && !transport.Sent.Any(m => m["id"]?.ToString() == "srv-1"); i++) await Task.Delay(20);
 
-        var pong = transport.Sent.Single(m => m["id"]?.ToString() == "srv-1");
-        Assert.NotNull(pong["result"]);
+        Assert.NotNull(transport.Sent.Single(m => m["id"]?.ToString() == "srv-1")["result"]);
     }
 
     [Fact]
     public async Task AServerThatGoesAwayFailsTheWaitingRequestInsteadOfHanging()
     {
-        var server = new McpLoopbackServer();
-        server.Add(new McpToolInfo("hang", "never answers", """{"type":"object"}"""), _ => throw new InvalidOperationException("unreachable"));
-        var transport = new HangingTransport(new LoopbackMcpTransport(server));
+        var transport = new HangingTransport(new LoopbackMcpTransport(new McpLoopbackServer()));
         await using var session = new McpSession(transport);
         await session.ConnectAsync(default);
-        var call = session.CallToolAsync("hang", new JsonObject(), default);
+        var call = session.CallToolAsync("echo", new JsonObject(), default);
         transport.Inner.Drop();
         var error = await Assert.ThrowsAsync<McpException>(() => call.WaitAsync(TimeSpan.FromSeconds(5)));
         Assert.StartsWith("The server stopped.", error.Message);
@@ -109,19 +98,23 @@ public sealed class McpTests : IDisposable
 
     [Theory]
     [InlineData("github", "create_issue", "mcp__github__create_issue")]
-    [InlineData("my-server", "files.read", "mcp__my-server__files_read")]
-    [InlineData("db", "run query!", "mcp__db__run_query_")]
-    public void ToolNamesArePrefixedAndSafe(string server, string tool, string expected) =>
-        Assert.Equal(expected, McpTool.NameFor(server, tool));
+    [InlineData("My Server", "files.read", "mcp__My_Server__files_read")]
+    [InlineData("_db_", "run query!", "mcp__db__run_query")]
+    public void ToolNamesArePrefixedAndSafe(string server, string tool, string expected) => Assert.Equal(expected, McpNames.ToolName(server, tool));
 
     [Fact]
-    public void ALongNameIsCutWithAHashSoTwoStayApart()
+    public void ALongNameIsCutWithATagSoTwoStayApart()
     {
-        var a = McpTool.NameFor("server", new string('a', 80) + "_one");
-        var b = McpTool.NameFor("server", new string('a', 80) + "_two");
-        Assert.Equal(McpTool.MaxNameLength, a.Length);
+        var a = McpNames.ToolName("server", new string('a', 80) + "_one");
+        var b = McpNames.ToolName("server", new string('a', 80) + "_two");
+        Assert.Equal(McpNames.MaxLength, a.Length);
         Assert.NotEqual(a, b);
-        Assert.StartsWith("mcp__server__aaa", a);
+        Assert.Matches("^mcp__server__a+_[0-9a-f]{6}$", a);
+        Assert.Equal(["github", "github-2", "GitHub-3"], new[] { "github", "github", "GitHub" }.Aggregate(new List<string>(), (taken, n) =>
+        {
+            taken.Add(McpNames.Unique(n, taken));
+            return taken;
+        }));
     }
 
     [Fact]
@@ -139,134 +132,172 @@ public sealed class McpTests : IDisposable
         var presented = McpTool.Present(result);
         Assert.Equal("Found 2 issues\n[image 2: image/png]\n[resource file:///a.txt]\nhello\n[link: spec https://x/y]", presented.Output);
         Assert.Equal([1, 2, 3], Assert.Single(presented.Images).Data);
-
         Assert.Equal("Error: boom", McpTool.Present(JsonNode.Parse("""{"content":[{"type":"text","text":"boom"}],"isError":true}""")!.AsObject()).Output);
+        Assert.Equal("Error: the tool reported an error.", McpTool.Present(JsonNode.Parse("""{"content":[],"isError":true}""")!.AsObject()).Output);
         Assert.Equal("""{"total":3}""", McpTool.Present(JsonNode.Parse("""{"content":[],"structuredContent":{"total":3}}""")!.AsObject()).Output);
     }
 
-    [Fact]
-    public async Task AToolAsksOnceInAChatAndThenRuns()
+    private async Task<(McpManager Manager, McpServerStore Store)> Connected(params McpServerConfig[] servers)
     {
-        var store = new McpServerStore(_dir["mcp.json"]);
-        store.Save(new McpServerConfig { Id = "demo", Name = "demo", Command = "x" });
-        McpManager.TransportOverride = _ => new LoopbackMcpTransport(new McpLoopbackServer());
-        await using var manager = new McpManager(store);
+        var store = new McpServerStore(_dir["mcp-servers.json"]);
+        foreach (var server in servers) store.Save(server);
+        McpManager.TransportOverride ??= _ => new LoopbackMcpTransport(new McpLoopbackServer());
+        var manager = new McpManager(store);
         await manager.SyncAsync();
-        var grants = new McpGrants();
-        var echo = manager.ToolsFor(null, grants).Single(t => t.Name == "mcp__demo__echo");
-        Assert.Contains("(MCP server “demo”)", echo.Spec.Description);
+        return (manager, store);
+    }
 
-        var asked = new List<string>();
-        var answer = false;
-        using var tools = new ToolTestContext();
-        var context = tools.Context with
+    private ToolContext Context(List<string> asked, bool answer = true, PermissionPreset preset = PermissionPreset.WorkspaceWrite, bool sensitive = false)
+    {
+        var tools = new ToolTestContext();
+        return tools.Context with
         {
-            RequestPermission = (_, name, detail) =>
+            Policy = new PermissionPolicy(preset, tools.Root.Path),
+            Sensitive = sensitive,
+            RequestPermission = (_, _, detail) =>
             {
                 asked.Add(detail);
                 return Task.FromResult(answer);
             },
         };
-        Assert.Equal("Error: the user declined to run this MCP tool.", (await echo.ExecuteAsync("""{"text":"hi"}""", context, default)).Output);
-        answer = true;
-        Assert.Equal("hi", (await echo.ExecuteAsync("""{"text":"hi"}""", context, default)).Output);
-        Assert.Equal("again", (await echo.ExecuteAsync("""{"text":"again"}""", context, default)).Output);
-        Assert.Equal(2, asked.Count);
-        Assert.Contains("MCP server “demo” wants to run echo", asked[0]);
-
-        // A server set to run its tools without asking doesn't ask.
-        store.SetAskBeforeUse("demo", false);
-        await manager.SyncAsync();
-        var fresh = manager.ToolsFor(null, new McpGrants()).Single(t => t.Name == "mcp__demo__add");
-        Assert.Equal("3", (await fresh.ExecuteAsync("""{"a":1,"b":2}""", context, default)).Output);
-        Assert.Equal(2, asked.Count);
     }
 
     [Fact]
-    public async Task InASensitiveChatAServerOnSomeoneElsesMachineAsksFirstWhateverItsSetting()
+    public async Task EveryCallAsksUnlessTheServerIsTrustedOrTheChatHasFullAccess()
     {
-        var store = new McpServerStore(_dir["mcp.json"]);
-        store.Save(new McpServerConfig { Id = "remote", Name = "remote", Transport = McpTransportKind.Http, Url = "https://mcp.example.com/mcp", AskBeforeUse = false });
-        store.Save(new McpServerConfig { Id = "local", Name = "local", Command = "x", AskBeforeUse = false });
-        McpManager.TransportOverride = _ => new LoopbackMcpTransport(new McpLoopbackServer());
-        await using var manager = new McpManager(store);
-        await manager.SyncAsync();
+        var (manager, store) = await Connected(new McpServerConfig { Id = "d", Name = "demo", Command = "x" });
+        await using var _ = manager;
+        var echo = manager.ToolsFor(null).Single(t => t.Name == "mcp__demo__echo");
+        Assert.StartsWith("[MCP server “demo”] Repeat the text back.", echo.Spec.Description);
+
         var asked = new List<string>();
-        using var tools = new ToolTestContext();
-        var context = tools.Context with
-        {
-            Sensitive = true,
-            RequestPermission = (_, _, detail) =>
-            {
-                asked.Add(detail);
-                return Task.FromResult(true);
-            },
-        };
-        var all = manager.ToolsFor(null, new McpGrants());
-        await all.Single(t => t.Name == "mcp__local__echo").ExecuteAsync("""{"text":"a"}""", context, default);
+        Assert.Equal("Error: the user declined this MCP call. Don't retry it; say what you wanted it for.",
+            (await echo.ExecuteAsync("""{"text":"hi"}""", Context(asked, answer: false), default)).Output);
+        Assert.Equal("hi", (await echo.ExecuteAsync("""{"text":"hi"}""", Context(asked), default)).Output);
+        Assert.Equal(2, asked.Count);
+        Assert.Equal("MCP server “demo” wants to run its tool “echo” with {\"text\":\"hi\"}", asked[0]);
+        // Full access asks nothing.
+        await echo.ExecuteAsync("""{"text":"x"}""", Context(asked, preset: PermissionPreset.FullAccess), default);
+        Assert.Equal(2, asked.Count);
+
+        // Read-only tools without asking: echo (read-only) runs, add asks.
+        store.SetTrust("d", McpTrust.ReadOnly);
+        await manager.SyncAsync();
+        var tools = manager.ToolsFor(null);
+        await tools.Single(t => t.Name == "mcp__demo__echo").ExecuteAsync("""{"text":"x"}""", Context(asked), default);
+        Assert.Equal(2, asked.Count);
+        Assert.Equal("3", (await tools.Single(t => t.Name == "mcp__demo__add").ExecuteAsync("""{"a":1,"b":2}""", Context(asked), default)).Output);
+        Assert.Equal(3, asked.Count);
+
+        store.SetTrust("d", McpTrust.Always);
+        await manager.SyncAsync();
+        await manager.ToolsFor(null).Single(t => t.Name == "mcp__demo__add").ExecuteAsync("""{"a":1,"b":2}""", Context(asked), default);
+        Assert.Equal(3, asked.Count);
+    }
+
+    [Fact]
+    public async Task InASensitiveChatAServerOnSomeoneElsesMachineAlwaysAsks()
+    {
+        var (manager, _) = await Connected(
+            new McpServerConfig { Id = "r", Name = "remote", Transport = McpTransportKind.Http, Url = "https://mcp.example.com/mcp", Trust = McpTrust.Always },
+            new McpServerConfig { Id = "l", Name = "local", Command = "x", Trust = McpTrust.Always });
+        await using var _ = manager;
+        var asked = new List<string>();
+        var all = manager.ToolsFor(null);
+        await all.Single(t => t.Name == "mcp__local__echo").ExecuteAsync("""{"text":"a"}""", Context(asked, sensitive: true, preset: PermissionPreset.FullAccess), default);
         Assert.Empty(asked);
-        await all.Single(t => t.Name == "mcp__remote__echo").ExecuteAsync("""{"text":"a"}""", context, default);
-        Assert.Contains("This chat is Sensitive: what echo is given goes to mcp.example.com.", Assert.Single(asked));
-        // Once allowed in the chat, it runs.
-        await all.Single(t => t.Name == "mcp__remote__echo").ExecuteAsync("""{"text":"b"}""", context, default);
+        await all.Single(t => t.Name == "mcp__remote__echo").ExecuteAsync("""{"text":"a"}""", Context(asked, sensitive: true, preset: PermissionPreset.FullAccess), default);
+        Assert.EndsWith("This chat is Sensitive: what it is given goes to mcp.example.com.", Assert.Single(asked));
+        // Not Sensitive: trusted means trusted.
+        await all.Single(t => t.Name == "mcp__remote__echo").ExecuteAsync("""{"text":"a"}""", Context(asked), default);
         Assert.Single(asked);
     }
 
     // MARK: The manager
 
     [Fact]
-    public async Task TheManagerConnectsWhatIsOnShowsFailuresAndOffersToolsByProject()
+    public async Task TheManagerConnectsWhatIsOnShowsFailuresAndOffersToolsByProjectAndSwitch()
     {
-        var store = new McpServerStore(_dir["mcp.json"]);
-        store.Save(new McpServerConfig { Id = "everywhere", Name = "everywhere", Command = "x" });
-        store.Save(new McpServerConfig { Id = "project", Name = "project", Command = "x", Project = _dir.Path });
-        store.Save(new McpServerConfig { Id = "broken", Name = "broken", Command = "x" });
-        store.Save(new McpServerConfig { Id = "off", Name = "off", Command = "x", Enabled = false });
-        McpManager.TransportOverride = config => new LoopbackMcpTransport(config.Id == "broken"
+        McpManager.TransportOverride = config => new LoopbackMcpTransport(config.Name == "broken"
             ? new McpLoopbackServer { FailToStart = "Couldn't start x: not found." }
             : new McpLoopbackServer());
-        await using var manager = new McpManager(store);
-        await manager.SyncAsync();
+        var (manager, store) = await Connected(
+            new McpServerConfig { Id = "1", Name = "everywhere", Command = "x" },
+            new McpServerConfig { Id = "2", Name = "project", Command = "x", Project = _dir.Path },
+            new McpServerConfig { Id = "3", Name = "broken", Command = "x" },
+            new McpServerConfig { Id = "4", Name = "off", Command = "x", Enabled = false });
+        await using var _ = manager;
 
-        var statuses = manager.Statuses.ToDictionary(s => s.Config.Id);
-        Assert.Equal("Connected · 2 tools", statuses["everywhere"].Headline);
-        Assert.Equal(McpState.Failed, statuses["broken"].State);
+        var statuses = manager.Statuses.ToDictionary(s => s.Config.Name);
+        Assert.Equal("Connected", statuses["everywhere"].Headline);
+        Assert.Equal(2, statuses["everywhere"].Tools.Count);
         Assert.Equal("Failed: Couldn't start x: not found.", statuses["broken"].Headline);
         Assert.Equal("Off", statuses["off"].Headline);
 
-        Assert.Equal(2, manager.ToolsFor(null, new McpGrants()).Count);
-        Assert.Equal(4, manager.ToolsFor(_dir.Path, new McpGrants()).Count);
-        // Built-ins (and tools added before) keep their names.
-        Assert.Single(manager.ToolsFor(null, new McpGrants(), ["mcp__everywhere__echo"]));
-        Assert.Contains("everywhere (2 tools)", manager.PromptSection(null));
+        Assert.Equal(2, manager.ToolsFor(null).Count);
+        Assert.Equal(4, manager.ToolsFor(_dir.Path).Count);
+        Assert.Single(manager.ToolsFor(null, ["mcp__everywhere__echo"]));
+        Assert.Equal("MCP servers connected (their tools are named mcp__<server>__<tool>): everywhere (2 tools). Each call asks the user first unless they allowed that server.",
+            manager.PromptSection(null));
+
+        // A tool kept from the model.
+        store.SetToolEnabled("1", "add", false);
+        await manager.SyncAsync();
+        Assert.Equal(["mcp__everywhere__echo"], manager.ToolsFor(null).Select(t => t.Name));
 
         var revision = manager.Revision;
-        store.SetEnabled("everywhere", false);
+        store.SetEnabled("1", false);
         await manager.SyncAsync();
         Assert.True(manager.Revision > revision);
-        Assert.Empty(manager.ToolsFor(null, new McpGrants()));
+        Assert.Empty(manager.ToolsFor(null));
     }
 
-    // MARK: Settings and secrets
+    [Fact]
+    public async Task AServerWithResourcesGetsAToolThatListsAndReadsThem()
+    {
+        var server = new McpLoopbackServer { Resources = { ["file:///notes.md"] = ("Notes", "remember the milk") } };
+        McpManager.TransportOverride = _ => new LoopbackMcpTransport(server);
+        var (manager, _) = await Connected(new McpServerConfig { Id = "d", Name = "docs", Command = "x", Trust = McpTrust.Always });
+        await using var _ = manager;
+        var resources = manager.ToolsFor(null).Single(t => t.Name == "mcp__docs__resources");
+        var asked = new List<string>();
+        Assert.Equal("file:///notes.md — Notes", (await resources.ExecuteAsync("{}", Context(asked), default)).Output);
+        Assert.Equal("remember the milk", (await resources.ExecuteAsync("""{"uri":"file:///notes.md"}""", Context(asked), default)).Output);
+    }
+
+    // MARK: The settings file and its secrets
 
     [Fact]
-    public void SecretsGoToTheCredentialStoreAndOnlyTheirNamesToTheFile()
+    public void TheFileIsVisionForMacsAndSecretsGoToTheCredentialStore()
     {
-        var path = _dir["mcp.json"];
+        var path = _dir["mcp-servers.json"];
         var store = new McpServerStore(path);
-        store.Save(new McpServerConfig { Id = "gh", Name = "GitHub", Command = "npx", Args = ["-y", "server-github"] },
-            env: new Dictionary<string, string> { ["GITHUB_TOKEN"] = "ghp_secret123" },
-            headers: new Dictionary<string, string>());
+        store.Save(new McpServerConfig { Id = "gh-1", Name = "github", Command = "npx", Args = ["-y", "server-github"], Trust = McpTrust.ReadOnly },
+            env: new Dictionary<string, string> { ["GITHUB_TOKEN"] = "ghp_secret123" }, headers: new Dictionary<string, string>());
 
-        var file = File.ReadAllText(path);
-        Assert.Contains("GITHUB_TOKEN", file);
-        Assert.DoesNotContain("ghp_secret123", file);
-        Assert.Equal("ghp_secret123", SecretStore.Read("Vision/mcp/gh/env/GITHUB_TOKEN"));
-        var reloaded = new McpServerStore(path).Find("gh")!;
-        Assert.Equal("ghp_secret123", McpServerStore.EnvOf(reloaded)["GITHUB_TOKEN"]);
+        var json = JsonNode.Parse(File.ReadAllText(path))!.AsObject();
+        Assert.Equal(1, json["version"]!.GetValue<int>());
+        var server = json["servers"]![0]!.AsObject();
+        Assert.Equal("stdio", server["transport"]!.GetValue<string>());
+        Assert.Equal("readOnly", server["trust"]!.GetValue<string>());
+        Assert.Equal("GITHUB_TOKEN", server["envNames"]![0]!.GetValue<string>());
+        Assert.NotNull(server["headerNames"]);
+        Assert.NotNull(server["disabledTools"]);
+        Assert.DoesNotContain("ghp_secret123", File.ReadAllText(path));
+        Assert.Equal("ghp_secret123", SecretStore.Read("Vision/mcp/gh-1/env/GITHUB_TOKEN"));
+        Assert.Equal("ghp_secret123", McpServerStore.EnvOf(new McpServerStore(path).Find("gh-1")!)["GITHUB_TOKEN"]);
 
-        store.Remove("gh");
-        Assert.Null(SecretStore.Read("Vision/mcp/gh/env/GITHUB_TOKEN"));
+        store.Remove("gh-1");
+        Assert.Null(SecretStore.Read("Vision/mcp/gh-1/env/GITHUB_TOKEN"));
+    }
+
+    [Fact]
+    public void AServerSaysWhatIsMissingForItToStart()
+    {
+        Assert.Equal("It needs a name.", new McpServerConfig { Name = "!!", Command = "x" }.Problem);
+        Assert.Equal("It needs a program to run.", new McpServerConfig { Name = "a" }.Problem);
+        Assert.Equal("It needs an http(s) address.", new McpServerConfig { Name = "a", Transport = McpTransportKind.Http, Url = "ftp://x" }.Problem);
+        Assert.Null(new McpServerConfig { Name = "a", Transport = McpTransportKind.Http, Url = "https://x/mcp" }.Problem);
     }
 
     [Fact]
@@ -276,7 +307,6 @@ public sealed class McpTests : IDisposable
         Assert.Equal("/home/me/data", McpVariables.Expand("${HOME_DIR}/data", Lookup));
         Assert.Equal("fallback", McpVariables.Expand("${MISSING:-fallback}", Lookup));
         Assert.Equal("", McpVariables.Expand("${MISSING}", Lookup));
-        Assert.Equal("no vars", McpVariables.Expand("no vars", Lookup));
     }
 
     [Fact]
@@ -290,65 +320,69 @@ public sealed class McpTests : IDisposable
 
     // MARK: Import
 
+    private static void Write(string path, string text)
+    {
+        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+        File.WriteAllText(path, text);
+    }
+
     [Fact]
-    public void ImportFindsClaudeCodeClaudeDesktopCursorAndProjectServers()
+    public void ImportFindsClaudeCodeClaudeDesktopCursorAndTheProjectsServers()
     {
         var home = _dir["home"];
         var project = _dir["work/app"];
+        var other = _dir["work/api"];
         Directory.CreateDirectory(project);
+        Directory.CreateDirectory(other);
         Write(Path.Combine(home, ".claude.json"), """
             {"numStartups": 40,
              "mcpServers": {
                "github": {"type":"stdio","command":"npx","args":["-y","@modelcontextprotocol/server-github"],"env":{"GITHUB_TOKEN":"ghp_1"}},
                "linear": {"type":"http","url":"https://mcp.linear.app/mcp","headers":{"Authorization":"Bearer lin_2"}}
              },
-             "projects": {"C:\\work\\api": {"mcpServers": {"db": {"command":"uvx","args":["mcp-db"]}}}}}
-            """);
+             "projects": {
+               OTHER: {"mcpServers": {"db": {"command":"uvx","args":["mcp-db"]}}},
+               "C:\\elsewhere": {"mcpServers": {"ignored": {"command":"x"}}}
+             }}
+            """.Replace("OTHER", System.Text.Json.JsonSerializer.Serialize(other)));
         Write(McpImport.ClaudeDesktopConfig(new ExternalLocations(home)), """{"mcpServers":{"filesystem":{"command":"npx","args":["-y","@modelcontextprotocol/server-filesystem","C:\\Users\\me"]}}}""");
         Write(Path.Combine(home, ".cursor", "mcp.json"), """{"mcpServers":{"figma":{"url":"https://figma.example/sse","type":"sse"},"old":{"command":"x","disabled":true}}}""");
         Write(Path.Combine(project, ".mcp.json"), """{"mcpServers":{"playwright":{"command":"npx","args":["@playwright/mcp@latest"]}}}""");
 
-        var found = McpImport.Scan(new ExternalLocations(home), [project]);
+        var found = McpImport.Scan(new ExternalLocations(home), project, [other]);
 
         var byName = found.ToDictionary(c => c.Server.Name);
         Assert.Equal(["db", "figma", "filesystem", "github", "linear", "old", "playwright"], byName.Keys.Order());
-        Assert.Equal(McpTransportKind.Stdio, byName["github"].Server.Transport);
+        Assert.Equal((McpTransportKind.Stdio, McpImport.ClaudeCode, (string?)null), (byName["github"].Server.Transport, byName["github"].Server.Source, byName["github"].Server.Project));
         Assert.Equal("ghp_1", byName["github"].Env["GITHUB_TOKEN"]);
-        Assert.Equal(McpImport.ClaudeCode, byName["github"].Server.Source);
-        Assert.Null(byName["github"].Server.Project);
+        Assert.Equal(["GITHUB_TOKEN"], byName["github"].Server.EnvNames);
         Assert.Equal(McpTransportKind.Http, byName["linear"].Server.Transport);
         Assert.Equal("Bearer lin_2", byName["linear"].Headers["Authorization"]);
-        Assert.Equal("C:\\work\\api", byName["db"].Server.Project);
+        Assert.Equal(("Claude Code (api)", other), (byName["db"].Server.Source, byName["db"].Server.Project));
         Assert.Equal(McpImport.ClaudeDesktop, byName["filesystem"].Server.Source);
-        Assert.Equal(McpTransportKind.Sse, byName["figma"].Server.Transport);
+        Assert.Equal((McpTransportKind.Http, McpImport.SseCaveat), (byName["figma"].Server.Transport, byName["figma"].Caveat));
+        Assert.Equal(McpImport.SseCaveat, byName["figma"].Server.Note);
         Assert.False(byName["old"].Server.Enabled);
-        Assert.Equal(McpImport.ProjectFile, byName["playwright"].Server.Source);
-        Assert.Equal(project, byName["playwright"].Server.Project);
+        Assert.Equal(("Claude Code (this project)", project), (byName["playwright"].Server.Source, byName["playwright"].Server.Project));
     }
 
     [Fact]
-    public void ImportingTwiceUpdatesInsteadOfDuplicatingAndSecretsLeaveTheirFiles()
+    public void ImportingAServerVisionHasUpdatesItAndANameClashGetsANumber()
     {
         var home = _dir["home"];
-        Write(Path.Combine(home, ".cursor", "mcp.json"), """{"mcpServers":{"github":{"command":"npx","env":{"TOKEN":"t1"}}}}""");
-        Write(Path.Combine(home, ".claude.json"), """{"mcpServers":{"github":{"command":"npx"}}}""");
-        var store = new McpServerStore(_dir["mcp.json"]);
+        Write(Path.Combine(home, ".cursor", "mcp.json"), """{"mcpServers":{"github":{"command":"npx","args":["gh"],"env":{"TOKEN":"t1"}}}}""");
+        Write(Path.Combine(home, ".claude.json"), """{"mcpServers":{"github":{"command":"uvx","args":["other"]}}}""");
+        var store = new McpServerStore(_dir["mcp-servers.json"]);
 
-        var first = McpImport.Import(store, McpImport.Scan(new ExternalLocations(home), []));
-        var second = McpImport.Import(store, McpImport.Scan(new ExternalLocations(home), []));
-
-        Assert.Equal((2, 0), first);
-        Assert.Equal((0, 2), second);
-        Assert.Equal(["github", "github-2"], store.Servers.Select(s => s.Id).Order());
+        Assert.Equal((2, 0), McpImport.Import(store, McpImport.Scan(new ExternalLocations(home), null)));
+        Assert.Equal(["github", "github-2"], store.Servers.Select(s => s.Name).Order());
+        var again = McpImport.Scan(new ExternalLocations(home), null);
+        Assert.All(again, c => Assert.True(c.IsKnown(store.Servers)));
+        Assert.Equal((0, 2), McpImport.Import(store, again));
+        Assert.Equal(2, store.Servers.Count);
         var cursor = store.Servers.Single(s => s.Source == McpImport.Cursor);
         Assert.Equal("t1", McpServerStore.EnvOf(cursor)["TOKEN"]);
-        Assert.DoesNotContain("t1", File.ReadAllText(_dir["mcp.json"]));
-    }
-
-    private static void Write(string path, string text)
-    {
-        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
-        File.WriteAllText(path, text);
+        Assert.DoesNotContain("t1", File.ReadAllText(_dir["mcp-servers.json"]));
     }
 
     // MARK: Streamable HTTP
@@ -356,40 +390,38 @@ public sealed class McpTests : IDisposable
     [Fact]
     public async Task StreamableHttpCarriesTheSessionIdAndReadsJsonAndEventStreamAnswers()
     {
-        var calls = 0;
         var handler = new FakeHttpHandler(request =>
         {
-            calls++;
             if (request.Method == HttpMethod.Delete) return new HttpResponseMessage(HttpStatusCode.OK); // the session's end
-            var body = request.Content!.ReadAsStringAsync().Result;
-            var message = JsonNode.Parse(body)!.AsObject();
+            var message = JsonNode.Parse(request.Content!.ReadAsStringAsync().Result)!.AsObject();
             var method = message["method"]!.GetValue<string>();
-            var id = message["id"]?.DeepClone();
+            var id = message["id"]?.ToJsonString() ?? "null";
             if (method == "initialize")
             {
-                var response = FakeHttpHandler.Json("""{"jsonrpc":"2.0","id":ID,"result":{"protocolVersion":"2025-03-26","serverInfo":{"name":"remote","version":"2"},"capabilities":{}}}""".Replace("ID", id!.ToJsonString()));
+                var response = FakeHttpHandler.Json("""{"jsonrpc":"2.0","id":ID,"result":{"protocolVersion":"2025-03-26","serverInfo":{"name":"remote","version":"2"},"capabilities":{}}}""".Replace("ID", id));
                 response.Headers.Add("Mcp-Session-Id", "session-42");
                 return response;
             }
             if (method == "notifications/initialized") return new HttpResponseMessage(HttpStatusCode.Accepted);
             // tools/list answers as an event stream, with a notification before the answer.
             var stream = "event: message\ndata: {\"jsonrpc\":\"2.0\",\"method\":\"notifications/message\",\"params\":{}}\n\n" +
-                         $"data: {{\"jsonrpc\":\"2.0\",\"id\":{id!.ToJsonString()},\"result\":{{\"tools\":[{{\"name\":\"search\",\"description\":\"Search\",\"inputSchema\":{{\"type\":\"object\"}}}}]}}}}\n\n";
+                         "data: {\"jsonrpc\":\"2.0\",\"id\":" + id + ",\"result\":{\"tools\":[{\"name\":\"search\",\"description\":\"Search\",\"inputSchema\":{\"type\":\"object\"}}]}}\n\n";
             return new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent(stream, Encoding.UTF8, "text/event-stream") };
         });
         var transport = new HttpMcpTransport(new Uri("https://mcp.example.com/mcp"), new Dictionary<string, string> { ["Authorization"] = "Bearer abc" }, handler: handler);
-        await using var session = new McpSession(transport);
-        await session.ConnectAsync(default);
-        var tools = await session.ListToolsAsync(default);
-
-        Assert.Equal("search", Assert.Single(tools).Name);
-        Assert.Equal("remote", session.ServerName);
+        await using (var session = new McpSession(transport))
+        {
+            await session.ConnectAsync(default);
+            Assert.Equal("search", Assert.Single(await session.ListToolsAsync(default)).Name);
+            Assert.Equal("remote", session.ServerName);
+        }
         var requests = handler.Requests;
         Assert.Equal("Bearer abc", requests[0].Headers["Authorization"]);
         Assert.False(requests[0].Headers.ContainsKey("Mcp-Session-Id"));
         Assert.Equal("session-42", requests[2].Headers["Mcp-Session-Id"]);
         Assert.Equal("2025-03-26", requests[2].Headers["MCP-Protocol-Version"]);
         Assert.Contains("text/event-stream", requests[0].Headers["Accept"]);
+        Assert.Equal(HttpMethod.Delete, requests[^1].Method);
     }
 
     [Fact]
@@ -402,7 +434,7 @@ public sealed class McpTests : IDisposable
     }
 
     [Fact]
-    public async Task AnSseServerThatOnlySpeaksTheOldTransportIsReachedThroughItsEndpoint()
+    public async Task AServerThatOnlySpeaksTheOlderSseTransportIsReachedThroughItsEndpoint()
     {
         var posted = new List<string>();
         var stream = new SseFeed();
@@ -410,8 +442,8 @@ public sealed class McpTests : IDisposable
         {
             if (request.Method == HttpMethod.Get)
                 return new HttpResponseMessage(HttpStatusCode.OK) { Content = new StreamContent(stream) { Headers = { ContentType = new("text/event-stream") } } };
-            var body = request.Content!.ReadAsStringAsync().Result;
             if (request.RequestUri!.AbsolutePath == "/sse") return new HttpResponseMessage(HttpStatusCode.MethodNotAllowed);
+            var body = request.Content!.ReadAsStringAsync().Result;
             posted.Add(body);
             var message = JsonNode.Parse(body)!.AsObject();
             if (message["id"] is { } id)
@@ -419,19 +451,20 @@ public sealed class McpTests : IDisposable
                 var result = message["method"]!.GetValue<string>() == "initialize"
                     ? """{"protocolVersion":"2024-11-05","serverInfo":{"name":"legacy"},"capabilities":{}}"""
                     : """{"tools":[]}""";
-                stream.Push($"event: message\ndata: {{\"jsonrpc\":\"2.0\",\"id\":{id.ToJsonString()},\"result\":{result}}}\n\n");
+                stream.Push("event: message\ndata: {\"jsonrpc\":\"2.0\",\"id\":" + id.ToJsonString() + ",\"result\":" + result + "}\n\n");
             }
             return new HttpResponseMessage(HttpStatusCode.Accepted);
         });
         stream.Push("event: endpoint\ndata: /messages?session=7\n\n");
         var transport = new HttpMcpTransport(new Uri("https://legacy.example.com/sse"), new Dictionary<string, string>(), allowLegacy: true, handler: handler);
-        await using var session = new McpSession(transport);
-        await session.ConnectAsync(default);
-        await session.ListToolsAsync(default);
-
-        Assert.True(transport.UsingLegacySse);
-        Assert.Equal("legacy", session.ServerName);
-        Assert.Equal(3, posted.Count); // initialize, initialized, tools/list — all to the endpoint
+        await using (var session = new McpSession(transport))
+        {
+            await session.ConnectAsync(default);
+            await session.ListToolsAsync(default);
+            Assert.True(transport.UsingLegacySse);
+            Assert.Equal("legacy", session.ServerName);
+            Assert.Equal(3, posted.Count); // initialize, initialized, tools/list — all to the endpoint
+        }
         stream.End();
     }
 

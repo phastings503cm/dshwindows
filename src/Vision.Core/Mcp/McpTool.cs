@@ -1,97 +1,86 @@
-using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json.Nodes;
 
 namespace Vision.Core;
 
-// MARK: - MCP tools as the model sees them
+// MARK: - A server's tool, as one of the model's
 //
 // Each tool of a connected server is offered as mcp__<server>__<tool> (the names Claude Code uses, so an agent definition
-// written for it finds them), described with the server's name, and run through the normal permission prompt: the first use
-// of each tool in a chat asks (unless the server is set to run its tools without asking); the person's answer holds for
-// the rest of that chat.
+// written for it finds them), described "[MCP server “name”] …", plus mcp__<server>__resources for a server with
+// resources. A call asks first unless the chat has full access, the server is trusted with all its tools, or the tool is
+// read-only on a server trusted with read-only tools — and, in a Sensitive chat, a server on someone else's machine always
+// asks. A local server's tool that isn't read-only may change files: in a git repository the turn's checkpoint works out
+// which, as for a shell command. The words are Vision for macOS's (MCPManager.swift).
 
-/// <summary>The MCP tools a chat has allowed (its "Allow" answers), kept across engine rebuilds.</summary>
-public sealed class McpGrants
-{
-    private readonly HashSet<string> _allowed = new(StringComparer.Ordinal);
-    private readonly Lock _lock = new();
-
-    public bool IsAllowed(string tool)
-    {
-        lock (_lock) return _allowed.Contains(tool);
-    }
-
-    public void Allow(string tool)
-    {
-        lock (_lock) _allowed.Add(tool);
-    }
-}
-
-/// <summary>One tool of one MCP server.</summary>
+/// <summary>One tool of one MCP server (or its resources).</summary>
 public sealed class McpTool : IToolExecutor
 {
-    public const string Prefix = "mcp__";
-    /// <summary>OpenAI-style tool names are at most 64 characters of letters, digits, '_' and '-'.</summary>
-    public const int MaxNameLength = 64;
-
     private readonly McpConnection _connection;
-    private readonly McpGrants _grants;
 
-    public McpTool(McpConnection connection, McpToolInfo info, McpGrants grants)
+    /// <param name="info">The tool; null = the server's resources (list them, or read one by its uri).</param>
+    public McpTool(McpConnection connection, McpToolInfo? info)
     {
         _connection = connection;
         Info = info;
-        _grants = grants;
-        Name = NameFor(connection.Config.Id, info.Name);
-        var title = info.Title is { Length: > 0 } t && t != info.Name ? $"{t}. " : "";
-        Spec = new ToolSpec(Name, $"{title}{info.Description}".Trim() + $" (MCP server “{connection.Config.Name}”)", info.InputSchema);
+        Name = McpNames.ToolName(connection.Config.Name, info?.Name ?? "resources");
+        var prefix = $"[MCP server “{connection.Config.Name}”] ";
+        Spec = info is null
+            ? new ToolSpec(Name, prefix + "List the server's resources, or read one by its uri.",
+                """{"type":"object","properties":{"uri":{"type":"string","description":"The resource to read; leave out to list them"}}}""")
+            : new ToolSpec(Name, prefix + TextUtil.Prefix(info.Description.Length > 0 ? info.Description : info.Title ?? info.Name, 2_000), info.InputSchema);
     }
 
-    public McpToolInfo Info { get; }
-    public string Server => _connection.Config.Id;
+    public McpToolInfo? Info { get; }
+    public McpServerConfig Server => _connection.Config;
     public string Name { get; }
     public ToolSpec Spec { get; }
 
-    /// <summary>mcp__server__tool, made safe for every model API: other characters become '_', and a name that would pass 64
-    /// characters is cut and given a short hash of the whole so two long names stay apart.</summary>
-    public static string NameFor(string server, string tool)
+    /// <summary>Whether a call asks first (see the top of the file).</summary>
+    public bool NeedsApproval(ToolContext context)
     {
-        static string Clean(string s) => new(s.Select(c => char.IsAsciiLetterOrDigit(c) || c is '_' or '-' ? c : '_').ToArray());
-        var name = Prefix + Clean(server) + "__" + Clean(tool);
-        if (name.Length <= MaxNameLength) return name;
-        var hash = Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(name)))[..8];
-        return name[..(MaxNameLength - 9)] + "_" + hash;
+        var server = _connection.Config;
+        var remote = server.Transport != McpTransportKind.Stdio && !RoutePrivacy.IsPrivateAddress(server.Url);
+        if (context.Sensitive && remote) return true;
+        if (context.Policy.Preset == PermissionPreset.FullAccess) return false;
+        return server.Trust switch
+        {
+            McpTrust.Always => false,
+            McpTrust.ReadOnly => !(Info?.ReadOnly ?? true),
+            _ => true,
+        };
     }
 
     public async Task<ToolResult> ExecuteAsync(string arguments, ToolContext context, CancellationToken cancellationToken)
     {
+        var server = _connection.Config;
         var args = JsonArgs.Object(arguments);
-        var config = _connection.Config;
-        // In a Sensitive chat a server on someone else's machine always asks first (once per tool per chat), whatever its setting:
-        // what the tool is given leaves this PC.
-        var remote = config.Transport != McpTransportKind.Stdio && !RoutePrivacy.IsPrivateAddress(config.Url);
-        if ((config.AskBeforeUse || (context.Sensitive && remote)) && !_grants.IsAllowed(Name))
+        if (NeedsApproval(context))
         {
-            var shown = args.Count == 0 ? "(no arguments)" : TextUtil.Prefix(args.ToJsonString(new System.Text.Json.JsonSerializerOptions { WriteIndented = true }), 800);
-            var warning = context.Sensitive && remote && Uri.TryCreate(config.Url, UriKind.Absolute, out var url)
-                ? $"\nThis chat is Sensitive: what {Info.Name} is given goes to {url.Host}."
+            var shown = args.ToJsonString();
+            if (shown.Length > 400) shown = shown[..400] + "…";
+            var what = Info is null ? "its resources" : $"its tool “{Info.Name}”";
+            var warning = context.Sensitive && server.Transport != McpTransportKind.Stdio && Uri.TryCreate(server.Url, UriKind.Absolute, out var url)
+                          && !RoutePrivacy.IsPrivateAddress(server.Url)
+                ? $"\nThis chat is Sensitive: what it is given goes to {url.Host}."
                 : "";
             var approved = await context.RequestPermission($"mcp-{Guid.NewGuid():N}", Name,
-                $"MCP server “{config.Name}” wants to run {Info.Name}:\n{shown}{warning}\nAllowing it lets {Info.Name} run for the rest of this chat.").ConfigureAwait(false);
-            if (!approved) return "Error: the user declined to run this MCP tool.";
-            _grants.Allow(Name);
+                $"MCP server “{server.Name}” wants to run {what} with {shown}{warning}").ConfigureAwait(false);
+            if (!approved) return "Error: the user declined this MCP call. Don't retry it; say what you wanted it for.";
         }
-        JsonObject result;
+        // A local server's tool that isn't read-only may change files: the turn's checkpoint works out which (git).
+        var checkpoint = server.Transport == McpTransportKind.Stdio && !(Info?.ReadOnly ?? true) ? context.Checkpoint : null;
+        var baseline = checkpoint?.BeforeShell(context.Workspace);
         try
         {
-            result = await _connection.CallAsync(Info.Name, args, cancellationToken).ConfigureAwait(false);
+            if (Info is null) return await _connection.ResourcesAsync(JsonArgs.String(args, "uri"), cancellationToken).ConfigureAwait(false);
+            var result = Present(await _connection.CallAsync(Info.Name, args, cancellationToken).ConfigureAwait(false));
+            if (baseline is not null) result = result with { Files = checkpoint!.AfterShell(baseline, Name) };
+            return result;
         }
         catch (McpException error)
         {
-            return $"Error: MCP server “{_connection.Config.Name}”: {error.Message}";
+            return $"Error: MCP server “{server.Name}”: {error.Message}";
         }
-        return Present(result);
     }
 
     /// <summary>What the model is told: the text content (a resource's text, a link's address), pictures as images, the
@@ -134,10 +123,10 @@ public sealed class McpTool : IToolExecutor
             }
         }
         if (text.Length == 0 && result["structuredContent"] is JsonNode structured) text.Append(structured.ToJsonString());
-        var output = text.Length == 0 ? "(no output)" : text.ToString().TrimEnd();
+        var output = text.ToString().Trim();
         var isError = result["isError"] is JsonValue flag && flag.TryGetValue<bool>(out var e) && e;
-        if (isError) output = "Error: " + output;
-        return new ToolResult(output) { Images = images };
+        if (isError) return "Error: " + (output.Length == 0 ? "the tool reported an error." : output);
+        return new ToolResult(output.Length == 0 ? "(no output)" : output) { Images = images };
     }
 
     private static void Line(StringBuilder text, string line)

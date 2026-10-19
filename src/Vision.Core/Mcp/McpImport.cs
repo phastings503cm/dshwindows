@@ -2,19 +2,31 @@ using System.Text.Json;
 
 namespace Vision.Core;
 
-// MARK: - Bringing in the MCP servers other tools already have
+// MARK: - Bringing in the MCP servers other apps already have
 //
-// Claude Code lists its servers in ~/.claude.json (user-wide "mcpServers", and per project under "projects"/<folder>), and
-// each project may have a .mcp.json; Claude Desktop in claude_desktop_config.json (%APPDATA%\Claude on Windows,
-// ~/Library/Application Support/Claude on a Mac); Cursor in ~/.cursor/mcp.json and a project's .cursor/mcp.json. All of
-// them share one shape: "mcpServers": { "<name>": { "command", "args", "env" } or { "type", "url", "headers" } }.
-// Importing copies each server into Vision's list and moves its env and header values into Credential Manager.
+// The servers configured for Claude Code (~/.claude.json: its own "mcpServers" and each project's under
+// "projects"/<folder>; a project's .mcp.json), Claude Desktop (claude_desktop_config.json: %APPDATA%\Claude on Windows,
+// ~/Library/Application Support/Claude on a Mac) and Cursor (~/.cursor/mcp.json, a project's .cursor/mcp.json). Each file
+// has the same shape:
+//
+//   { "mcpServers": { "github": { "command": "npx", "args": ["-y", "…"], "env": { "GITHUB_TOKEN": "…" } },
+//                     "docs":   { "type": "http", "url": "https://…/mcp", "headers": { "Authorization": "Bearer …" } } } }
+//
+// Nothing is started while looking. Importing copies a server into Vision's list; its environment and header values go to
+// Credential Manager. A value like ${GITHUB_TOKEN} is kept as written and filled in from the environment when the server
+// starts, as Claude Code does. The labels and rules are Vision for macOS's (MCPImport.swift); Windows also looks at the
+// recent projects' files, and a server from a project's own file applies only in that project.
 
-/// <summary>One server another tool has configured, ready to import.</summary>
-public sealed record McpCandidate(McpServerConfig Server, IReadOnlyDictionary<string, string> Env, IReadOnlyDictionary<string, string> Headers)
+/// <summary>One server another app has configured, ready to import.</summary>
+/// <param name="Caveat">Why it may not work as configured there (an SSE server); null = fine.</param>
+public sealed record McpCandidate(McpServerConfig Server, IReadOnlyDictionary<string, string> Env, IReadOnlyDictionary<string, string> Headers,
+                                  string Origin, string? Caveat = null)
 {
-    /// <summary>"Claude Code · user", "Cursor · C:\work\app"…</summary>
-    public string Where => Server.Project is { } project ? $"{Server.Source} · {project}" : $"{Server.Source} · every chat";
+    /// <summary>What makes two servers the same one: how it starts or where it is.</summary>
+    public string Fingerprint => $"{Server.Transport}|{Server.Summary}".ToLowerInvariant();
+
+    /// <summary>Whether Vision already has it (it starts the same way, or is at the same address).</summary>
+    public bool IsKnown(IEnumerable<McpServerConfig> existing) => existing.Any(s => $"{s.Transport}|{s.Summary}".ToLowerInvariant() == Fingerprint);
 }
 
 public static class McpImport
@@ -22,7 +34,8 @@ public static class McpImport
     public const string ClaudeCode = "Claude Code";
     public const string ClaudeDesktop = "Claude Desktop";
     public const string Cursor = "Cursor";
-    public const string ProjectFile = "Project .mcp.json";
+    public const string SseCaveat =
+        "It uses the older SSE transport; Vision speaks Streamable HTTP, which many such servers also offer at the same address (or at /mcp).";
 
     /// <summary>Claude Desktop's settings file on this platform.</summary>
     public static string ClaudeDesktopConfig(ExternalLocations locations)
@@ -35,39 +48,46 @@ public static class McpImport
         return Path.Combine(appData, "Claude", "claude_desktop_config.json");
     }
 
-    /// <summary>Every server Claude Code, Claude Desktop and Cursor have, plus those of <paramref name="projects"/>' own
-    /// .mcp.json and .cursor/mcp.json. Nothing is changed.</summary>
-    public static IReadOnlyList<McpCandidate> Scan(ExternalLocations locations, IEnumerable<string> projects)
+    /// <summary>"Claude Code (this project)" for the open project, "Claude Code (app)" for another.</summary>
+    private static string ForProject(string app, string project, string? current) =>
+        current is not null && SameFolder(project, current) ? $"{app} (this project)" : $"{app} ({Path.GetFileName(project.TrimEnd('\\', '/'))})";
+
+    /// <summary>Every server Claude Code, Claude Desktop and Cursor have, with those of the projects' own files (the open one,
+    /// <paramref name="current"/>, and <paramref name="projects"/>). Nothing is started or changed.</summary>
+    public static IReadOnlyList<McpCandidate> Scan(ExternalLocations locations, string? current, IEnumerable<string>? projects = null)
     {
+        var folders = new List<string>();
+        foreach (var folder in (current is null ? [] : new[] { current }).Concat(projects ?? []))
+            if (!string.IsNullOrWhiteSpace(folder) && !folders.Any(f => SameFolder(f, folder))) folders.Add(folder);
         var output = new List<McpCandidate>();
-        // Claude Code: user-wide, then per project ("local" scope).
         if (ReadJson(locations.ClaudeGlobalConfig) is { } claude)
         {
             output.AddRange(Servers(claude, ClaudeCode, locations.ClaudeGlobalConfig, project: null));
+            // Claude Code keeps a project's own servers inside ~/.claude.json, under its folder.
             if (claude.TryGetProperty("projects", out var perProject) && perProject.ValueKind == JsonValueKind.Object)
-                foreach (var project in perProject.EnumerateObject())
-                    if (project.Value.ValueKind == JsonValueKind.Object)
-                        output.AddRange(Servers(project.Value, ClaudeCode, locations.ClaudeGlobalConfig, project.Name));
+                foreach (var entry in perProject.EnumerateObject())
+                    if (entry.Value.ValueKind == JsonValueKind.Object && folders.FirstOrDefault(f => SameFolder(f, entry.Name)) is { } folder)
+                        output.AddRange(Servers(entry.Value, ForProject(ClaudeCode, folder, current), locations.ClaudeGlobalConfig, folder));
         }
         var desktop = ClaudeDesktopConfig(locations);
         if (ReadJson(desktop) is { } desktopConfig) output.AddRange(Servers(desktopConfig, ClaudeDesktop, desktop, project: null));
         var cursor = Path.Combine(locations.CursorHome, "mcp.json");
         if (ReadJson(cursor) is { } cursorConfig) output.AddRange(Servers(cursorConfig, Cursor, cursor, project: null));
-        foreach (var project in projects.Where(p => !string.IsNullOrWhiteSpace(p)).Distinct(TurnRecorder.PathComparer))
+        foreach (var folder in folders)
         {
-            var shared = Path.Combine(project, ".mcp.json");
-            if (ReadJson(shared) is { } sharedConfig) output.AddRange(Servers(sharedConfig, ProjectFile, shared, project));
-            var cursorProject = Path.Combine(project, ".cursor", "mcp.json");
-            if (ReadJson(cursorProject) is { } cursorProjectConfig) output.AddRange(Servers(cursorProjectConfig, Cursor, cursorProject, project));
+            var shared = Path.Combine(folder, ".mcp.json");
+            if (ReadJson(shared) is { } sharedConfig) output.AddRange(Servers(sharedConfig, ForProject(ClaudeCode, folder, current), shared, folder));
+            var cursorProject = Path.Combine(folder, ".cursor", "mcp.json");
+            if (ReadJson(cursorProject) is { } cursorProjectConfig) output.AddRange(Servers(cursorProjectConfig, ForProject(Cursor, folder, current), cursorProject, folder));
         }
         return output;
     }
 
-    /// <summary>The servers under "mcpServers" in <paramref name="root"/>.</summary>
+    /// <summary>The servers under "mcpServers" in <paramref name="root"/>, by name.</summary>
     public static IEnumerable<McpCandidate> Servers(JsonElement root, string source, string file, string? project)
     {
         if (!root.TryGetProperty("mcpServers", out var servers) || servers.ValueKind != JsonValueKind.Object) yield break;
-        foreach (var entry in servers.EnumerateObject())
+        foreach (var entry in servers.EnumerateObject().OrderBy(e => e.Name, StringComparer.Ordinal))
             if (Parse(entry.Name, entry.Value, source, file, project) is { } candidate) yield return candidate;
     }
 
@@ -75,61 +95,80 @@ public static class McpImport
     public static McpCandidate? Parse(string name, JsonElement entry, string source, string file, string? project)
     {
         if (entry.ValueKind != JsonValueKind.Object) return null;
-        var command = Str(entry, "command");
+        var type = (Str(entry, "type") ?? Str(entry, "transport"))?.ToLowerInvariant();
         var url = Str(entry, "url") ?? Str(entry, "serverUrl");
-        var type = (Str(entry, "type") ?? Str(entry, "transport") ?? "").ToLowerInvariant();
-        McpTransportKind transport;
-        if (type is "http" or "streamable-http" or "streamablehttp") transport = McpTransportKind.Http;
-        else if (type == "sse") transport = McpTransportKind.Sse;
-        else if (!string.IsNullOrWhiteSpace(command)) transport = McpTransportKind.Stdio;
-        else if (!string.IsNullOrWhiteSpace(url)) transport = McpTransportKind.Http;
-        else return null;
-        if (transport == McpTransportKind.Stdio && string.IsNullOrWhiteSpace(command)) return null;
-        if (transport != McpTransportKind.Stdio && string.IsNullOrWhiteSpace(url)) return null;
-        var server = new McpServerConfig
+        var command = Str(entry, "command");
+        var enabled = !(entry.TryGetProperty("disabled", out var disabled) && disabled.ValueKind == JsonValueKind.True)
+                      && !(entry.TryGetProperty("enabled", out var on) && on.ValueKind == JsonValueKind.False);
+        McpServerConfig server;
+        Dictionary<string, string> env = new(StringComparer.Ordinal), headers = new(StringComparer.Ordinal);
+        string? caveat = null;
+        if (url is not null && type != "stdio" && (command is null || type is not null))
         {
-            Id = McpServerConfig.IdFrom(name),
-            Name = name,
-            Transport = transport,
-            Command = transport == McpTransportKind.Stdio ? command : null,
-            Args = transport == McpTransportKind.Stdio ? Strings(entry, "args") : [],
-            Cwd = Str(entry, "cwd"),
-            Url = transport == McpTransportKind.Stdio ? null : url,
-            // A server another tool has switched off comes in switched off.
-            Enabled = !(entry.TryGetProperty("disabled", out var disabled) && disabled.ValueKind == JsonValueKind.True),
-            Project = project,
-            Source = source,
-            SourceFile = file,
-        };
-        return new McpCandidate(server, Map(entry, "env"), Map(entry, "headers"));
+            if (type == "sse") caveat = SseCaveat;
+            headers = Map(entry, "headers");
+            server = new McpServerConfig
+            {
+                Name = name, Transport = McpTransportKind.Http, Url = url, HeaderNames = headers.Keys.Order(StringComparer.Ordinal).ToList(),
+                Enabled = enabled, Source = source, Note = caveat, Project = project, SourceFile = file,
+            };
+        }
+        else if (!string.IsNullOrEmpty(command))
+        {
+            env = Map(entry, "env");
+            server = new McpServerConfig
+            {
+                Name = name, Transport = McpTransportKind.Stdio, Command = command, Args = Strings(entry, "args"), Cwd = Str(entry, "cwd"),
+                EnvNames = env.Keys.Order(StringComparer.Ordinal).ToList(), Enabled = enabled, Source = source, Project = project, SourceFile = file,
+            };
+        }
+        else
+        {
+            return null;
+        }
+        return new McpCandidate(server, env, headers, file, caveat);
     }
 
-    /// <summary>Import <paramref name="candidates"/>: each gets an id of its own (a second "github" becomes "github-2"), its
-    /// secrets go to Credential Manager. A server already imported from the same file under the same name is replaced,
-    /// not duplicated. Returns how many were added and how many replaced.</summary>
-    public static (int Added, int Replaced) Import(McpServerStore store, IEnumerable<McpCandidate> candidates)
+    /// <summary>Import <paramref name="candidates"/>: a server Vision already has (same start or address) is updated in place —
+    /// its secrets refreshed, its switch and trust kept; a new one gets a name of its own ("github", "github-2"). Secrets go to
+    /// Credential Manager. Returns how many were added and how many updated.</summary>
+    public static (int Added, int Updated) Import(McpServerStore store, IEnumerable<McpCandidate> candidates)
     {
-        int added = 0, replaced = 0;
+        int added = 0, updated = 0;
         foreach (var candidate in candidates)
         {
             var server = candidate.Server.Copy();
-            var existing = store.Servers.FirstOrDefault(s => s.Name == server.Name && s.SourceFile == server.SourceFile
-                                                              && string.Equals(s.Project, server.Project, StringComparison.OrdinalIgnoreCase));
+            var existing = store.Servers.FirstOrDefault(s => candidate.IsKnown([s]));
             if (existing is not null)
             {
-                server.Id = existing.Id;
-                server.Enabled = existing.Enabled;
-                server.AskBeforeUse = existing.AskBeforeUse;
-                replaced++;
+                server = server with
+                {
+                    Id = existing.Id, Name = existing.Name, Enabled = existing.Enabled, Trust = existing.Trust, Project = existing.Project,
+                    DisabledTools = [.. existing.DisabledTools],
+                };
+                updated++;
             }
             else
             {
-                server.Id = store.UniqueId(server.Name);
+                server = server with { Id = Guid.NewGuid().ToString(), Name = store.UniqueName(server.Name) };
                 added++;
             }
             store.Save(server, new Dictionary<string, string>(candidate.Env), new Dictionary<string, string>(candidate.Headers));
         }
-        return (added, replaced);
+        return (added, updated);
+    }
+
+    private static bool SameFolder(string a, string b)
+    {
+        try
+        {
+            return string.Equals(Path.TrimEndingDirectorySeparator(Path.GetFullPath(a)), Path.TrimEndingDirectorySeparator(Path.GetFullPath(b)),
+                OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal);
+        }
+        catch (Exception ex) when (ex is ArgumentException or NotSupportedException or PathTooLongException)
+        {
+            return false;
+        }
     }
 
     private static JsonElement? ReadJson(string path)
@@ -137,7 +176,6 @@ public static class McpImport
         try
         {
             if (!File.Exists(path)) return null;
-            // Claude Code's state file can be large; it is read once, and only its mcpServers are kept.
             using var doc = JsonDocument.Parse(File.ReadAllText(path), new JsonDocumentOptions { AllowTrailingCommas = true, CommentHandling = JsonCommentHandling.Skip });
             return doc.RootElement.ValueKind == JsonValueKind.Object ? doc.RootElement.Clone() : null;
         }
@@ -161,7 +199,13 @@ public static class McpImport
         var output = new Dictionary<string, string>(StringComparer.Ordinal);
         if (!entry.TryGetProperty(key, out var value) || value.ValueKind != JsonValueKind.Object) return output;
         foreach (var item in value.EnumerateObject())
-            output[item.Name] = item.Value.ValueKind == JsonValueKind.String ? item.Value.GetString() ?? "" : item.Value.GetRawText();
+        {
+            switch (item.Value.ValueKind)
+            {
+                case JsonValueKind.String: output[item.Name] = item.Value.GetString() ?? ""; break;
+                case JsonValueKind.Number or JsonValueKind.True or JsonValueKind.False: output[item.Name] = item.Value.GetRawText(); break;
+            }
+        }
         return output;
     }
 }

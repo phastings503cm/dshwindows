@@ -1,69 +1,104 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
-using System.Text.RegularExpressions;
 
 namespace Vision.Core;
 
 // MARK: - MCP servers: what is configured
 //
-// Settings › MCP Servers keeps the list in mcp-servers.json in the data folder: how to reach each server (a command to run
-// for stdio, a URL for Streamable HTTP), whether it is on, whether its tools ask before each use, and the project it
-// belongs to (null = every chat). Environment variables and HTTP headers are listed by name only: their values are in
-// Credential Manager (Vision/mcp/<id>/env/<NAME>, Vision/mcp/<id>/header/<Name>), never in the file. Vision for macOS
-// keeps the same file, with its values in the Keychain.
+// An MCP server (Model Context Protocol) offers tools — and sometimes resources — to the model. Vision talks to two kinds:
+// a program it starts and speaks to over stdin/stdout (stdio), and a server at a URL (Streamable HTTP, falling back to the
+// older SSE transport for a server that only speaks that). Each server's tools are offered to the model as
+// mcp__<server>__<tool>, behind the usual permission prompt.
+//
+// The list lives in mcp-servers.json in the data folder — the same file as Vision for macOS: {version, servers: [{id, name,
+// transport, command, args, cwd, url, envNames, headerNames, enabled, trust, source, note, disabledTools}]}, plus Windows'
+// own "project" (a server from a project's file applies only there) and "sourceFile". The values of a server's environment
+// variables and HTTP headers live in Credential Manager (Vision/mcp/<id>/env/<NAME>, Vision/mcp/<id>/header/<Name>), never
+// in the file.
 
 [JsonConverter(typeof(JsonStringEnumConverter<McpTransportKind>))]
 public enum McpTransportKind
 {
-    /// <summary>A program Vision starts, spoken to over its standard input and output.</summary>
+    /// <summary>A program Vision starts, spoken to over stdin/stdout.</summary>
     [JsonStringEnumMemberName("stdio")] Stdio,
-    /// <summary>Streamable HTTP: JSON-RPC posted to one URL, answered with JSON or an event stream.</summary>
+    /// <summary>A server at a URL (Streamable HTTP; the older SSE transport when that is all it speaks).</summary>
     [JsonStringEnumMemberName("http")] Http,
-    /// <summary>The older HTTP + server-sent events transport (Vision tries Streamable HTTP at the same URL first).</summary>
-    [JsonStringEnumMemberName("sse")] Sse,
+}
+
+/// <summary>When a server's tools may run without asking.</summary>
+[JsonConverter(typeof(JsonStringEnumConverter<McpTrust>))]
+public enum McpTrust
+{
+    /// <summary>Every call asks first (the default).</summary>
+    [JsonStringEnumMemberName("ask")] Ask,
+    /// <summary>Tools the server marks read-only run without asking; the others ask.</summary>
+    [JsonStringEnumMemberName("readOnly")] ReadOnly,
+    /// <summary>Every tool runs without asking.</summary>
+    [JsonStringEnumMemberName("always")] Always,
+}
+
+public static class McpTrusts
+{
+    public static string Label(this McpTrust trust) => trust switch
+    {
+        McpTrust.ReadOnly => "Read-only tools without asking",
+        McpTrust.Always => "All tools without asking",
+        _ => "Ask before every tool call",
+    };
 }
 
 /// <summary>One configured MCP server.</summary>
 public sealed record McpServerConfig
 {
-    /// <summary>Unique, and the prefix of its tools' names (mcp__&lt;id&gt;__&lt;tool&gt;): letters, digits, '-' and '_'.</summary>
-    public string Id { get; set; } = "";
-    /// <summary>The name shown (what the source called it).</summary>
+    public string Id { get; set; } = Guid.NewGuid().ToString();
+    /// <summary>The name the model sees in front of its tools (mcp__&lt;name&gt;__&lt;tool&gt;).</summary>
     public string Name { get; set; } = "";
     public McpTransportKind Transport { get; set; } = McpTransportKind.Stdio;
+    /// <summary>stdio: the program and its arguments, and the folder it starts in (null = the project's, else your user folder).</summary>
     public string? Command { get; set; }
     public List<string> Args { get; set; } = [];
-    /// <summary>Where the program runs (null = the chat's project folder, or the data folder for a chat without one).</summary>
     public string? Cwd { get; set; }
+    /// <summary>http: the server's address.</summary>
     public string? Url { get; set; }
-    /// <summary>The environment variables it is given; values in Credential Manager.</summary>
-    public List<string> EnvKeys { get; set; } = [];
-    /// <summary>The HTTP headers it is sent; values in Credential Manager.</summary>
-    public List<string> HeaderKeys { get; set; } = [];
+    /// <summary>The names of its environment variables (stdio) and HTTP headers (http); their values are in Credential Manager.</summary>
+    public List<string> EnvNames { get; set; } = [];
+    public List<string> HeaderNames { get; set; } = [];
     public bool Enabled { get; set; } = true;
-    /// <summary>Its tools ask before they run (once per tool per chat). Off: they run without asking.</summary>
-    public bool AskBeforeUse { get; set; } = true;
-    /// <summary>The project folder it belongs to (from a project's .mcp.json); null = every chat.</summary>
-    public string? Project { get; set; }
-    /// <summary>Where it was imported from ("Claude Code", "Claude Desktop", "Cursor", "Project .mcp.json"); null = added here.</summary>
+    public McpTrust Trust { get; set; } = McpTrust.Ask;
+    /// <summary>Where it was imported from ("Claude Code", "Cursor", …); null = added in Vision.</summary>
     public string? Source { get; set; }
+    /// <summary>A word about it the settings show (an SSE server imported as Streamable HTTP, …).</summary>
+    public string? Note { get; set; }
+    /// <summary>Tools it offers that aren't given to the model.</summary>
+    public List<string> DisabledTools { get; set; } = [];
+    /// <summary>The project folder it belongs to (from a project's own file); null = every chat. Windows only.</summary>
+    public string? Project { get; set; }
+    /// <summary>The file it was imported from. Windows only.</summary>
     public string? SourceFile { get; set; }
 
-    [JsonIgnore] public string Target => Transport == McpTransportKind.Stdio
-        ? string.Join(" ", new[] { Command ?? "" }.Concat(Args.Select(a => a.Contains(' ') ? $"\"{a}\"" : a))).Trim()
+    /// <summary>One line about where it runs: "npx -y @modelcontextprotocol/server-github" or the URL.</summary>
+    [JsonIgnore]
+    public string Summary => Transport == McpTransportKind.Stdio
+        ? string.Join(" ", new[] { Command ?? "" }.Concat(Args).Where(s => s.Length > 0))
         : Url ?? "";
 
-    public McpServerConfig Copy() => this with { Args = [.. Args], EnvKeys = [.. EnvKeys], HeaderKeys = [.. HeaderKeys] };
-
-    public static string EnvTarget(string id, string key) => $"{SecretStore.Prefix}mcp/{id}/env/{key}";
-    public static string HeaderTarget(string id, string name) => $"{SecretStore.Prefix}mcp/{id}/header/{name}";
-
-    /// <summary>A server id from a name: lowercased letters, digits, '-' and '_' ("GitHub Server" → "github-server").</summary>
-    public static string IdFrom(string name)
+    /// <summary>What is missing for it to start (null = nothing).</summary>
+    [JsonIgnore]
+    public string? Problem
     {
-        var id = Regex.Replace(name.Trim().ToLowerInvariant(), "[^a-z0-9_-]+", "-").Trim('-');
-        return id.Length == 0 ? "server" : id.Length > 32 ? id[..32].TrimEnd('-') : id;
+        get
+        {
+            if (McpNames.Sanitize(Name).Length == 0) return "It needs a name.";
+            if (Transport == McpTransportKind.Stdio) return string.IsNullOrWhiteSpace(Command) ? "It needs a program to run." : null;
+            return Uri.TryCreate(Url ?? "", UriKind.Absolute, out var url) && url.Scheme is "http" or "https" && url.Host.Length > 0
+                ? null : "It needs an http(s) address.";
+        }
     }
+
+    public McpServerConfig Copy() => this with { Args = [.. Args], EnvNames = [.. EnvNames], HeaderNames = [.. HeaderNames], DisabledTools = [.. DisabledTools] };
+
+    public static string EnvTarget(string id, string name) => $"{SecretStore.Prefix}mcp/{id}/env/{name}";
+    public static string HeaderTarget(string id, string name) => $"{SecretStore.Prefix}mcp/{id}/header/{name}";
 
     /// <summary>Whether this server is offered in a chat working in <paramref name="project"/> (null = a chat without one).</summary>
     public bool AppliesTo(string? project) =>
@@ -80,6 +115,36 @@ public sealed record McpServerConfig
         {
             return path.TrimEnd('\\', '/');
         }
+    }
+}
+
+/// <summary>Tool names as the model sees them.</summary>
+public static class McpNames
+{
+    /// <summary>Tool names may hold letters, digits, '_' and '-', up to 64 characters (OpenAI, Bedrock).</summary>
+    public const int MaxLength = 64;
+
+    /// <summary>Other characters become '_'; underscores at either end go.</summary>
+    public static string Sanitize(string raw) =>
+        new string(raw.Select(c => char.IsAsciiLetterOrDigit(c) || c is '_' or '-' ? c : '_').ToArray()).Trim('_');
+
+    /// <summary>mcp__&lt;server&gt;__&lt;tool&gt;, shortened (with a stable tag) when longer than the limit.</summary>
+    public static string ToolName(string server, string tool)
+    {
+        var name = $"mcp__{Sanitize(server)}__{Sanitize(tool)}";
+        if (name.Length <= MaxLength) return name;
+        var tag = CheckpointStore.Hash(System.Text.Encoding.UTF8.GetBytes(name))[..6];
+        return name[..(MaxLength - 7)] + "_" + tag;
+    }
+
+    /// <summary>A name that doesn't clash with one already there ("github", "github-2", …), compared without regard to case.</summary>
+    public static string Unique(string name, IEnumerable<string> taken)
+    {
+        var baseName = Sanitize(name) is { Length: > 0 } clean ? clean : "server";
+        var lowered = taken.Select(t => t.ToLowerInvariant()).ToHashSet();
+        var candidate = baseName;
+        for (var n = 2; lowered.Contains(candidate.ToLowerInvariant()); n++) candidate = $"{baseName}-{n}";
+        return candidate;
     }
 }
 
@@ -133,7 +198,7 @@ public sealed class McpServerStore
         {
             if (!File.Exists(_path)) return;
             var stored = JsonSerializer.Deserialize<StoredFile>(File.ReadAllText(_path), Json);
-            lock (_lock) _servers = stored?.Servers.Where(s => s.Id.Length > 0).ToList() ?? [];
+            lock (_lock) _servers = stored?.Servers.Where(s => s.Id.Length > 0 && s.Name.Length > 0).ToList() ?? [];
         }
         catch (Exception ex) when (ex is JsonException or IOException or UnauthorizedAccessException)
         {
@@ -159,17 +224,10 @@ public sealed class McpServerStore
         Changed?.Invoke();
     }
 
-    /// <summary>An id no other server has: <paramref name="wanted"/>, else "wanted-2", "wanted-3"…</summary>
-    public string UniqueId(string wanted, string? except = null)
+    /// <summary>A name no other server has (see <see cref="McpNames.Unique"/>).</summary>
+    public string UniqueName(string wanted, string? exceptId = null)
     {
-        var id = McpServerConfig.IdFrom(wanted);
-        lock (_lock)
-        {
-            bool Taken(string candidate) => _servers.Any(s => s.Id == candidate && s.Id != except);
-            if (!Taken(id)) return id;
-            for (var n = 2; ; n++)
-                if (!Taken($"{id}-{n}")) return $"{id}-{n}";
-        }
+        lock (_lock) return McpNames.Unique(wanted, _servers.Where(s => s.Id != exceptId).Select(s => McpNames.Sanitize(s.Name)));
     }
 
     /// <summary>Add a server, or replace the one with its id. <paramref name="env"/> and <paramref name="headers"/> (when given)
@@ -181,15 +239,15 @@ public sealed class McpServerStore
         lock (_lock) old = _servers.FirstOrDefault(s => s.Id == copy.Id);
         if (env is not null)
         {
-            foreach (var key in old?.EnvKeys.Except(env.Keys) ?? []) TryDelete(McpServerConfig.EnvTarget(copy.Id, key));
-            foreach (var (key, value) in env) TryWrite(McpServerConfig.EnvTarget(copy.Id, key), value);
-            copy.EnvKeys = env.Keys.ToList();
+            foreach (var name in old?.EnvNames.Except(env.Keys) ?? []) TryDelete(McpServerConfig.EnvTarget(copy.Id, name));
+            foreach (var (name, value) in env) TryWrite(McpServerConfig.EnvTarget(copy.Id, name), value);
+            copy.EnvNames = env.Keys.OrderBy(k => k, StringComparer.Ordinal).ToList();
         }
         if (headers is not null)
         {
-            foreach (var key in old?.HeaderKeys.Except(headers.Keys) ?? []) TryDelete(McpServerConfig.HeaderTarget(copy.Id, key));
-            foreach (var (key, value) in headers) TryWrite(McpServerConfig.HeaderTarget(copy.Id, key), value);
-            copy.HeaderKeys = headers.Keys.ToList();
+            foreach (var name in old?.HeaderNames.Except(headers.Keys) ?? []) TryDelete(McpServerConfig.HeaderTarget(copy.Id, name));
+            foreach (var (name, value) in headers) TryWrite(McpServerConfig.HeaderTarget(copy.Id, name), value);
+            copy.HeaderNames = headers.Keys.OrderBy(k => k, StringComparer.Ordinal).ToList();
         }
         lock (_lock)
         {
@@ -200,7 +258,14 @@ public sealed class McpServerStore
     }
 
     public void SetEnabled(string id, bool enabled) => Update(id, s => s.Enabled = enabled);
-    public void SetAskBeforeUse(string id, bool ask) => Update(id, s => s.AskBeforeUse = ask);
+    public void SetTrust(string id, McpTrust trust) => Update(id, s => s.Trust = trust);
+
+    /// <summary>Give one of a server's tools to the model, or keep it back.</summary>
+    public void SetToolEnabled(string id, string tool, bool enabled) => Update(id, s =>
+    {
+        s.DisabledTools.Remove(tool);
+        if (!enabled) s.DisabledTools.Add(tool);
+    });
 
     private void Update(string id, Action<McpServerConfig> change)
     {
@@ -222,17 +287,17 @@ public sealed class McpServerStore
             if (old is null) return;
             _servers.Remove(old);
         }
-        foreach (var key in old.EnvKeys) TryDelete(McpServerConfig.EnvTarget(id, key));
-        foreach (var key in old.HeaderKeys) TryDelete(McpServerConfig.HeaderTarget(id, key));
+        foreach (var name in old.EnvNames) TryDelete(McpServerConfig.EnvTarget(id, name));
+        foreach (var name in old.HeaderNames) TryDelete(McpServerConfig.HeaderTarget(id, name));
         Save();
     }
 
     /// <summary>The server's environment variables with their values (read from Credential Manager; a missing one is empty).</summary>
     public static Dictionary<string, string> EnvOf(McpServerConfig server) =>
-        server.EnvKeys.ToDictionary(k => k, k => TryRead(McpServerConfig.EnvTarget(server.Id, k)) ?? "", StringComparer.Ordinal);
+        server.EnvNames.ToDictionary(k => k, k => TryRead(McpServerConfig.EnvTarget(server.Id, k)) ?? "", StringComparer.Ordinal);
 
     public static Dictionary<string, string> HeadersOf(McpServerConfig server) =>
-        server.HeaderKeys.ToDictionary(k => k, k => TryRead(McpServerConfig.HeaderTarget(server.Id, k)) ?? "", StringComparer.OrdinalIgnoreCase);
+        server.HeaderNames.ToDictionary(k => k, k => TryRead(McpServerConfig.HeaderTarget(server.Id, k)) ?? "", StringComparer.OrdinalIgnoreCase);
 
     private static string? TryRead(string target)
     {

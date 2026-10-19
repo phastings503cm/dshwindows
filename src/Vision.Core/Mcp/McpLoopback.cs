@@ -53,6 +53,8 @@ public sealed class McpLoopbackServer
     public string? FailToStart { get; init; }
     public string? Diagnostics { get; set; }
     public Dictionary<string, (McpToolInfo Info, Func<JsonObject, JsonObject> Run)> Tools { get; } = new(StringComparer.Ordinal);
+    /// <summary>Resources by uri (none = the server offers no resources).</summary>
+    public Dictionary<string, (string Name, string Text)> Resources { get; } = new(StringComparer.Ordinal);
 
     public McpLoopbackServer()
     {
@@ -89,7 +91,9 @@ public sealed class McpLoopbackServer
                 reply = Reply(new JsonObject
                 {
                     ["protocolVersion"] = McpSession.Text(parameters, "protocolVersion") ?? McpSession.LatestProtocolVersion,
-                    ["capabilities"] = new JsonObject { ["tools"] = new JsonObject { ["listChanged"] = true } },
+                    ["capabilities"] = Resources.Count == 0
+                        ? new JsonObject { ["tools"] = new JsonObject { ["listChanged"] = true } }
+                        : new JsonObject { ["tools"] = new JsonObject { ["listChanged"] = true }, ["resources"] = new JsonObject() },
                     ["serverInfo"] = new JsonObject { ["name"] = Name, ["version"] = "1.0" },
                 });
                 break;
@@ -113,6 +117,18 @@ public sealed class McpLoopbackServer
                 break;
             case "ping":
                 reply = Reply(new JsonObject());
+                break;
+            case "resources/list":
+                reply = Reply(new JsonObject
+                {
+                    ["resources"] = new JsonArray(Resources.Select(r => (JsonNode)new JsonObject { ["uri"] = r.Key, ["name"] = r.Value.Name }).ToArray()),
+                });
+                break;
+            case "resources/read":
+                var uri = McpSession.Text(parameters, "uri") ?? "";
+                reply = Resources.TryGetValue(uri, out var resource)
+                    ? Reply(new JsonObject { ["contents"] = new JsonArray(new JsonObject { ["uri"] = uri, ["text"] = resource.Text }) })
+                    : Error(-32002, $"Resource not found: {uri}");
                 break;
             default:
                 reply = Error(-32601, $"Method not found: {method}");

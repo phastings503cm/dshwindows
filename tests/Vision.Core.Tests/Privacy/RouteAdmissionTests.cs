@@ -1,98 +1,94 @@
 namespace Vision.Core.Tests;
 
-/// <summary>The sensitivity policy (10-19 #20): which routes a Sensitive chat may use, and how.</summary>
+/// <summary>Which routes a Sensitive chat may use (10-19 #20): private ones as they are, online ones only through the shield,
+/// engines that read files themselves never — the same cases as Vision for macOS's SensitivityPolicyTests.</summary>
 public sealed class RouteAdmissionTests
 {
-    private static ProviderProfile Route(ProviderKind kind, string name, string url, string model = "m", bool? isPrivate = null) =>
-        new(kind, name, url, model) { IsPrivate = isPrivate };
-
-    private static readonly ProviderProfile Spark = Route(ProviderKind.OpenAICompat, "DGX Spark", "http://192.168.1.40:8002/v1");
-    private static readonly ProviderProfile Ollama = Route(ProviderKind.Ollama, "Ollama", "http://127.0.0.1:11434/v1");
-    private static readonly ProviderProfile LmStudio = Route(ProviderKind.LmStudio, "LM Studio", "http://localhost:1234/v1");
-    private static readonly ProviderProfile Tailnet = Route(ProviderKind.OpenAICompat, "Evo", "http://evo-x2.tail1234.ts.net:8000/v1");
-    private static readonly ProviderProfile Bedrock = Route(ProviderKind.Bedrock, "Amazon Bedrock", "https://bedrock-runtime.us-east-1.amazonaws.com") with { AwsProfile = "vision-bedrock" };
-    private static readonly ProviderProfile Guardian = Route(ProviderKind.OpenAICompat, "Guardian", "https://guardian.503cm.com/api/harness/v1");
-    private static readonly ProviderProfile DeepSeek = Route(ProviderKind.OpenAICompat, "DeepSeek", "https://api.deepseek.com/v1");
-    private static readonly ProviderProfile OpenAi = Route(ProviderKind.OpenAI, "OpenAI", "https://api.openai.com/v1");
+    private static ProviderProfile Route(ProviderKind kind, string name, string url, bool? isPrivate = null) =>
+        new(kind, name, url, "m") { IsPrivate = isPrivate };
 
     [Fact]
-    public void RoutesAreClassedByWhereTheySendWhatTheyAreGiven()
+    public void YourOwnHardwareIsPrivate()
     {
-        Assert.Equal(RouteReach.OwnMachine, RouteAdmission.Reach(Spark));
-        Assert.Equal(RouteReach.OwnMachine, RouteAdmission.Reach(Ollama));
-        Assert.Equal(RouteReach.OwnMachine, RouteAdmission.Reach(LmStudio));
-        Assert.Equal(RouteReach.OwnMachine, RouteAdmission.Reach(Tailnet));
-        Assert.Equal(RouteReach.OwnCloud, RouteAdmission.Reach(Bedrock));
-        Assert.Equal(RouteReach.Guardian, RouteAdmission.Reach(Guardian));
-        Assert.Equal(RouteReach.Online, RouteAdmission.Reach(DeepSeek));
-        Assert.Equal(RouteReach.Online, RouteAdmission.Reach(OpenAi));
-        // The person's own word wins: an online address they marked private is treated as theirs.
-        Assert.Equal(RouteReach.OwnMachine, RouteAdmission.Reach(OpenAi with { IsPrivate = true }));
-        Assert.Equal(RouteReach.Online, RouteAdmission.Reach(Spark with { IsPrivate = false }));
+        foreach (var url in new[] { "http://spark.local:8002/v1", "http://127.0.0.1:11434/v1", "http://192.168.1.50:8002/v1", "http://halo:8080/v1", "http://evo.tail1234.ts.net/v1" })
+            Assert.Equal(RouteAdmission.Private("your own hardware"), SensitivityPolicy.Admission(Route(ProviderKind.OpenAICompat, "Spark", url), shieldOn: false));
+        Assert.Equal("private", SensitivityPolicy.Admission(Route(ProviderKind.Ollama, "Ollama", "http://127.0.0.1:11434/v1"), shieldOn: true).Code);
+        Assert.Equal("private", SensitivityPolicy.Admission(Route(ProviderKind.LmStudio, "LM Studio", "http://localhost:1234/v1"), shieldOn: true).Code);
     }
 
     [Fact]
-    public void AStandardChatMayUseEveryRoute()
+    public void GuardianAndBedrockInYourAccountArePrivate()
     {
-        foreach (var route in new[] { Spark, Bedrock, Guardian, DeepSeek, OpenAi })
-            Assert.True(RouteAdmission.Admit(route, sensitive: false).Allowed);
-        Assert.False(RouteAdmission.Admit(Spark, sensitive: false).Masked);
-        Assert.True(RouteAdmission.Admit(DeepSeek, sensitive: false).Masked);
+        // Windows reaches Guardian through its model proxy (an OpenAI-compatible route under /api/harness/).
+        Assert.Equal(RouteAdmission.Private("Guardian, your organisation's own server"),
+            SensitivityPolicy.Admission(Route(ProviderKind.OpenAICompat, "Guardian", "https://guardian.503cm.com/api/harness/v1"), shieldOn: false));
+        // Bedrock isn't "private" for the shield (it still masks), but it is the person's own AWS account.
+        var bedrock = Route(ProviderKind.Bedrock, "Amazon Bedrock", "https://bedrock-runtime.us-east-1.amazonaws.com");
+        Assert.False(bedrock.IsPrivateRoute);
+        Assert.Equal(RouteAdmission.Private("Amazon Bedrock in your own AWS account"), SensitivityPolicy.Admission(bedrock, shieldOn: false));
+        Assert.Equal("private", SensitivityPolicy.Admission("guardian", "Guardian", isPrivate: false, shieldOn: false).Code);
     }
 
     [Fact]
-    public void ASensitiveChatUsesPrivateRoutesAsTheyAreAndOnlineOnesOnlyMasked()
+    public void AnOnlineServiceIsAllowedOnlyThroughTheShield()
     {
-        foreach (var route in new[] { Spark, Ollama, LmStudio, Tailnet })
+        var kimi = Route(ProviderKind.OpenAICompat, "Kimi Code", "https://api.kimi.com/coding/v1");
+        Assert.Equal(RouteAdmission.Masked, SensitivityPolicy.Admission(kimi, shieldOn: true));
+        var off = SensitivityPolicy.Admission(kimi, shieldOn: false);
+        Assert.False(off.IsAllowed);
+        Assert.Equal("refused", off.Code);
+        Assert.Contains("the sensitive-data shield is switched off", off.Refusal);
+        Assert.Contains("Settings › AI Models › Sensitive data", off.Refusal);
+        Assert.Equal(RouteAdmission.Masked, SensitivityPolicy.Admission(Route(ProviderKind.OpenAICompat, "DeepSeek", "https://api.deepseek.com/v1"), shieldOn: true));
+    }
+
+    [Fact]
+    public void ThePersonsPrivateSwitchWinsBothWays()
+    {
+        Assert.Equal("private", SensitivityPolicy.Admission(Route(ProviderKind.OpenAICompat, "My box", "https://box.example.com/v1", isPrivate: true), shieldOn: false).Code);
+        Assert.Equal(RouteAdmission.Masked, SensitivityPolicy.Admission(Route(ProviderKind.OpenAICompat, "Shared", "http://10.0.0.5:8000/v1", isPrivate: false), shieldOn: true));
+    }
+
+    [Fact]
+    public void EnginesThatReadFilesThemselvesAreRefusedWhateverTheShield()
+    {
+        foreach (var kind in new[] { "claudeCode", "ClaudeCode", "codex" })
         {
-            var admission = RouteAdmission.Admit(route, sensitive: true);
-            Assert.True(admission.Allowed, route.Name);
-            Assert.False(admission.Masked, route.Name);
+            foreach (var shield in new[] { true, false })
+            {
+                var admission = SensitivityPolicy.Admission(kind, "Claude Code", isPrivate: false, shieldOn: shield);
+                Assert.False(admission.IsAllowed, kind);
+                Assert.StartsWith("Claude Code reads your files itself", admission.Refusal);
+            }
+            // Even marked private: what it reads goes to its own service.
+            Assert.False(SensitivityPolicy.Admission(kind, "Claude Code", isPrivate: true, shieldOn: true).IsAllowed);
         }
-        Assert.True(RouteAdmission.Admit(Bedrock, sensitive: true).Allowed);
-        Assert.True(RouteAdmission.Admit(Guardian, sensitive: true).Allowed);
-        var online = RouteAdmission.Admit(DeepSeek, sensitive: true);
-        Assert.True(online.Allowed);
-        Assert.True(online.Masked);
-        Assert.Equal(RouteReach.Online, online.Reach);
+        Assert.False(SensitivityPolicy.ReadsFilesDirectly(Route(ProviderKind.OpenAI, "OpenAI", "https://api.openai.com/v1")));
     }
 
     [Fact]
-    public void WithMaskedOnlineUseOffASensitiveChatRefusesOnlineRoutesButKeepsPrivateOnes()
+    public void TheRefusalTheChatShowsAndTheHeaderLine()
     {
-        var refused = RouteAdmission.Admit(OpenAi, sensitive: true, allowShielded: false);
-        Assert.False(refused.Allowed);
-        Assert.Contains("private models only", refused.Refusal);
-        Assert.Contains("OpenAI", refused.Refusal);
-        Assert.True(RouteAdmission.Admit(Spark, sensitive: true, allowShielded: false).Allowed);
-        Assert.True(RouteAdmission.Admit(Bedrock, sensitive: true, allowShielded: false).Allowed);
-        Assert.True(RouteAdmission.Admit(Guardian, sensitive: true, allowShielded: false).Allowed);
-        Assert.True(RouteAdmission.Admit(OpenAi, sensitive: false, allowShielded: false).Allowed);
+        var kimi = Route(ProviderKind.OpenAICompat, "Kimi Code", "https://api.kimi.com/coding/v1");
+        Assert.Null(SensitivityPolicy.RefusalMessage(kimi, shieldOn: true));
+        Assert.StartsWith("This chat is Sensitive. Kimi Code is an online service", SensitivityPolicy.RefusalMessage(kimi, shieldOn: false));
+        Assert.Equal("Sensitive — Kimi Code isn't private: what the shield detects is masked before sending.", SensitivityPolicy.HeaderLine(kimi, shieldOn: true));
+        Assert.Equal("Sensitive — Kimi Code can't be used in this chat. Choose a private model.", SensitivityPolicy.HeaderLine(kimi, shieldOn: false));
+        Assert.Equal("Sensitive — Spark is private (your own hardware).", SensitivityPolicy.HeaderLine(Route(ProviderKind.OpenAICompat, "Spark", "http://spark.local/v1"), shieldOn: false));
+        Assert.Equal("Sensitive — only private models, or others through the shield.", SensitivityPolicy.HeaderLine(null, shieldOn: true));
+        Assert.Equal("gpt-5", SensitivityPolicy.Label(new ProviderProfile(ProviderKind.OpenAI, "", "https://api.openai.com/v1", "gpt-5")));
+        Assert.Equal(("Sensitive", "Not sensitive"), (SensitivityPolicy.Label(true), SensitivityPolicy.Label(false)));
     }
 
     [Fact]
-    public void AnEngineThatReadsTheFilesItselfIsRefusedForASensitiveChatWithTheReason()
+    public void BackupsAndSubagentsFollowThePolicy()
     {
-        // The Claude Code engine is a route kind of its own; matched by name so this policy holds whatever build has it.
-        Assert.True(RouteAdmission.IsDirectFileKindName("ClaudeCode"));
-        Assert.True(RouteAdmission.IsDirectFileKindName("codex"));
-        Assert.False(RouteAdmission.IsDirectFileKindName("OpenAI"));
-        var refusal = RouteAdmission.DirectEngineRefusal("Claude Code");
-        Assert.Contains("can't use Claude Code", refusal);
-        Assert.Contains("reads your project's files itself", refusal);
-        Assert.Contains("turn Sensitive off", refusal);
-    }
-
-    [Fact]
-    public void TheHeaderSaysThePolicyAndWhatTheChatsModelDoesUnderIt()
-    {
-        Assert.Equal("Sensitive", RouteAdmission.Label(true));
-        Assert.Equal("Standard", RouteAdmission.Label(false));
-        var sensitive = RouteAdmission.Describe(true, RouteAdmission.Admit(DeepSeek, true));
-        Assert.StartsWith("Sensitive: private models only", sensitive);
-        Assert.EndsWith("sensitive details are masked before anything is sent.", sensitive);
-        Assert.EndsWith("runs on your own machine.", RouteAdmission.Describe(true, RouteAdmission.Admit(Spark, true)));
-        Assert.Contains("can't be used while it is Sensitive", RouteAdmission.Describe(true, RouteAdmission.Admit(OpenAi, true, allowShielded: false), allowShielded: false));
-        Assert.StartsWith("Standard: any model", RouteAdmission.Describe(false, null));
+        var spark = Route(ProviderKind.OpenAICompat, "Spark", "http://spark.local/v1");
+        var kimi = Route(ProviderKind.OpenAICompat, "Kimi Code", "https://api.kimi.com/coding/v1");
+        var bedrock = Route(ProviderKind.Bedrock, "Bedrock", "");
+        Assert.Equal(["Spark", "Bedrock"], SensitivityPolicy.AdmittedBackups([spark, kimi, bedrock], shieldOn: false).Select(r => r.Name));
+        Assert.Equal(["Spark", "Kimi Code", "Bedrock"], SensitivityPolicy.AdmittedBackups([spark, kimi, bedrock], shieldOn: true).Select(r => r.Name));
+        Assert.True(SensitivityPolicy.SubagentsPrivateOnly(shieldOn: false));
+        Assert.False(SensitivityPolicy.SubagentsPrivateOnly(shieldOn: true));
     }
 }

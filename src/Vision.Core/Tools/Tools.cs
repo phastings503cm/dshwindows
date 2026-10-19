@@ -59,9 +59,12 @@ public sealed record ToolContext
     /// <summary>The running turn's checkpoint: a tool that changes files keeps each one as it was before its first change in
     /// the turn, so the turn can be rewound (null = not recorded). Subagents write through their parent turn's.</summary>
     public TurnRecorder? Checkpoint { get; init; }
-    /// <summary>The chat is marked Sensitive: every subagent task it starts counts as sensitive (it runs only where the chat's
-    /// sensitive data may go).</summary>
+    /// <summary>The chat is marked Sensitive (see <see cref="SensitivityPolicy"/>): an MCP server on someone else's machine asks
+    /// before each of its tools' first use, whatever its setting.</summary>
     public bool Sensitive { get; init; }
+    /// <summary>A Sensitive chat with the shield off: every subagent task it starts counts as sensitive (it runs only on a
+    /// private server).</summary>
+    public bool PrivateSubagentsOnly { get; init; }
 }
 
 public enum FileChangeKind { Created, Modified, Deleted }

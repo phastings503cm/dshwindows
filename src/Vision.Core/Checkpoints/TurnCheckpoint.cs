@@ -1,3 +1,5 @@
+using System.Globalization;
+using System.Text.Json;
 using System.Text.Json.Serialization;
 
 namespace Vision.Core;
@@ -5,87 +7,101 @@ namespace Vision.Core;
 // MARK: - Checkpoints: what a turn changed
 //
 // Before the agent changes a file in a turn, the file as it was goes into a content-addressed store (see
-// CheckpointStore), and the turn's manifest records each file's state before and after the turn. "Rewind this turn"
-// puts those files back the way they were before it — after checking that nothing changed them since. The same
-// manifest, word for word, is what Vision for macOS writes (checkpoints/turns/<chat>/<turn>.json).
+// CheckpointStore), and the turn's record lists each file it changed with its content before and after, by hash. The
+// turn's "Files changed (N)" row shows them with their diffs, and "Rewind this turn…" puts them back — after checking
+// that nothing changed them since. The record is the one Vision for macOS writes (checkpoints/turns/<chat>/<turn>.json:
+// version, id, chatID, title, startedAt, updatedAt, files[path, before, after, by, skipped], rewoundAt), with a few
+// fields of Windows' own that the Mac ignores (added, removed, binary, late, workspace).
 
-/// <summary>How a turn changed one file.</summary>
+/// How a turn changed one file.
 public enum CheckpointChange { Created, Modified, Deleted }
 
-/// <summary>One file a turn changed: its content before the turn and after it, by SHA-256 (the blobs are in the store).</summary>
+/// One file a turn changed.
 public sealed class CheckpointFile
 {
-    /// <summary>The file's full path.</summary>
+    /// The file's full path.
     public string Path { get; set; } = "";
-    /// <summary>SHA-256 (lowercase hex) of the file before the turn; null = it didn't exist.</summary>
+    /// SHA-256 (lowercase hex) of its content before the turn first changed it; null = it didn't exist.
     public string? Before { get; set; }
-    /// <summary>SHA-256 of the file when the turn ended; null = it didn't exist then (deleted).</summary>
+    /// SHA-256 of what the turn left; null = the turn deleted it.
     public string? After { get; set; }
-    /// <summary>Whether <see cref="After"/> was taken when the turn ended. False for a change a background agent made after
-    /// the turn was over: what it left can't be told apart from a later edit, so rewinding it asks first.</summary>
-    public bool AfterKnown { get; set; }
-    public long BeforeBytes { get; set; }
-    public long AfterBytes { get; set; }
-    /// <summary>The file was larger than the store keeps (<see cref="CheckpointStore.MaxFileBytes"/>): it can't be rewound.</summary>
-    public bool TooLarge { get; set; }
-    /// <summary>What changed it first: the tool's name ("edit", "write_file", "run_shell_command" — a shell command's change
-    /// found through git).</summary>
-    public string Source { get; set; } = "";
-    /// <summary>Lines added and removed (text files; 0 for a binary one).</summary>
+    /// What changed it: the tool ("edit", "write_file", "run_shell_command" — a shell command's change found through git — an
+    /// MCP tool, "rewind").
+    public string By { get; set; } = "";
+    /// Why it can't be rewound (its content wasn't kept: too large, unreadable); null = it can.
+    public string? Skipped { get; set; }
+    /// Lines added and removed (text files; 0 for a binary one). Windows only.
     public int Added { get; set; }
     public int Removed { get; set; }
-    /// <summary>Not text: no line diff.</summary>
+    /// Not text: no line diff. Windows only.
     public bool Binary { get; set; }
+    /// Changed after its turn had ended (a background agent of that turn): what it left can't be told apart from a later
+    /// edit, so rewinding it asks first. Windows only.
+    public bool? Late { get; set; }
+
+    [JsonIgnore] public bool IsLate => Late == true;
 
     [JsonIgnore]
     public CheckpointChange Change => Before is null ? CheckpointChange.Created
-        : AfterKnown && After is null ? CheckpointChange.Deleted
+        : After is null && !IsLate ? CheckpointChange.Deleted
         : CheckpointChange.Modified;
 
-    /// <summary>The file ended the turn exactly as it began it (changed and changed back): nothing to show or rewind.</summary>
-    [JsonIgnore] public bool Unchanged => AfterKnown && !TooLarge && Before == After;
+    /// The file ended the turn holding what it began it with (changed and put back): no change.
+    [JsonIgnore] public bool Unchanged => !IsLate && Before == After;
 
     public CheckpointFile Clone() => (CheckpointFile)MemberwiseClone();
 }
 
-/// <summary>One turn's checkpoint: the files it changed, and whether it was rewound.</summary>
+/// Everything one turn changed.
 public sealed class TurnCheckpoint
 {
-    public const int CurrentVersion = 1;
-
-    public int Version { get; set; } = CurrentVersion;
-    /// <summary>The turn: its prompt's id in the Prompts timeline (a turn the harness started by itself has one of its own).</summary>
+    public int Version { get; set; } = 1;
+    /// The turn: its prompt's id in the Prompts timeline (every round of a /goal is one turn); "auto-…" for a turn the harness
+    /// started by itself, "rewind-…" for a rewind (which is recorded as a turn of its own, so it can be rewound in turn).
     public string Id { get; set; } = "";
-    public string ChatId { get; set; } = "";
-    /// <summary>The folder the agent worked in.</summary>
-    public string? Workspace { get; set; }
-    /// <summary>The prompt's first line (up to 200 characters), for /rewind's list.</summary>
-    public string Prompt { get; set; } = "";
-    public DateTimeOffset At { get; set; } = DateTimeOffset.Now;
-    public DateTimeOffset? FinishedAt { get; set; }
+    [JsonPropertyName("chatID")] public string ChatId { get; set; } = "";
+    /// What was asked, short: the prompt's first line, up to 80 characters ("Rewind of “…”" for a rewind).
+    public string Title { get; set; } = "";
+    public DateTimeOffset StartedAt { get; set; } = DateTimeOffset.Now;
+    public DateTimeOffset UpdatedAt { get; set; } = DateTimeOffset.Now;
     public List<CheckpointFile> Files { get; set; } = [];
-    /// <summary>When the person rewound this turn (null = not rewound), and how many files went back.</summary>
+    /// When it was rewound (null = not).
     public DateTimeOffset? RewoundAt { get; set; }
-    public int RewoundCount { get; set; }
-    /// <summary>Each rewound file's content just before the rewind (path → SHA-256, null = absent), so a rewind can be undone.</summary>
-    public Dictionary<string, string?>? RewoundFrom { get; set; }
+    /// The folder the agent worked in (paths are shown relative to it). Windows only.
+    public string? Workspace { get; set; }
 
-    /// <summary>The files that really changed (a file changed and changed back is left out).</summary>
+    /// The files that changed (a file edited and then put back is no change).
     [JsonIgnore] public IReadOnlyList<CheckpointFile> Changed => Files.Where(f => !f.Unchanged).ToList();
 
     [JsonIgnore] public bool IsRewound => RewoundAt is not null;
 
-    /// <summary>"Files changed (3)" — the same words on every harness.</summary>
-    [JsonIgnore] public string Title => $"Files changed ({Changed.Count})";
+    /// "Files changed (3)" — the same words on every harness.
+    [JsonIgnore] public string Heading => $"Files changed ({Changed.Count})";
 
-    /// <summary>"+12 −3" over every text file.</summary>
+    /// "+12 −3" over every text file.
     [JsonIgnore] public string LineSummary => $"+{Changed.Sum(f => f.Added)} −{Changed.Sum(f => f.Removed)}";
+
+    /// The first line of <paramref name="prompt"/>, up to 80 characters — a turn's title.
+    public static string TitleOf(string? prompt)
+    {
+        var line = (prompt ?? "").Replace("\r", "").Split('\n').Select(l => l.Trim()).FirstOrDefault(l => l.Length > 0) ?? "";
+        return line.Length == 0 ? "Carrying on" : line.Length > 80 ? line[..80] : line;
+    }
 
     public TurnCheckpoint Clone()
     {
         var copy = (TurnCheckpoint)MemberwiseClone();
         copy.Files = Files.Select(f => f.Clone()).ToList();
-        copy.RewoundFrom = RewoundFrom is null ? null : new Dictionary<string, string?>(RewoundFrom, StringComparer.Ordinal);
         return copy;
     }
+}
+
+/// Dates as Vision for macOS writes and reads them (Swift's ISO 8601: UTC, whole seconds, "Z").
+public sealed class Iso8601SecondsConverter : JsonConverter<DateTimeOffset>
+{
+    public override DateTimeOffset Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options) =>
+        DateTimeOffset.Parse(reader.GetString() ?? "", CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal);
+
+    public override void Write(Utf8JsonWriter writer, DateTimeOffset value, JsonSerializerOptions options) =>
+        writer.WriteStringValue(value.ToUniversalTime().ToString("yyyy-MM-dd'T'HH:mm:ss'Z'", CultureInfo.InvariantCulture));
 }

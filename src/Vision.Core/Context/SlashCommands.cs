@@ -33,11 +33,11 @@ public abstract record SlashCommand
     public sealed record Memory(string? Query) : SlashCommand;
     /// <summary>List the kinds of subagent, the model servers they run on, and what is running.</summary>
     public sealed record Agents : SlashCommand;
-    /// <summary>List this chat's recent turns that changed files, to see their changes or rewind one.</summary>
-    public sealed record Rewind : SlashCommand;
-    /// <summary>List the MCP servers, their state and their tools.</summary>
-    public sealed record Mcp : SlashCommand;
-    /// <summary>"/sensitive" shows this chat's policy; "/sensitive on|off|default" sets it.</summary>
+    /// <summary>The recent turns that changed files ("/rewind"), or undo one of them ("/rewind 2").</summary>
+    public sealed record Rewind(string? Argument) : SlashCommand;
+    /// <summary>The MCP servers and their tools; "/mcp reload" reconnects them.</summary>
+    public sealed record Mcp(string? Argument) : SlashCommand;
+    /// <summary>Show this chat's sensitivity, or set it ("/sensitive on", "/sensitive off").</summary>
     public sealed record Sensitive(string? Argument) : SlashCommand;
     public sealed record Help : SlashCommand;
 
@@ -56,9 +56,9 @@ public abstract record SlashCommand
         new("/remember <note>", "Save a note to long-term memory (searched automatically when it's relevant)"),
         new("/memory [search]", "Open the memory manager, or search what is remembered"),
         new("/agents", "Show the subagent types, the model servers they run on, and what is running now"),
-        new("/rewind", "List this chat's recent turns that changed files — see what each changed, or put the files back"),
-        new("/mcp", "Show the MCP servers, whether they are connected, and their tools"),
-        new("/sensitive [on|off|default]", "Show or set whether this chat is Sensitive (private models only, or online ones masked)"),
+        new("/rewind [n]", "List the recent turns that changed files, or undo turn n's file changes"),
+        new("/mcp [reload]", "Show the MCP servers and their tools, or reconnect them"),
+        new("/sensitive [on|off]", "Show or set whether this chat is Sensitive (private models only, or masked)"),
         new("/help", "List commands"),
     ];
 
@@ -84,9 +84,9 @@ public abstract record SlashCommand
             "/remember" or "/note" => new Remember(rest),
             "/memory" or "/memories" => new Memory(arg),
             "/agents" or "/fleet" => new Agents(),
-            "/rewind" or "/undo" or "/checkpoints" => new Rewind(),
-            "/mcp" => new Mcp(),
-            "/sensitive" or "/sensitivity" => new Sensitive(arg),
+            "/rewind" or "/checkpoints" => new Rewind(arg),
+            "/mcp" => new Mcp(arg),
+            "/sensitive" => new Sensitive(arg),
             "/help" or "/?" or "/commands" => new Help(),
             _ => null,
         };

@@ -6,45 +6,53 @@ namespace Vision.Core;
 
 // MARK: - The checkpoint store
 //
-// checkpoints\blobs\ab\abcdef… holds each version of a file once, named by the SHA-256 of its bytes, however many turns
-// it belongs to; checkpoints\turns\<chat>\<turn>.json is each turn's manifest. Pruning drops manifests older than 30
-// days, then the oldest ones while the blobs take more than 1 GB, then every blob no manifest names.
+// Under the data folder, the same layout as Vision for macOS:
+//   checkpoints\objects\<2 hex>\<sha-256 hex>     each version of a file once, however many turns keep it
+//   checkpoints\turns\<chat id>\<turn id>.json    one record per turn that changed something
+// Pruning drops records older than 30 days (and empty ones older than an hour), then the oldest while the contents they
+// keep take more than 1 GB (never the newest), then every content no record — and no turn still recording — names.
+// Contents written in the last hour are never removed: they may belong to a turn whose record isn't saved yet.
 
-/// <summary>Where checkpoints live, and the pruning of them. Thread-safe.</summary>
+/// Where checkpoints live, and the pruning of them. Thread-safe.
 public sealed class CheckpointStore
 {
     public const string FolderName = "checkpoints";
-    /// <summary>A file larger than this isn't kept (it is recorded as too large, and can't be rewound).</summary>
-    public const long MaxFileBytes = 20L * 1024 * 1024;
+    /// A file larger than this isn't kept: a turn that changes it can't rewind it.
+    public const long MaxFileBytes = 16L * 1024 * 1024;
     public static readonly TimeSpan DefaultMaxAge = TimeSpan.FromDays(30);
     public const long DefaultMaxBytes = 1024L * 1024 * 1024;
+    /// Contents and empty records younger than this are left alone by pruning.
+    public static readonly TimeSpan Grace = TimeSpan.FromHours(1);
 
-    private static readonly JsonSerializerOptions Json = new()
+    public static readonly JsonSerializerOptions Json = new()
     {
         PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
-        WriteIndented = true,
+        WriteIndented = false,
         DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
+        Converters = { new Iso8601SecondsConverter() },
     };
 
     private readonly Lock _lock = new();
+    /// Turns still recording: their contents are in use even before their record is saved.
+    private readonly HashSet<TurnRecorder> _live = [];
 
     public string Root { get; }
-    private string Blobs => Path.Combine(Root, "blobs");
+    private string Objects => Path.Combine(Root, "objects");
     private string Turns => Path.Combine(Root, "turns");
 
     public CheckpointStore(string root) => Root = root;
 
-    // MARK: Blobs
+    // MARK: Contents
 
     public static string Hash(byte[] bytes) => Convert.ToHexStringLower(SHA256.HashData(bytes));
 
-    private string BlobPath(string hash) => Path.Combine(Blobs, hash[..2], hash);
+    private string ObjectPath(string hash) => Path.Combine(Objects, hash[..2], hash);
 
-    /// <summary>Keep <paramref name="bytes"/> (once, however often it is put) and return its SHA-256.</summary>
+    /// Keep <paramref name="bytes"/> (once, however often it is put) and return its SHA-256.
     public string Put(byte[] bytes)
     {
         var hash = Hash(bytes);
-        var path = BlobPath(hash);
+        var path = ObjectPath(hash);
         lock (_lock)
         {
             if (File.Exists(path)) return hash;
@@ -56,13 +64,13 @@ public sealed class CheckpointStore
         return hash;
     }
 
-    /// <summary>The bytes stored under <paramref name="hash"/>, or null when they were pruned (or never kept).</summary>
+    /// The bytes stored under <paramref name="hash"/>, or null when they were pruned (or never kept).
     public byte[]? Get(string hash)
     {
         if (hash.Length < 3) return null;
         try
         {
-            return File.ReadAllBytes(BlobPath(hash));
+            return File.ReadAllBytes(ObjectPath(hash));
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
@@ -70,24 +78,31 @@ public sealed class CheckpointStore
         }
     }
 
-    public bool Has(string hash) => hash.Length > 2 && File.Exists(BlobPath(hash));
+    public bool Has(string hash) => hash.Length > 2 && File.Exists(ObjectPath(hash));
 
-    // MARK: Manifests
-
-    /// <summary>A file-system-safe name for an id (chat and turn ids are GUIDs; anything else is reduced to letters,
-    /// digits, '-' and '_').</summary>
-    private static string Safe(string id)
+    internal void Track(TurnRecorder recorder, bool live)
     {
-        var chars = id.Select(c => char.IsAsciiLetterOrDigit(c) || c is '-' or '_' ? c : '_').ToArray();
-        var safe = new string(chars);
-        return safe.Length == 0 ? "_" : safe.Length > 100 ? safe[..100] : safe;
+        lock (_lock)
+        {
+            if (live) _live.Add(recorder);
+            else _live.Remove(recorder);
+        }
     }
 
-    private string ManifestPath(string chatId, string turnId) => Path.Combine(Turns, Safe(chatId), Safe(turnId) + ".json");
+    // MARK: Records
+
+    /// A file name for an id (ids are GUIDs; anything else is reduced to letters, digits, '-', '_' and '.').
+    private static string Safe(string id)
+    {
+        var safe = new string(id.Select(c => char.IsAsciiLetterOrDigit(c) || c is '-' or '_' or '.' ? c : '_').ToArray());
+        return safe.Length == 0 || safe.StartsWith('.') ? "_" + safe : safe;
+    }
+
+    private string RecordPath(string chatId, string turnId) => Path.Combine(Turns, Safe(chatId), Safe(turnId) + ".json");
 
     public void Save(TurnCheckpoint turn)
     {
-        var path = ManifestPath(turn.ChatId, turn.Id);
+        var path = RecordPath(turn.ChatId, turn.Id);
         var json = JsonSerializer.Serialize(turn, Json);
         lock (_lock)
         {
@@ -98,7 +113,7 @@ public sealed class CheckpointStore
         }
     }
 
-    public TurnCheckpoint? Load(string chatId, string turnId) => Read(ManifestPath(chatId, turnId));
+    public TurnCheckpoint? Load(string chatId, string turnId) => Read(RecordPath(chatId, turnId));
 
     private static TurnCheckpoint? Read(string path)
     {
@@ -106,24 +121,24 @@ public sealed class CheckpointStore
         {
             return File.Exists(path) ? JsonSerializer.Deserialize<TurnCheckpoint>(File.ReadAllText(path), Json) : null;
         }
-        catch (Exception ex) when (ex is JsonException or IOException or UnauthorizedAccessException)
+        catch (Exception ex) when (ex is JsonException or IOException or UnauthorizedAccessException or FormatException)
         {
             return null;
         }
     }
 
-    /// <summary>A chat's checkpoints, newest first (only turns that changed something).</summary>
+    /// A chat's turns that changed files, newest first.
     public IReadOnlyList<TurnCheckpoint> List(string chatId)
     {
         var folder = Path.Combine(Turns, Safe(chatId));
         if (!Directory.Exists(folder)) return [];
         var output = new List<TurnCheckpoint>();
         foreach (var file in SafeFiles(folder, "*.json"))
-            if (Read(file) is { } turn) output.Add(turn);
-        return output.OrderByDescending(t => t.At).ToList();
+            if (Read(file) is { Changed.Count: > 0 } turn) output.Add(turn);
+        return output.OrderByDescending(t => t.StartedAt).ToList();
     }
 
-    /// <summary>Forget a chat's checkpoints (the chat was deleted). Blobs go at the next prune.</summary>
+    /// A deleted chat's records go with it (their contents go at the next prune).
     public void DeleteChat(string chatId)
     {
         var folder = Path.Combine(Turns, Safe(chatId));
@@ -135,18 +150,17 @@ public sealed class CheckpointStore
             }
             catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
             {
-                // The next prune tries again by age.
+                // The next prune takes it by age.
             }
         }
     }
 
     // MARK: Pruning
 
-    /// <summary>What a prune removed.</summary>
-    public sealed record PruneResult(int Manifests, int Blobs, long BytesFreed);
+    /// What a prune removed, and what the contents still kept take.
+    public sealed record PruneResult(int Records, int Objects, long BytesKept);
 
-    /// <summary>Drop manifests older than <paramref name="maxAge"/>, then the oldest while the blobs they name take more than
-    /// <paramref name="maxBytes"/>, then every blob no manifest names. <paramref name="now"/> is for tests.</summary>
+    /// See the top of the file. <paramref name="now"/> is for tests.
     public PruneResult Prune(TimeSpan? maxAge = null, long? maxBytes = null, DateTimeOffset? now = null)
     {
         var age = maxAge ?? DefaultMaxAge;
@@ -154,55 +168,54 @@ public sealed class CheckpointStore
         var at = now ?? DateTimeOffset.Now;
         lock (_lock)
         {
-            var manifests = new List<(string Path, TurnCheckpoint Turn)>();
-            if (Directory.Exists(Turns))
-                foreach (var file in SafeFiles(Turns, "*.json", recursive: true))
-                    if (Read(file) is { } turn) manifests.Add((file, turn));
-                    else TryDelete(file); // damaged: nothing can be rewound from it
+            var kept = new List<(string Path, TurnCheckpoint Turn)>();
             var removed = 0;
-            foreach (var old in manifests.Where(m => at - (m.Turn.FinishedAt ?? m.Turn.At) > age).ToList())
+            foreach (var file in Directory.Exists(Turns) ? SafeFiles(Turns, "*.json", recursive: true) : [])
             {
-                TryDelete(old.Path);
-                manifests.Remove(old);
-                removed++;
+                var turn = Read(file);
+                var old = turn is null || at - turn.UpdatedAt > age || (turn.Changed.Count == 0 && at - turn.UpdatedAt > Grace);
+                if (old && TryDelete(file)) removed++;
+                else if (!old) kept.Add((file, turn!));
             }
             var sizes = new Dictionary<string, long>(StringComparer.Ordinal);
-            foreach (var file in Directory.Exists(Blobs) ? SafeFiles(Blobs, "*", recursive: true) : [])
+            var recent = new HashSet<string>(StringComparer.Ordinal);
+            foreach (var file in Directory.Exists(Objects) ? SafeFiles(Objects, "*", recursive: true) : [])
             {
                 if (file.EndsWith(".tmp", StringComparison.Ordinal)) continue;
                 try
                 {
-                    sizes[Path.GetFileName(file)] = new FileInfo(file).Length;
+                    var info = new FileInfo(file);
+                    sizes[info.Name] = info.Length;
+                    if (at - new DateTimeOffset(info.LastWriteTimeUtc, TimeSpan.Zero) < Grace) recent.Add(info.Name);
                 }
                 catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
                 {
                     // Gone already.
                 }
             }
-            static IEnumerable<string> Named(TurnCheckpoint turn) =>
-                turn.Files.SelectMany(f => new[] { f.Before, f.After }).Concat(turn.RewoundFrom?.Values ?? Enumerable.Empty<string?>()).OfType<string>();
-            long Total() => manifests.SelectMany(m => Named(m.Turn)).Distinct(StringComparer.Ordinal).Sum(h => sizes.GetValueOrDefault(h));
-            var ordered = manifests.OrderBy(m => m.Turn.FinishedAt ?? m.Turn.At).ToList();
-            while (ordered.Count > 0 && Total() > cap)
+            var inMemory = _live.Select(r => r.Snapshot).ToList();
+            HashSet<string> Referenced(IEnumerable<TurnCheckpoint> turns) =>
+                turns.Concat(inMemory).SelectMany(t => t.Files).SelectMany(f => new[] { f.Before, f.After }).OfType<string>().ToHashSet(StringComparer.Ordinal);
+            // Newest first; the oldest go while over budget (the newest always stays).
+            kept = kept.OrderByDescending(k => k.Turn.UpdatedAt).ToList();
+            var live = Referenced(kept.Select(k => k.Turn));
+            long Total(HashSet<string> hashes) => hashes.Sum(h => sizes.GetValueOrDefault(h));
+            var total = Total(live);
+            while (total > cap && kept.Count > 1)
             {
-                TryDelete(ordered[0].Path);
-                manifests.Remove(ordered[0]);
-                ordered.RemoveAt(0);
-                removed++;
+                var oldest = kept[^1];
+                kept.RemoveAt(kept.Count - 1);
+                if (TryDelete(oldest.Path)) removed++;
+                live = Referenced(kept.Select(k => k.Turn));
+                total = Total(live);
             }
-            var named = manifests.SelectMany(m => Named(m.Turn)).ToHashSet(StringComparer.Ordinal);
-            var blobs = 0;
-            long freed = 0;
-            foreach (var (hash, size) in sizes)
+            var objects = 0;
+            foreach (var (hash, _) in sizes)
             {
-                if (named.Contains(hash) || hash.Length < 3) continue;
-                if (TryDelete(BlobPath(hash)))
-                {
-                    blobs++;
-                    freed += size;
-                }
+                if (live.Contains(hash) || recent.Contains(hash) || hash.Length < 3) continue;
+                if (TryDelete(ObjectPath(hash))) objects++;
             }
-            return new PruneResult(removed, blobs, freed);
+            return new PruneResult(removed, objects, total);
         }
     }
 
