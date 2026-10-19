@@ -222,8 +222,11 @@ public sealed partial class SelfTest
             // What the composer says it will send for a PDF, a Markdown file, a Word file, a scan and a large paste.
             await CaptureAttachments(window, model);
 
-            // Last, since it leaves a chat holding 10,000 lines: a very large paste, measured.
+            // Near the end, since it leaves a chat holding 10,000 lines: a very large paste, measured.
             await ProbeLargePaste(window, model);
+
+            // Then a chat of 2,000 messages with a 10,214-line one, opened and measured.
+            await ProbeLongChat(window, model);
         }
         catch (Exception error)
         {
