@@ -10,6 +10,7 @@ using Vision.App.Model;
 using Vision.App.Views;
 using Vision.App.Views.Chat;
 using Vision.Core;
+using MessageRole = Vision.App.Model.MessageRole;
 
 namespace Vision.App;
 
@@ -63,29 +64,125 @@ public sealed partial class SelfTest
             await Settle(400);
             Capture(window, "long-chat");
 
-            // To the top: through every row (old) or to the first loaded one (windowed).
+            // To the top, as the reader would drag the scrollbar there: through every row (old) or to the first loaded one
+            // (windowed: "Load earlier messages" is there, and arriving at the top brings the page before).
+            var pager = view.SelfTestPagingWindow ?? throw new InvalidOperationException("no transcript window");
+            Note($"probe paging: the window holds {pager.Items.Count:N0} of {chat.Entries.Count:N0} rows ({pager.Earlier:N0} earlier, " +
+                 $"{pager.Later:N0} newer, {(pager.IsLive ? "live" : "NOT LIVE")}); pinned {view.SelfTestPagingPinned}");
             watch.Restart();
-            scroller.ScrollToTop();
+            view.SelfTestPagingAsReader(scroller.ScrollToTop);
             window.UpdateLayout();
             var topMs = watch.ElapsedMilliseconds;
-            await Dispatcher.Yield(DispatcherPriority.ApplicationIdle);
-            Note($"probe long chat: scrolled to the top in {topMs:N0} ms (idle at {watch.ElapsedMilliseconds:N0} ms); {LongChatShape(view, scroller)}");
-            await Settle(400);
+            Note($"probe long chat: scrolled to the top in {topMs:N0} ms; {LongChatShape(view, scroller)}");
             Capture(window, "long-chat-top");
-
-            // The wheel over the very long message, and the scrollbar's worth: how far one notch goes and how many it takes.
-            watch.Restart();
-            scroller.ScrollToEnd();
-            window.UpdateLayout();
+            var earlier = pager.Earlier;
             await Dispatcher.Yield(DispatcherPriority.ApplicationIdle);
-            Note($"probe long chat: back to the bottom in {watch.ElapsedMilliseconds:N0} ms; {LongChatShape(view, scroller)}");
-            var start = scroller.VerticalOffset;
-            var target = scroller.InputHitTest(new Point(scroller.ActualWidth / 2, scroller.ActualHeight / 3)) as UIElement;
-            await LongChatWheel(target, 10, 120);
-            scroller.UpdateLayout();
-            var moved = start - scroller.VerticalOffset;
-            Note($"probe long chat: 10 wheel notches up moved the transcript {moved:F0} px; " +
-                 $"top to bottom is {scroller.ExtentHeight / Math.Max(1, scroller.ViewportHeight):N0} screens");
+            await Settle(300);
+            Note($"probe paging: arriving at the top loaded {earlier - pager.Earlier:N0} earlier rows ({pager.Earlier:N0} left) and held the " +
+                 $"reader's place — {LongChatShape(view, scroller)}");
+            if (pager.Earlier >= earlier) throw new InvalidOperationException("scrolling to the top didn't load the page before");
+
+            // "Load earlier messages" pressed: how long it takes, and how far the row being read moves (it shouldn't).
+            for (var i = 0; i < 3; i++)
+            {
+                var anchor = view.SelfTestPagingAnchor() ?? throw new InvalidOperationException("no row in view");
+                watch.Restart();
+                var count = view.LoadEarlier();
+                var loadMs = watch.ElapsedMilliseconds;
+                window.UpdateLayout();
+                var container = view.SelfTestPagingContainer(anchor.Row);
+                var top = container?.TranslatePoint(new Point(0, 0), scroller).Y ?? double.NaN;
+                Note($"probe paging: Load earlier #{i + 1} brought {count} rows in {loadMs:N0} ms; the row being read moved {top - anchor.Top:+0.0;-0.0;0} px; " +
+                     $"window {pager.Start:N0}–{pager.End:N0} ({pager.Items.Count} rows, {(pager.IsLive ? "live" : $"{pager.Later:N0} newer")})");
+                if (double.IsNaN(top) || Math.Abs(top - anchor.Top) > 2) throw new InvalidOperationException($"the row being read moved {top - anchor.Top} px");
+            }
+
+            // Jump to an old prompt (what the Prompts timeline and search do): the window moves to it, it is in view and flashes.
+            var prompts = chat.Entries.OfType<MessageEntryVM>().Where(m => m.IsUser).ToList();
+            var target = prompts[150];
+            var targetIndex = chat.Entries.IndexOf(target);
+            watch.Restart();
+            var jumped = view.ShowEntry(target.Id);
+            var jumpMs = watch.ElapsedMilliseconds;
+            window.UpdateLayout();
+            var shown = view.SelfTestPagingContainer(target);
+            var shownTop = shown?.TranslatePoint(new Point(0, 0), scroller).Y ?? double.NaN;
+            Note($"probe paging: jump to prompt 151 (row {targetIndex:N0}) {(jumped ? "done" : "FAILED")} in {jumpMs:N0} ms — window {pager.Start:N0}–{pager.End:N0} " +
+                 $"({pager.Earlier:N0} earlier, {pager.Later:N0} newer); its top is {shownTop:F0} px into a {scroller.ViewportHeight:F0} px viewport");
+            if (!jumped || double.IsNaN(shownTop) || shownTop < -1 || shownTop > scroller.ViewportHeight - 20) throw new InvalidOperationException("the jumped-to prompt isn't in view");
+            await Settle(350);
+            Capture(window, "long-chat-jump");
+
+            // Back to the newest page, then a reply streamed in: the transcript follows it to the end.
+            view.JumpToLatest();
+            await Settle(400);
+            var reply = new StringBuilder();
+            var followed = 0;
+            for (var i = 0; i < 40; i++)
+            {
+                var chunk = i % 8 == 7 ? $"line {i}\n\n" : $"word{i} ";
+                reply.Append(chunk);
+                chat.AppendDelta(chunk);
+                await Dispatcher.Yield(DispatcherPriority.ApplicationIdle);
+                if (scroller.VerticalOffset >= scroller.ScrollableHeight - 2) followed++;
+            }
+            chat.EndStreaming();
+            Note($"probe paging: back to the latest ({(pager.IsLive ? "live" : "NOT LIVE")}, pinned {view.SelfTestPagingPinned}); a streamed reply of 40 chunks " +
+                 $"was followed to the end after {followed} of them; window {pager.Items.Count} rows");
+            if (followed < 38) throw new InvalidOperationException("the streamed reply wasn't followed");
+
+            // A long session followed at its bottom: the window lets go of its oldest rows.
+            for (var i = 0; i < 400; i++) chat.AppendMessage(i % 2 == 0 ? MessageRole.User : MessageRole.Assistant, $"follow-up {i}");
+            await Settle(300);
+            Note($"probe paging: 400 more rows while following the end — the window holds {pager.Items.Count} ({pager.Earlier:N0} earlier); " +
+                 $"at the end: {scroller.VerticalOffset >= scroller.ScrollableHeight - 2}");
+            if (pager.Items.Count > pager.MaxRows + pager.PageSize) throw new InvalidOperationException("the live window kept growing");
+
+            // The very long prompt: collapsed, Copy gives it back whole, Show more opens it in its own box, Show less closes it.
+            var longRow = chat.Entries.OfType<MessageEntryVM>().First(m => ReferenceEquals(m.Text, longText) || m.Text.Length == longText.Length);
+            view.ShowEntry(longRow.Id);
+            await Settle(300);
+            var row = view.SelfTestPagingContainer(longRow) ?? throw new InvalidOperationException("the long prompt's row isn't laid out");
+            var body = LongChatFind<MessageBody>(row) ?? throw new InvalidOperationException("no message body");
+            Note($"probe paging: the {LongChatLongLines:N0}-line prompt's row is {row.ActualHeight:F0} px tall, collapsed {body.IsCollapsed}, “{body.ToggleLabel}”");
+            if (!body.IsCollapsed || row.ActualHeight > 1500) throw new InvalidOperationException("the long prompt isn't collapsed");
+            await CheckCopy(window, view, body, longRow, longText);
+
+            watch.Restart();
+            body.Toggle();
+            window.UpdateLayout();
+            var openMs = watch.ElapsedMilliseconds;
+            var box = body.Shown;
+            var boxLines = box is null ? 0 : LongChatFind<VirtualizingStackPanel>(box)?.Children.Count ?? 0;
+            Note($"probe paging: Show more in {openMs:N0} ms — {(body.InBox ? "in its own box" : "INLINE")} {box?.ActualHeight:F0} px tall with {boxLines} of " +
+                 $"{LongChatLongLines:N0} lines laid out; the row is {row.ActualHeight:F0} px; “{body.ToggleLabel}”");
+            if (!body.InBox || row.ActualHeight > MessageBody.BoxHeight + 300) throw new InvalidOperationException("Show more didn't open the box");
+            var lag2 = await LongChatLag(window, 1000);
+            Note($"probe paging: with it open, {lag2}");
+            await Settle(300);
+            Capture(window, "long-chat-show-more");
+
+            // The wheel over the open box scrolls the box; at its end it hands the wheel to the transcript.
+            var inner = box is null ? null : LongChatFind<ScrollViewer>(box);
+            if (inner is not null)
+            {
+                var innerStart = inner.VerticalOffset;
+                var outerStart = scroller.VerticalOffset;
+                var under = box!.InputHitTest(new Point(box.ActualWidth / 2, box.ActualHeight / 2)) as UIElement ?? box;
+                await LongChatWheel(under, 5, -120);
+                inner.UpdateLayout();
+                Note($"probe paging: 5 notches down over the box moved the box {inner.VerticalOffset - innerStart:F0} px and the transcript {scroller.VerticalOffset - outerStart:F0} px");
+                inner.ScrollToEnd();
+                inner.UpdateLayout();
+                outerStart = scroller.VerticalOffset;
+                under = box.InputHitTest(new Point(box.ActualWidth / 2, box.ActualHeight / 2)) as UIElement ?? box;
+                await LongChatWheel(under, 3, -120);
+                scroller.UpdateLayout();
+                Note($"probe paging: at the box's end, 3 more notches moved the transcript {scroller.VerticalOffset - outerStart:F0} px");
+            }
+            body.Toggle();
+            window.UpdateLayout();
+            Note($"probe paging: Show less — the row is {row.ActualHeight:F0} px again, “{body.ToggleLabel}”");
 
             // Closed again (the rows stay loaded in the chat): what the open view itself was holding.
             model.Select(previous);
@@ -98,6 +195,62 @@ public sealed partial class SelfTest
         {
             Fail("probe-long-chat", error);
         }
+    }
+
+    /// <summary>Copy on the very long prompt (its Copy button, then Ctrl+C in it with nothing selected) gives back exactly what
+    /// was sent, and the row says "Copied".</summary>
+    private async Task CheckCopy(MainWindow window, ChatView view, MessageBody body, MessageEntryVM prompt, string sent)
+    {
+        var button = CopyButton.InRow(body) ?? throw new InvalidOperationException("the prompt has no Copy button");
+        try { Clipboard.Clear(); } catch (System.Runtime.InteropServices.ExternalException) { }
+        // A click, as UI Automation (and so a screen reader) makes one.
+        (new System.Windows.Automation.Peers.ButtonAutomationPeer(button).GetPattern(System.Windows.Automation.Peers.PatternInterface.Invoke)
+            as System.Windows.Automation.Provider.IInvokeProvider)?.Invoke();
+        await Settle(150);
+        var copied = LongChatClipboard();
+        Note($"probe copy: Copy on the {LongChatLongLines:N0}-line prompt put {copied?.Length ?? 0:N0} characters on the clipboard — " +
+             $"{(copied == sent ? "exactly the prompt as sent" : copied is null ? "CLIPBOARD UNREADABLE" : "NOT THE PROMPT")}; the button says “{(button.IsCopied ? "Copied" : "Copy")}”");
+        if (copied is not null && copied != sent) throw new InvalidOperationException("Copy didn't give back the prompt");
+        Capture(window, "long-chat-copied");
+
+        // Ctrl+C in a short reply with nothing selected copies the whole reply.
+        var replyRow = view.SelfTestPagingWindow?.Items.OfType<MessageEntryVM>().LastOrDefault(m => m.IsAssistant && m.Text.Length > 20);
+        if (replyRow is not null && view.SelfTestPagingContainer(replyRow) is { } replyContainer && LongChatFind<MessageBody>(replyContainer) is { } replyBody
+            && replyBody.Shown is Control text)
+        {
+            try { Clipboard.Clear(); } catch (System.Runtime.InteropServices.ExternalException) { }
+            text.Focus();
+            // Ctrl+C with nothing selected (the self-test can't hold the real Ctrl key, so it hands the key and modifier over).
+            var handled = replyBody.CopyKey(Key.C, ModifierKeys.Control);
+            await Settle(150);
+            var reply = LongChatClipboard();
+            Note($"probe copy: Ctrl+C in a reply with nothing selected {(handled ? "copied" : "DID NOT COPY")} " +
+                 $"{(reply == replyRow.Text ? "exactly the reply" : reply is null ? "nothing readable" : "SOMETHING ELSE")} ({reply?.Length ?? 0:N0} characters); " +
+                 $"a /goal prompt copies as “{TranscriptCopy.Prompt("🎯 /goal ship the release")}”");
+            if (!handled || (reply is not null && reply != replyRow.Text)) throw new InvalidOperationException("Ctrl+C didn't copy the reply");
+        }
+    }
+
+    private static string? LongChatClipboard()
+    {
+        for (var i = 0; i < 5; i++)
+        {
+            try { return Clipboard.ContainsText() ? Clipboard.GetText() : null; }
+            catch (System.Runtime.InteropServices.ExternalException) { Thread.Sleep(50); }
+        }
+        return null;
+    }
+
+    private static T? LongChatFind<T>(DependencyObject root) where T : DependencyObject
+    {
+        var count = VisualTreeHelper.GetChildrenCount(root);
+        for (var i = 0; i < count; i++)
+        {
+            var child = VisualTreeHelper.GetChild(root, i);
+            if (child is T found) return found;
+            if (LongChatFind<T>(child) is { } deeper) return deeper;
+        }
+        return null;
     }
 
     /// <summary>The probe chat's stored rows: <see cref="LongChatMessages"/> prompts and replies with a tool card every
