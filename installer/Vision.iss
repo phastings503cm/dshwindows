@@ -8,9 +8,10 @@
 ; User data (%APPDATA%\Vision: settings, conversations, skills) is never touched by install or uninstall.
 ;
 ; Upgrading an install made under the app's former name (DSH, up to 0.8): the AppId is the same, so this
-; setup upgrades it rather than adding a second app. The new version goes into its own Vision folder; once
-; it is installed, [Code] below removes the old DSH folder, its shortcuts and its "Open with DSH" entries.
-; The user's data is brought over by the app itself on its first start (see DataFolderMigration).
+; setup upgrades it rather than adding a second app. An install in a folder named DSH moves to a folder named
+; Vision beside it, and once the new version is installed, [Code] below removes the old DSH folder; an install
+; in a folder the user named otherwise is upgraded where it is. Either way its shortcuts and "Open with DSH"
+; entries go. The user's data is brought over by the app itself on its first start (see DataFolderMigration).
 
 #if VER < EncodeVer(6,3,0)
   #error Inno Setup 6.3 or later is required (x64compatible architecture identifiers).
@@ -48,10 +49,9 @@ AppComments=A native coding agent for OpenAI-compatible model servers.
 VersionInfoVersion={#AppVersion}
 VersionInfoProductName={#AppName}
 ; {autopf} is %LOCALAPPDATA%\Programs for a per-user install and Program Files for an all-users one.
-; UsePreviousAppDir=no: an upgrade of an install made under the former name moves from its DSH folder to
-; this one instead of staying there (an upgrade of a Vision install lands in the same folder anyway).
+; An upgrade goes into the previous install's folder (UsePreviousAppDir, left at its default of yes), wherever
+; the user put it; only an install made under the former name in a folder named DSH is moved (InitializeWizard).
 DefaultDirName={autopf}\Vision
-UsePreviousAppDir=no
 DefaultGroupName={#AppName}
 DisableProgramGroupPage=yes
 DisableDirPage=auto
@@ -226,8 +226,38 @@ begin
   Result := True;
 end;
 
+// Legacy: where an upgrade of an install made under the former name goes. One in a folder named DSH (the old
+// default, {autopf}\DSH, or a DSH folder the user chose elsewhere) moves to a folder named Vision beside it, and
+// the DSH folder is removed after; one in a folder the user named otherwise stays there ([InstallDelete] removes
+// the old program files). '' when the previous install isn't one made under the former name.
+function LegacyUpgradeDir(): String;
+var
+  Dir: String;
+begin
+  Result := '';
+  Dir := PreviousInstallDir();
+  if HoldsLegacyApp(Dir) and (CompareText(ExtractFileName(Dir), LegacyFolderName) = 0) then
+    Result := AddBackslash(ExtractFileDir(Dir)) + '{#AppName}';
+end;
+
+// The folder starts as the previous install's (UsePreviousAppDir) or one given with /DIR=; only the former name's
+// DSH folder, when it came from the previous install, is swapped for the Vision folder beside it. The folder page
+// is skipped on an upgrade (DisableDirPage=auto), and a silent install reads this value too.
+procedure InitializeWizard;
+var
+  Dir: String;
+begin
+  Dir := LegacyUpgradeDir();
+  if (Dir <> '') and (ExpandConstant('{param:DIR|}') = '') and
+     (CompareText(RemoveBackslashUnlessRoot(WizardForm.DirEdit.Text), PreviousInstallDir()) = 0) then
+  begin
+    Log('Upgrading an install made under the former name: moving it from ' + PreviousInstallDir() + ' to ' + Dir);
+    WizardForm.DirEdit.Text := Dir;
+  end;
+end;
+
 // Lets "Preparing to install" close the old app (Restart Manager) like it closes a running Vision.exe. Called
-// before the install starts, so this is also where the previous install's folder is first read.
+// before the install starts, while the previous install's Settings > Apps entry is still the one it wrote.
 procedure RegisterExtraCloseApplicationsResources;
 var
   Dir: String;

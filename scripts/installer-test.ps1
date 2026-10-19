@@ -19,7 +19,10 @@
          the data must be in %APPDATA%\Vision (paths inside it rewritten), DSH's folder gone, the
          key under Vision's name with the same value and DSH's entry gone, and Vision must read
          back every chat, task and vault value; a second run must change nothing;
-      4. uninstalling must leave the user's data (now in %APPDATA%\Vision) alone.
+      4. uninstalling must leave the user's data (now in %APPDATA%\Vision) alone;
+      5. the former version installed in a folder of the user's own is upgraded there, and one installed in a
+         folder named DSH elsewhere moves to a Vision folder beside it.
+    Every run also checks that an upgrade of an install in a folder of the user's own stays there.
     The upgrade run refuses to start if %APPDATA%\DSH or %APPDATA%\Vision already exists, so it never
     touches a real user's data. Without -LegacyInstaller, only the old folder menu entries are seeded.
 
@@ -62,11 +65,27 @@ function Wait-Until([scriptblock] $Condition, [int] $Seconds, [string] $What) {
     }
 }
 
-function Invoke-Setup([string] $Path, [string] $Tasks, [string] $Log) {
-    $process = Start-Process -FilePath $Path -PassThru -Wait -ArgumentList @(
-        '/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', '/CURRENTUSER', "/TASKS=$Tasks", "/LOG=`"$Log`"")
+function Invoke-Setup([string] $Path, [string] $Tasks, [string] $Log, [string] $Dir = '') {
+    $arguments = @('/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', '/CURRENTUSER', "/TASKS=$Tasks", "/LOG=`"$Log`"")
+    if ($Dir) { $arguments += "/DIR=`"$Dir`"" }
+    $process = Start-Process -FilePath $Path -PassThru -Wait -ArgumentList $arguments
     if ($process.ExitCode -ne 0) { throw "$Path exited with code $($process.ExitCode) (see $Log)." }
 }
+
+# Runs the uninstaller in $Dir and waits until it has removed the app and its Settings > Apps entry.
+function Invoke-Uninstall([string] $Dir, [string] $Log) {
+    $uninstaller = Join-Path $Dir 'unins000.exe'
+    if (-not (Test-Path $uninstaller)) { throw "The uninstaller is missing ($uninstaller)." }
+    $process = Start-Process -FilePath $uninstaller -PassThru -Wait -ArgumentList @(
+        '/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', "/LOG=`"$Log`"")
+    if ($process.ExitCode -ne 0) { throw "The uninstaller exited with code $($process.ExitCode)." }
+    # The uninstaller hands off to a copy of itself in %TEMP%, so wait for the files to go.
+    Wait-Until { -not (Test-Path (Join-Path $Dir 'Vision.exe')) } 120 "Vision.exe to be removed from $Dir"
+    Wait-Until { -not (Test-Path $uninstallKey) } 60 'the uninstall entry to be removed'
+}
+
+# The folder Settings > Apps records for the install (Inno Setup's own note of it, which the next setup reuses).
+function Get-RecordedDir { return (Get-ItemProperty $uninstallKey).'Inno Setup: App Path'.TrimEnd('\') }
 
 # Runs a GUI exe with arguments and returns its exit code (Start-Process -Wait would also wait for its children).
 function Invoke-App([string] $Path, [string[]] $Arguments, [int] $Seconds, [string] $What) {
@@ -397,14 +416,7 @@ Write-Host 'Launching the installed app (UI self-test, light theme)'
 if ($LASTEXITCODE -and $LASTEXITCODE -ne 0) { throw 'The installed app failed its self-test.' }
 
 Write-Host 'Uninstalling'
-$uninstaller = Join-Path $installDir 'unins000.exe'
-if (-not (Test-Path $uninstaller)) { throw "The uninstaller is missing ($uninstaller)." }
-$process = Start-Process -FilePath $uninstaller -PassThru -Wait -ArgumentList @(
-    '/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', "/LOG=`"$(Join-Path $Output 'uninstall.log')`"")
-if ($process.ExitCode -ne 0) { throw "The uninstaller exited with code $($process.ExitCode)." }
-# The uninstaller hands off to a copy of itself in %TEMP%, so wait for the files to go.
-Wait-Until { -not (Test-Path $exe) } 120 'Vision.exe to be removed'
-Wait-Until { -not (Test-Path $uninstallKey) } 60 'the uninstall entry to be removed'
+Invoke-Uninstall $installDir (Join-Path $Output 'uninstall.log')
 foreach ($key in $menuKeys) {
     if (Test-Path $key) { throw "Uninstall left the folder menu entry $key behind." }
 }
@@ -419,5 +431,54 @@ if ($upgrade) {
 } else {
     Remove-Item -Force $canary
     if ($madeLegacyData) { Remove-Item -Force -Recurse $legacyData }
+}
+
+# Upgrades of installs in folders the user chose: an upgrade stays in the user's folder (Vision.iss keeps
+# UsePreviousAppDir); only an install made under the former name in a folder named DSH moves to a Vision folder
+# beside it. Each case installs, upgrades with no /DIR (as a user running a newer setup does), then uninstalls.
+$customRoot = Join-Path $env:LOCALAPPDATA 'Vision installer test'
+if (Test-Path $customRoot) { throw "$customRoot already exists." }
+try {
+    Write-Host 'Upgrading an install in a folder of the user''s own'
+    $customDir = Join-Path $customRoot 'My tools'
+    Invoke-Setup $installerPath '' (Join-Path $Output 'custom-install.log') $customDir
+    if (-not (Test-Path (Join-Path $customDir 'Vision.exe'))) { throw "/DIR= did not install Vision.exe to $customDir." }
+    Invoke-Setup $installerPath '' (Join-Path $Output 'custom-upgrade.log')
+    if (-not (Test-Path (Join-Path $customDir 'Vision.exe'))) { throw "The upgrade left $customDir without Vision.exe." }
+    if (Test-Path (Join-Path $installDir 'Vision.exe')) { throw "The upgrade of an install in $customDir went to $installDir instead." }
+    if ((Get-RecordedDir) -ne $customDir) { throw "Settings > Apps records $(Get-RecordedDir), expected $customDir." }
+    Write-Host "  The upgrade stayed in $customDir"
+    Invoke-Uninstall $customDir (Join-Path $Output 'custom-uninstall.log')
+
+    if ($upgrade) {
+        # Legacy: the former name's install in a folder the user named otherwise is upgraded where it is.
+        Write-Host 'Upgrading an install made under the former name in a folder of the user''s own'
+        $ownDir = Join-Path $customRoot 'Agent'
+        Invoke-Setup $legacyPath '' (Join-Path $Output 'legacy-own-install.log') $ownDir
+        if (-not (Test-Path (Join-Path $ownDir 'DSH.exe'))) { throw "/DIR= did not install the former version to $ownDir." }
+        Invoke-Setup $installerPath '' (Join-Path $Output 'legacy-own-upgrade.log')
+        if (-not (Test-Path (Join-Path $ownDir 'Vision.exe'))) { throw "The upgrade left $ownDir without Vision.exe." }
+        if (Test-Path (Join-Path $ownDir 'DSH.exe')) { throw "The upgrade left the former version's DSH.exe in $ownDir." }
+        if (Test-Path (Join-Path $installDir 'Vision.exe')) { throw "The upgrade of an install in $ownDir went to $installDir instead." }
+        if ((Get-RecordedDir) -ne $ownDir) { throw "Settings > Apps records $(Get-RecordedDir), expected $ownDir." }
+        Write-Host "  The upgrade stayed in $ownDir, without the former version's program"
+        Invoke-Uninstall $ownDir (Join-Path $Output 'legacy-own-uninstall.log')
+
+        # Legacy: the former name's install in a folder named DSH somewhere else moves to a Vision folder beside it.
+        Write-Host 'Upgrading an install made under the former name in a DSH folder of the user''s choosing'
+        $namedDir = Join-Path $customRoot 'DSH'
+        $besideDir = Join-Path $customRoot 'Vision'
+        Invoke-Setup $legacyPath '' (Join-Path $Output 'legacy-named-install.log') $namedDir
+        if (-not (Test-Path (Join-Path $namedDir 'DSH.exe'))) { throw "/DIR= did not install the former version to $namedDir." }
+        Invoke-Setup $installerPath '' (Join-Path $Output 'legacy-named-upgrade.log')
+        if (-not (Test-Path (Join-Path $besideDir 'Vision.exe'))) { throw "The upgrade didn't install Vision.exe to $besideDir." }
+        if (Test-Path $namedDir) { throw "The upgrade left the former version's folder $namedDir behind." }
+        if (Test-Path (Join-Path $installDir 'Vision.exe')) { throw "The upgrade of an install in $namedDir went to $installDir instead." }
+        if ((Get-RecordedDir) -ne $besideDir) { throw "Settings > Apps records $(Get-RecordedDir), expected $besideDir." }
+        Write-Host "  The upgrade moved to $besideDir and removed $namedDir"
+        Invoke-Uninstall $besideDir (Join-Path $Output 'legacy-named-uninstall.log')
+    }
+} finally {
+    Remove-Item -Recurse -Force $customRoot -ErrorAction SilentlyContinue
 }
 Write-Host 'Installer test passed.'
