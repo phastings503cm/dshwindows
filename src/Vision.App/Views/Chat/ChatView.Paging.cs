@@ -37,6 +37,9 @@ public partial class ChatView
     private void InitPaging()
     {
         Transcript.PreviewMouseWheel += OnTranscriptWheel;
+        // Show more / Show less on a long message: the reader is reading it, so the transcript stops following its end.
+        Transcript.AddHandler(MessageBody.ToggledEvent, new RoutedEventHandler((_, _) => _pinned = false));
+        InitCopy();
     }
 
     /// <summary>What the transcript shows for <paramref name="session"/>: the pager rows around its window, then the footers.</summary>
