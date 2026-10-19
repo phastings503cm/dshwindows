@@ -19,6 +19,7 @@ namespace Vision.Core;
 //   prompt notebook    POST/GET /api/harness/prompts
 //   skills             POST/GET /api/harness/skills
 //   chats              POST/GET /api/harness/chats/:id · GET /api/harness/chats
+//   Guardian's chats   GET /api/chats · GET /api/chats/:id?messages=latest · GET /api/chats/:id/messages?before= (import)
 //   code projects      POST/GET /api/harness/projects (chunked for big ones)
 //   vault (opt-in)     GET /api/harness/vault · POST /api/harness/vault/:id/reveal
 // An org is picked with x-guardian-org (the person's default otherwise). Every refusal comes back as a GuardianError
@@ -295,6 +296,45 @@ public sealed class GuardianClient
             .ToList();
     }
 
+    // MARK: Chats in Guardian (to import)
+
+    /// <summary>The person's chats in Guardian (GET /api/chats: their own and those shared with them, newest first, at most
+    /// 300 — Guardian's cap).</summary>
+    public async Task<IReadOnlyList<GuardianWebChat>> WebChatsAsync(CancellationToken cancellationToken = default)
+    {
+        var node = await GetNodeAsync("/api/chats", cancellationToken).ConfigureAwait(false);
+        var array = node as JsonArray ?? node?["chats"] as JsonArray ?? [];
+        return array.OfType<JsonObject>()
+            .Select(c => GuardianJson.Text(c["id"]) is { Length: > 0 } id
+                ? new GuardianWebChat(id, GuardianJson.Text(c["title"]) is { Length: > 0 } title ? title : "Untitled chat", GuardianJson.Date(c["createdAt"]),
+                    GuardianJson.Date(c["updatedAt"]) ?? GuardianJson.Date(c["createdAt"]) ?? DateTimeOffset.MinValue, GuardianJson.Text(c["modelId"]),
+                    GuardianJson.Bool(c["sharedWithMe"]) == true,
+                    GuardianJson.Text(c["owner"]?["name"]) ?? GuardianJson.Text(c["owner"]?["email"]))
+                : null)
+            .OfType<GuardianWebChat>()
+            .OrderByDescending(c => c.UpdatedAt)
+            .ToList();
+    }
+
+    /// <summary>A page of a Guardian chat's transcript: the newest <paramref name="limit"/> messages
+    /// (GET /api/chats/:id?messages=latest&amp;limit=N), or those older than <paramref name="before"/>
+    /// (GET /api/chats/:id/messages?before=…&amp;limit=N). A Guardian without paging answers the whole transcript, read as one
+    /// page with nothing older.</summary>
+    public async Task<GuardianChatPage> WebChatPageAsync(string id, string? before = null, int limit = 200, CancellationToken cancellationToken = default)
+    {
+        var chat = Uri.EscapeDataString(id);
+        var path = before is null
+            ? $"/api/chats/{chat}?messages=latest&limit={limit}"
+            : $"/api/chats/{chat}/messages?before={Uri.EscapeDataString(before)}&limit={limit}";
+        var json = await GetObjectAsync(path, cancellationToken).ConfigureAwait(false);
+        var messages = (json["messages"] as JsonArray ?? []).OfType<JsonObject>().ToList();
+        // GET /chats/:id carries the paging under "paging"; a /messages page has the same fields at the top.
+        var paging = json["paging"] as JsonObject ?? (before is null ? null : json);
+        var older = GuardianJson.Number(paging?["olderCount"]);
+        return new GuardianChatPage(messages, GuardianJson.Bool(paging?["hasMore"]) == true, GuardianJson.Text(paging?["before"]),
+            older is null ? null : (int)older.Value);
+    }
+
     // MARK: Code projects
 
     /// <summary>Upload a project's text files. A manifest over <see cref="ProjectChunkBytes"/> goes in ordered chunks
@@ -378,6 +418,14 @@ public sealed class GuardianClient
     private Task<JsonObject> GetObjectAsync(string path, CancellationToken cancellationToken) =>
         SendObjectAsync(HttpMethod.Get, path, null, cancellationToken);
 
+    /// <summary>A GET whose answer may be an array (GET /api/chats).</summary>
+    private async Task<JsonNode?> GetNodeAsync(string path, CancellationToken cancellationToken)
+    {
+        if (Session is null) throw new GuardianError(GuardianErrorKind.Unauthorized, "Sign in to Guardian first (Settings › Guardian).");
+        using var request = Request(HttpMethod.Get, path);
+        return await SendNodeAsync(request, cancellationToken).ConfigureAwait(false);
+    }
+
     private async Task<JsonObject> SendObjectAsync(HttpMethod method, string path, JsonObject? body, CancellationToken cancellationToken)
     {
         if (Session is null) throw new GuardianError(GuardianErrorKind.Unauthorized, "Sign in to Guardian first (Settings › Guardian).");
@@ -407,6 +455,17 @@ public sealed class GuardianClient
 
     private async Task<JsonObject> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
     {
+        var node = await SendNodeAsync(request, cancellationToken).ConfigureAwait(false);
+        return node switch
+        {
+            null => [],
+            JsonObject json => json,
+            _ => throw new GuardianError(GuardianErrorKind.Server, "Guardian answered with something that isn't an object."),
+        };
+    }
+
+    private async Task<JsonNode?> SendNodeAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+    {
         HttpResponseMessage response;
         try
         {
@@ -424,10 +483,10 @@ public sealed class GuardianClient
         {
             var text = await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
             if (!response.IsSuccessStatusCode) throw GuardianError.FromResponse((int)response.StatusCode, text, response.Headers);
-            if (text.Length == 0 || response.StatusCode == HttpStatusCode.NoContent) return [];
+            if (text.Length == 0 || response.StatusCode == HttpStatusCode.NoContent) return null;
             try
             {
-                return JsonNode.Parse(text) as JsonObject
+                return JsonNode.Parse(text)
                        ?? throw new GuardianError(GuardianErrorKind.Server, "Guardian answered with something that isn't an object.") { Status = (int)response.StatusCode };
             }
             catch (JsonException)

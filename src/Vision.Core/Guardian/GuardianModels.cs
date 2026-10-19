@@ -203,6 +203,13 @@ public sealed record GuardianSkill(string Name, string Description, IReadOnlyDic
 /// <summary>A chat Guardian holds for the account.</summary>
 public sealed record GuardianChatSummary(string Id, string Title, DateTimeOffset UpdatedAt);
 
+/// <summary>One of the person's chats in Guardian itself (GET /api/chats): their own, or one shared with them.</summary>
+public sealed record GuardianWebChat(string Id, string Title, DateTimeOffset? CreatedAt, DateTimeOffset UpdatedAt, string? ModelId,
+                                     bool SharedWithMe = false, string? OwnerName = null);
+
+/// <summary>One page of a Guardian chat's transcript, oldest message first; <see cref="Before"/> asks for the page older than it.</summary>
+public sealed record GuardianChatPage(IReadOnlyList<JsonObject> Messages, bool HasMore, string? Before, int? OlderCount);
+
 /// <summary>A code project uploaded to the account's private store.</summary>
 public sealed record GuardianProjectSummary(string Id, string Name, DateTimeOffset? UpdatedAt, int? FileCount);
 
