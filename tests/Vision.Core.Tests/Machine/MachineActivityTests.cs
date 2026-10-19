@@ -29,6 +29,36 @@ public sealed class MachineActivityTests
     }
 
     [Fact]
+    public async Task AControlToolWaitsForTheGlowButNotForLong()
+    {
+        var activity = new MachineActivity(_clock);
+        // No glow at all (tests, no app): nothing to wait for.
+        await activity.WhenGlowShownAsync(TimeSpan.FromSeconds(30));
+        // The glow comes up a moment later: the wait ends then, not at the timeout.
+        var shown = new TaskCompletionSource();
+        activity.GlowShown = () => shown.Task;
+        var waiting = activity.WhenGlowShownAsync(TimeSpan.FromSeconds(30));
+        await Task.Delay(50);
+        Assert.False(waiting.IsCompleted);
+        shown.SetResult();
+        await waiting.WaitAsync(TimeSpan.FromSeconds(5));
+        // Already up: no wait. A UI thread too busy to show it: the input goes ahead after the timeout.
+        await activity.WhenGlowShownAsync(TimeSpan.FromSeconds(30)).WaitAsync(TimeSpan.FromSeconds(1));
+        activity.GlowShown = () => new TaskCompletionSource().Task;
+        var watch = System.Diagnostics.Stopwatch.StartNew();
+        await activity.WhenGlowShownAsync(TimeSpan.FromMilliseconds(150));
+        Assert.InRange(watch.ElapsedMilliseconds, 100, 5_000);
+    }
+
+    [Fact]
+    public void TheStopKeyHintWhenAnotherAppHoldsItStopsEveryChat()
+    {
+        // Ctrl+. in Vision stops only the selected chat; Ctrl+Shift+. stops all of them (MainWindow's bindings).
+        Assert.Equal("Ctrl+Shift+. in Vision stops all", MachineText.StopHintInApp);
+        Assert.Equal("Ctrl+Alt+. stops", MachineText.StopHint);
+    }
+
+    [Fact]
     public void ARunThatStoppedUsingTheMachineLetsTheGlowGo()
     {
         var activity = new MachineActivity(_clock);

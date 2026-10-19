@@ -145,15 +145,24 @@ internal static class ProcessLineage
     }
 }
 
-/// <summary>Every machine tool runs inside its chat's machine session: the glow lights for it.</summary>
+/// <summary>Every machine tool runs inside its chat's machine session: the glow lights for it. A control tool (mouse,
+/// keyboard, focus_app) waits for the glow to be on screen before it injects anything (up to half a second).</summary>
 internal sealed class MachineScoped(IToolExecutor inner, MachineChat chat) : IToolExecutor
 {
+    /// <summary>The longest a control tool waits for the glow (the UI thread may be busy laying out a long transcript).</summary>
+    public static readonly TimeSpan GlowWait = TimeSpan.FromMilliseconds(500);
+
     public string Name => inner.Name;
     public ToolSpec Spec => inner.Spec;
+    internal IToolExecutor Inner => inner;
+
+    /// <summary>Tools that act on the machine (and so must not act before the glow says so).</summary>
+    internal static bool Controls(IToolExecutor tool) => tool is MouseTool or KeyboardTool or FocusAppTool;
 
     public async Task<ToolResult> ExecuteAsync(string arguments, ToolContext context, CancellationToken cancellationToken)
     {
         using var use = MachineControl.Activity.Begin(chat.Id, chat.Title);
+        if (Controls(inner)) await MachineControl.Activity.WhenGlowShownAsync(GlowWait, cancellationToken).ConfigureAwait(false);
         return await inner.ExecuteAsync(arguments, context, cancellationToken).ConfigureAwait(false);
     }
 }

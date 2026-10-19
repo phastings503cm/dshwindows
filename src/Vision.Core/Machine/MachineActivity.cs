@@ -37,6 +37,29 @@ public sealed class MachineActivity(TimeProvider? time = null)
     /// <summary>The first session began while none was active: the app shows the glow.</summary>
     public event Action? Started;
 
+    /// <summary>Set by the app's glow: a task that is complete while the glow is on screen and completes when it next
+    /// comes up. Null (tests, no app) = nothing to wait for.</summary>
+    public Func<Task>? GlowShown { get; set; }
+
+    /// <summary>The glow before the input: a control tool waits for it (at most <paramref name="timeout"/> — a busy UI
+    /// thread must not hold the work up for long), so the person sees that Vision has the machine before the first click or
+    /// keystroke lands.</summary>
+    public async Task WhenGlowShownAsync(TimeSpan timeout, CancellationToken cancellationToken = default)
+    {
+        Task? shown;
+        try
+        {
+            shown = GlowShown?.Invoke();
+        }
+        catch (Exception)
+        {
+            return;
+        }
+        if (shown is null || shown.IsCompleted) return;
+        await Task.WhenAny(shown, Task.Delay(timeout, cancellationToken)).ConfigureAwait(false);
+        cancellationToken.ThrowIfCancellationRequested();
+    }
+
     /// <summary>A machine tool of <paramref name="chatId"/> starts; dispose when it finishes.</summary>
     public IDisposable Begin(string chatId, string title)
     {
@@ -132,7 +155,7 @@ public static class MachineText
     public const string Headline = "Machine in use by Vision AI";
     public const string StopHint = "Ctrl+Alt+. stops";
     /// <summary>The hint when another app holds Ctrl+Alt+. (the stop key then only works inside Vision).</summary>
-    public const string StopHintInApp = "Ctrl+. in Vision stops";
+    public const string StopHintInApp = "Ctrl+Shift+. in Vision stops all";
     /// <summary>Longest chat title the glow shows before an ellipsis.</summary>
     public const int TitleLimit = 40;
 

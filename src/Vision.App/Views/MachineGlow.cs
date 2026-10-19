@@ -324,6 +324,8 @@ public sealed class MachineGlowController
     private bool _keyRegistered;
     private GlowText? _shown;
     private GlowText? _preview;
+    /// <summary>Complete while the glow is on screen; a fresh one each time it goes.</summary>
+    private TaskCompletionSource _onScreen = new(TaskCreationOptions.RunContinuationsAsynchronously);
 
     public static MachineGlowController? Current { get; private set; }
 
@@ -337,6 +339,8 @@ public sealed class MachineGlowController
         _timer = new DispatcherTimer(DispatcherPriority.Background, dispatcher) { Interval = TimeSpan.FromMilliseconds(250) };
         _timer.Tick += (_, _) => Refresh();
         MachineControl.Activity.Started += () => _dispatcher.BeginInvoke(Refresh);
+        // Control tools wait for this before their first click or keystroke.
+        MachineControl.Activity.GlowShown = () => Volatile.Read(ref _onScreen).Task;
         SystemEvents.DisplaySettingsChanged += (_, _) => _dispatcher.BeginInvoke(Rebuild);
         // Connecting or disconnecting Remote Desktop changes whether the glow may be left out of captures.
         SystemEvents.SessionSwitch += (_, e) =>
@@ -407,6 +411,7 @@ public sealed class MachineGlowController
         RegisterStopKey();
         PersonInput.Shared.Start();
         _timer.Start();
+        _onScreen.TrySetResult();
     }
 
     private void Hide()
@@ -423,6 +428,7 @@ public sealed class MachineGlowController
         _shown = null;
         UnregisterStopKey();
         PersonInput.Shared.Stop();
+        if (_onScreen.Task.IsCompleted) Volatile.Write(ref _onScreen, new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously));
     }
 
     /// <summary>Monitors changed (or Remote Desktop came or went): draw the glow again.</summary>
