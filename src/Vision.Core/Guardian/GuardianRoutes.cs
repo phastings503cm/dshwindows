@@ -57,6 +57,45 @@ public static class GuardianRoutes
 
     public static string? OrgOf(ProviderProfile route) =>
         route.CustomHeaders?.FirstOrDefault(h => string.Equals(h.Key, OrgHeader, StringComparison.OrdinalIgnoreCase)).Value;
+
+    // MARK: Guardian's models in every chat's model menu
+    //
+    // Signed in, the account's models are routes without being saved: each is "Guardian|<model id>" (the id a saved Guardian
+    // route for that model has too, so a chat on one keeps working either way), made on demand from the model list with the
+    // sign-in's token and org — a new sign-in renews every one of them at once, and signing out takes them all away.
+
+    /// <summary>What a chat on a Guardian model says while Guardian is signed out.</summary>
+    public const string SignInNeeded = "Sign in to Guardian to use this model.";
+
+    /// <summary>The route id of Guardian's model <paramref name="modelId"/>.</summary>
+    public static string LiveRouteId(string modelId) => $"{RouteName}|{modelId}";
+
+    /// <summary>A route id that names one of Guardian's models ("Guardian|guardian/default").</summary>
+    public static bool IsLiveRouteId(string? routeId) =>
+        routeId is { } id && id.StartsWith(RouteName + "|", StringComparison.Ordinal) && id.Length > RouteName.Length + 1;
+
+    /// <summary>The model id in a Guardian route id, or null.</summary>
+    public static string? ModelOfRouteId(string? routeId) => IsLiveRouteId(routeId) ? routeId![(RouteName.Length + 1)..] : null;
+
+    /// <summary>The route for Guardian's model <paramref name="routeId"/> on <paramref name="address"/>, with the sign-in's
+    /// <paramref name="token"/> as its key. Null when the id isn't a Guardian model id, or — once the account's models are known
+    /// (<paramref name="models"/> not null) — names one the account no longer offers. Before the list arrives (just after
+    /// launch) any Guardian model id resolves, so a chat on one doesn't fall back to another model while the list loads.</summary>
+    public static ProviderProfile? LiveRoute(string? routeId, string address, IReadOnlyList<GuardianModel>? models, string? orgId, string token)
+    {
+        if (ModelOfRouteId(routeId) is not { } id) return null;
+        GuardianModel? model;
+        if (models is null) model = new GuardianModel(id);
+        else model = models.FirstOrDefault(m => string.Equals(m.Id, id, StringComparison.Ordinal));
+        if (model is null) return null;
+        var route = Route(address, model, orgId);
+        route.ApiKey = token;
+        return route;
+    }
+
+    /// <summary>The menu's name for a Guardian model: its label ("Claude Sonnet 5.5"), else its id.</summary>
+    public static string MenuTitle(GuardianModel model) =>
+        string.IsNullOrWhiteSpace(model.Label) ? model.Id : model.Label!;
 }
 
 /// <summary>Refusals from Guardian's model proxy, said in Guardian's words. The chat shows the sentence (never "HTTP 402"),

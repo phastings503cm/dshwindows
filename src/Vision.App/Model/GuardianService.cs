@@ -10,7 +10,8 @@ using Vision.Core;
 namespace Vision.App.Model;
 
 /// <summary>The app's Guardian connection (one per app): the sign-in and its token, the account's identity, orgs, limits
-/// and models, the routes through its proxy, the account the host's prompt sync uses, and the Settings › Guardian actions. Every refusal
+/// and models — which appear in every chat's model menu while signed in (<see cref="LiveRoute"/>) — the routes through its
+/// proxy, the account the host's prompt sync uses, and the Settings › Guardian actions. Every refusal
 /// Guardian sends (401/403/402/429) is shown as a dialog naming what is missing or which limit was reached
 /// (<see cref="Refused"/>); the page shows the rest as a status line.</summary>
 public sealed partial class GuardianService : ObservableObject
@@ -63,7 +64,66 @@ public sealed partial class GuardianService : ObservableObject
         GuardianProxyRefusals.Reported += OnProxyRefusal;
         // Prompt history and the shared ETAs go to the signed-in account, whether or not a chat uses Guardian's models. (A
         // test may make one without a host.)
-        if (host is not null) host.GuardianAccount = AccountEndpoint;
+        if (host is not null)
+        {
+            host.GuardianAccount = AccountEndpoint;
+            host.GuardianSignInRequired += OnSignInRequired;
+        }
+        // Signed in, the account's models can be picked in any chat without being saved as routes.
+        if (config is not null) config.LiveRoute = LiveRoute;
+    }
+
+    // MARK: - Guardian's models in every chat
+
+    /// <summary>Whether <see cref="Models"/> is the account's list (false until Guardian has answered since signing in or
+    /// launching — meanwhile a chat on a Guardian model keeps it).</summary>
+    private bool _modelsKnown;
+
+    /// <summary>One of the account's models as a route, with the sign-in's token and org — made fresh on every ask, so a new
+    /// sign-in or another org applies at once. Null when signed out or not a model the account offers.</summary>
+    public ProviderProfile? LiveRoute(string routeId) =>
+        Client is { Session: { } session } client
+            ? GuardianRoutes.LiveRoute(routeId, client.Address, _modelsKnown ? Models : null, client.OrgId, session.Token)
+            : null;
+
+    /// <summary>The account's models the model menu offers (none while signed out).</summary>
+    public IReadOnlyList<GuardianModel> MenuModels => IsSignedIn ? Models : [];
+
+    private DispatcherTimer? _modelTimer;
+
+    /// <summary>How often the model list is asked for again while signed in (an admin may change what the org allows).</summary>
+    public static TimeSpan ModelRefreshInterval { get; } = TimeSpan.FromMinutes(15);
+
+    /// <summary>Keep the model list fresh while the app runs.</summary>
+    public void StartModelRefresh()
+    {
+        _modelTimer ??= new DispatcherTimer(ModelRefreshInterval, DispatcherPriority.Background, (_, _) => _ = RefreshModelsAsync(), _dispatcher);
+        _modelTimer.Start();
+    }
+
+    /// <summary>Ask for the account's models again, quietly: a failure keeps what was known (the next chat message says what is
+    /// wrong, in Guardian's words).</summary>
+    public async Task RefreshModelsAsync()
+    {
+        if (Client is not { } client) return;
+        try
+        {
+            var models = await client.ModelsAsync().ConfigureAwait(true);
+            if (!ReferenceEquals(Client, client)) return; // signed out or in again meanwhile
+            Models = models;
+            _modelsKnown = true;
+        }
+        catch (Exception error) when (error is GuardianError or HttpRequestException or OperationCanceledException or IOException)
+        {
+        }
+    }
+
+    /// <summary>A chat on a Guardian model was sent a message while signed out: the sign-in dialog (with Sign in again…).</summary>
+    private void OnSignInRequired()
+    {
+        if (IsSignedIn) return;
+        _ = _dispatcher.BeginInvoke(() => Report(GuardianError.FromResponse(401,
+            $$"""{"error":"unauthorized","message":"{{GuardianRoutes.SignInNeeded}}"}""")));
     }
 
     public bool IsSignedIn => Client is not null;
@@ -204,6 +264,9 @@ public sealed partial class GuardianService : ObservableObject
             // Signed in for this session at least; the next start asks again.
             Status = $"Signed in, but the sign-in couldn't be saved on this PC ({error.Message}).";
         }
+        // Another account (or the same one again) may offer other models: the list is asked for afresh.
+        _modelsKnown = false;
+        Models = [];
         Client = client;
         Account = account;
         ApplyTokenToRoutes();
@@ -225,6 +288,7 @@ public sealed partial class GuardianService : ObservableObject
         Client = null;
         Identity = null;
         Limits = [];
+        _modelsKnown = false;
         Models = [];
         Status = "Signed out of Guardian on this PC.";
     }
@@ -249,6 +313,7 @@ public sealed partial class GuardianService : ObservableObject
                 client.OrgId ??= updated.OrgId;
             }
             Models = await client.ModelsAsync().ConfigureAwait(true);
+            _modelsKnown = true;
             return true;
         }, quiet: true).ConfigureAwait(true);
     }
@@ -637,6 +702,7 @@ public sealed partial class GuardianService : ObservableObject
             Account = null;
             Identity = null;
             Limits = [];
+            _modelsKnown = false;
             Models = [];
             if (twoFactor)
             {
@@ -667,6 +733,7 @@ public sealed partial class GuardianService : ObservableObject
             new GuardianModel("global.anthropic.claude-sonnet-5-5", "Claude Sonnet 5.5", 1_000_000, 64_000),
             new GuardianModel("us.anthropic.claude-opus-5-5", "Claude Opus 5.5", 1_000_000, 48_000, InteractiveOnly: true),
         ];
+        _modelsKnown = true;
         Status = null;
     }
 }

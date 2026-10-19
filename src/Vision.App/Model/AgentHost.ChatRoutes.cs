@@ -13,8 +13,37 @@ namespace Vision.App.Model;
 
 public sealed partial class AgentHost
 {
-    /// <summary>The route a chat talks to, with its key: its own while that is configured and on, else the primary.</summary>
-    public ProviderProfile? ChatRoute(SessionVM? vm) => Config.UsableRoute(vm?.RouteId) ?? Config.ActiveProvider;
+    /// <summary>The route a chat talks to, with its key: its own while that is configured and on (one of Guardian's models while
+    /// signed in counts), else the primary. None for a chat on a Guardian model while Guardian is signed out: it waits for the
+    /// sign-in rather than quietly moving to another model.</summary>
+    public ProviderProfile? ChatRoute(SessionVM? vm) =>
+        GuardianSignInNeeded(vm) ? null : Config.UsableRoute(vm?.RouteId) ?? Config.ActiveProvider;
+
+    /// <summary>The chat is on one of Guardian's models (or a saved Guardian route) and Guardian is signed out: it says "Sign in to
+    /// Guardian to use this model" instead of answering.</summary>
+    public bool GuardianSignInNeeded(SessionVM? vm) => vm?.RouteId is { } id && IsGuardianChoice(id) && GuardianAccount?.Invoke() is null;
+
+    /// <summary>A route id that means Guardian's proxy: a saved Guardian route (switched on), or a Guardian model id no saved
+    /// route has.</summary>
+    public bool IsGuardianChoice(string routeId) =>
+        Config.Providers.FirstOrDefault(p => p.RouteId == routeId) is { } stored
+            ? stored.IsEnabled && GuardianRoutes.IsGuardian(stored)
+            : GuardianRoutes.IsLiveRouteId(routeId);
+
+    /// <summary>The routes a chat can resolve changed without Settings (Guardian signed in or out, its model list arrived): the
+    /// model buttons and gauges look again.</summary>
+    public void NotifyRoutesChanged() => ContextInfoChanged?.Invoke();
+
+    /// <summary>Raised when a message is sent to a chat on a Guardian model while signed out (the app offers the sign-in).</summary>
+    public event Action? GuardianSignInRequired;
+
+    /// <summary>Refuse a turn on a Guardian model while signed out, in those words (and offer the sign-in).</summary>
+    private void RequireGuardianSignIn(SessionVM vm)
+    {
+        if (!GuardianSignInNeeded(vm)) return;
+        GuardianSignInRequired?.Invoke();
+        throw LlmException.Rejected(401, GuardianRoutes.SignInNeeded, "signed out of Guardian", permanent: true);
+    }
 
     public ProviderProfile? ChatRoute(string sessionId) => ChatRoute(Session(sessionId));
 
@@ -48,6 +77,8 @@ public sealed partial class AgentHost
     /// sends, and keeps it (saying so when it had another).</summary>
     private void PinRouteIfUnset(SessionVM vm)
     {
+        // A chat on a Guardian model keeps it while signed out: signing in again brings it back.
+        if (GuardianSignInNeeded(vm)) return;
         if (vm.RouteId is not null && Config.UsableRoute(vm.RouteId) is not null) return;
         if (Config.ActiveRoute is not { } primary || vm.RouteId == primary) return;
         var previous = vm.RouteId;

@@ -239,6 +239,12 @@ public partial class MainWindow : Window
     {
         // The selected chat's model (each chat has its own); without a chat, the primary.
         var selected = Model.Host.Selected;
+        if (Model.Host.GuardianSignInNeeded(selected))
+        {
+            ModelLabel.Text = "Sign in to Guardian";
+            ModelButton.ToolTip = GuardianRoutes.SignInNeeded;
+            return;
+        }
         var provider = Model.Host.ChatRoute(selected);
         var served = Model.Host.ModelIdFor(selected);
         ModelLabel.Text = provider is null ? "No model" : served ?? provider.Model;

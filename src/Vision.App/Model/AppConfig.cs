@@ -290,15 +290,22 @@ public sealed partial class AppConfig : ObservableObject
         Persist();
     }
 
-    /// <summary>A configured route that is switched on, with its API key (null when it is gone or off).</summary>
+    /// <summary>A configured route that is switched on, with its API key (null when it is gone or off) — or, for an id no saved
+    /// route has, a route someone else supplies (<see cref="LiveRoute"/>: Guardian's models while signed in).</summary>
     public ProviderProfile? UsableRoute(string? routeId)
     {
-        if (routeId is null || Providers.FirstOrDefault(p => p.RouteId == routeId) is not { IsEnabled: true } stored) return null;
+        if (routeId is null) return null;
+        if (Providers.FirstOrDefault(p => p.RouteId == routeId) is not { } stored) return LiveRoute?.Invoke(routeId);
+        if (!stored.IsEnabled) return null;
         var resolved = stored.DeepCopy();
         var key = ApiKey(stored);
         resolved.ApiKey = key.Length == 0 ? null : key;
         return resolved;
     }
+
+    /// <summary>Routes that aren't saved but can be chosen in a chat: the signed-in Guardian account's models (set by the
+    /// Guardian connection). Given a route id, the route with its key, or null.</summary>
+    public Func<string, ProviderProfile?>? LiveRoute { get; set; }
 
     /// <summary>The key a project's choice is kept under: its folder ("" for chats without a project).</summary>
     public static string ProjectKey(string? path)

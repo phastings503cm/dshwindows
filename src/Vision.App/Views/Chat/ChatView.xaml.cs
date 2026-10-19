@@ -455,13 +455,22 @@ public partial class ChatView : UserControl
 
         // This chat's own model: another chat (another project) may be on another one at the same time.
         var route = _model.Host.ChatRoute(session);
-        var current = _model.Host.ModelIdFor(session) ?? route?.Model ?? "No model";
-        var limit = _model.Host.ContextLimit(session);
-        ModelMenuText.Text = $"{current} · {Menus.ShortTokens(limit)}";
-        var masked = route is { IsPrivateRoute: false } && _model.Config.Privacy.Mask;
-        ModelMenuButton.ToolTip = $"This chat's model{(route is null ? "" : $" ({route.DisplayName})")} and its context window. Pick another model for this chat " +
-                                  "(other chats keep theirs; new chats in this project start with it), or a Spark Swapper model to switch what that box serves (also /swap)." +
-                                  (masked ? "\nNot private: sensitive details are masked before anything is sent to it." : "");
+        if (_model.Host.GuardianSignInNeeded(session))
+        {
+            // On one of Guardian's models while signed out: it waits for the sign-in rather than moving to another model.
+            ModelMenuText.Text = $"{GuardianRoutes.ModelOfRouteId(session.RouteId) ?? "Guardian"} · Sign in to Guardian";
+            ModelMenuButton.ToolTip = GuardianRoutes.SignInNeeded + " (Settings › Guardian), or pick another model for this chat.";
+        }
+        else
+        {
+            var current = _model.Host.ModelIdFor(session) ?? route?.Model ?? "No model";
+            var limit = _model.Host.ContextLimit(session);
+            ModelMenuText.Text = $"{current} · {Menus.ShortTokens(limit)}";
+            var masked = route is { IsPrivateRoute: false } && _model.Config.Privacy.Mask;
+            ModelMenuButton.ToolTip = $"This chat's model{(route is null ? "" : $" ({route.DisplayName})")} and its context window. Pick another model for this chat " +
+                                      "(other chats keep theirs; new chats in this project start with it), or a Spark Swapper model to switch what that box serves (also /swap)." +
+                                      (masked ? "\nNot private: sensitive details are masked before anything is sent to it." : "");
+        }
 
         ThinkingText.Text = Menus.ThinkingLabel(_model, session);
         ThinkingButton.ToolTip = "How hard the model thinks before answering (sent as reasoning_effort / enable_thinking). Also: /think <level>";

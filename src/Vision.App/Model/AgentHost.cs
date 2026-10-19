@@ -1057,6 +1057,7 @@ public sealed partial class AgentHost : ObservableObject
         // The chat's own model (an older chat that never chose takes the primary now, and keeps it). Re-read what the server
         // serves right now: the Spark can swap models between turns, and the window/model id must follow.
         PinRouteIfUnset(vm);
+        RequireGuardianSignIn(vm);
         var profile = await ResolveRouteAsync(vm) ?? throw LlmException.NoModel();
         ct.ThrowIfCancellationRequested();
         // What this turn runs on, for its timeline row and the activity menu.

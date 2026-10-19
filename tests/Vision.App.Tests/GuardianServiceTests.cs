@@ -329,4 +329,64 @@ public sealed class GuardianServiceTests : IDisposable
         Assert.Equal(["Over budget", "No files"], shown.Select(e => e.Message));
         await Task.CompletedTask;
     });
+
+    /// <summary>Signed in, Guardian's models are in every chat's model menu with nothing saved first: a chat picks one and talks
+    /// through Guardian's proxy with the sign-in's token. Signed out, the chat keeps its model and says "Sign in to Guardian to
+    /// use this model" instead of moving to another one; signing in again renews it.</summary>
+    [Fact]
+    public void GuardiansModelsAreInEveryChatWhileSignedInAndWaitForTheSignInAfterwards() => UiThread.Run(async () =>
+    {
+        var (config, host, guardian, fake) = Make();
+        var model = new FakeModelServer();
+        try
+        {
+            await guardian.SignInAsync("https://guardian.example.test", "pat@503cm.com", "pw");
+            var vm = ChatOnOwnServer(config, host, fake, model);
+            var id = GuardianRoutes.LiveRouteId("guardian/default");
+            Assert.DoesNotContain(config.Providers, GuardianRoutes.IsGuardian); // nothing saved
+            Assert.Equal("guardian/default", Assert.Single(guardian.MenuModels).Id);
+            host.SetChatRoute(vm, id);
+            Assert.Equal(id, host.ChatRouteId(vm));
+            Assert.Equal("tok-pw", host.ChatRoute(vm)!.ApiKey);
+            Assert.Equal(200_000, host.ContextLimit(vm));
+
+            fake.Override = (method, path, _) => method == "POST" && path == "/api/harness/v1/chat/completions"
+                ? new HttpResponseMessage(HttpStatusCode.OK)
+                {
+                    Content = new StringContent("data: {\"choices\":[{\"delta\":{\"content\":\"From Guardian.\"},\"finish_reason\":\"stop\"}]}\n\ndata: [DONE]\n\n",
+                        Encoding.UTF8, "text/event-stream"),
+                }
+                : null;
+            host.Send("hello", vm.Id);
+            await WaitUntil("Guardian's reply", () => !vm.Running && vm.Entries.OfType<MessageEntryVM>().Any(m => m.Text.Contains("From Guardian.", StringComparison.Ordinal)));
+            (string Method, string Path, string Body, Dictionary<string, string> Headers) turn;
+            lock (fake.Requests) turn = fake.Requests.Last(r => r.Path == "/api/harness/v1/chat/completions");
+            Assert.Equal("Bearer tok-pw", turn.Headers["Authorization"]);
+            Assert.Equal("o1", turn.Headers["x-guardian-org"]);
+            Assert.Equal("guardian/default", JsonNode.Parse(turn.Body)!["model"]!.GetValue<string>());
+
+            // Signed out: the chat keeps its model and waits for the sign-in.
+            guardian.SignOut();
+            Assert.Empty(guardian.MenuModels);
+            Assert.True(host.GuardianSignInNeeded(vm));
+            Assert.Null(host.ChatRoute(vm));
+            host.Send("again", vm.Id);
+            await WaitUntil("the sign-in refusal", () => !vm.Running && vm.Entries.OfType<MessageEntryVM>().Any(m => m.Text == GuardianRoutes.SignInNeeded));
+            Assert.Equal(id, vm.RouteId);
+            Assert.DoesNotContain(model.Seen, r => r.LastUser.Contains("again", StringComparison.Ordinal));
+
+            // Signed in again: the same chat, the new token.
+            fake.Override = (method, path, _) => method == "POST" && path == "/api/auth/login"
+                ? FakeGuardian.Json("""{"ok":true,"token":"tok-2","session":{"id":"s3","userId":"u1","email":"pat@503cm.com","name":"Pat"}}""")
+                : null;
+            Assert.True(await guardian.SignInAsync("https://guardian.example.test", "pat@503cm.com", "pw"));
+            Assert.False(host.GuardianSignInNeeded(vm));
+            Assert.Equal("tok-2", host.ChatRoute(vm)!.ApiKey);
+        }
+        finally
+        {
+            host.StopAll();
+            await Task.Delay(50);
+        }
+    });
 }

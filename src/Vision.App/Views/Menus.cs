@@ -3,6 +3,7 @@ using System.Windows.Controls;
 using System.Windows.Controls.Primitives;
 using Vision.App.Infrastructure;
 using Vision.App.Model;
+using Vision.App.Views.Guide;
 using Vision.Core;
 
 namespace Vision.App.Views;
@@ -36,7 +37,8 @@ public static class Menus
     /// <summary>The model a chat uses, and one click to change it — for that chat only (its project's next chats start with
     /// it too): what each Spark Swapper box serves (picking a model asks that box to switch), then the configured routes by
     /// role — Primary (the default for new projects), Subagents, Backups, Other — each marked private (a lock) or masked (a
-    /// shield). Switched-off routes aren't offered. Without a chat, picking a route makes it the primary.</summary>
+    /// shield), then — signed in to Guardian — the account's models under "Guardian", with nothing to add first. Switched-off
+    /// routes aren't offered. Without a chat, picking a route makes it the primary.</summary>
     public static ContextMenu Model(AppModel model, SessionVM? session = null)
     {
         var menu = new ContextMenu();
@@ -101,6 +103,7 @@ public static class Menus
                 menu.Items.Add(item);
             }
         }
+        AddGuardianModels(menu, model, session, chosen);
         if (session is not null && chosen is not null && chosen != config.ActiveRoute
             && config.Providers.FirstOrDefault(p => p.RouteId == chosen) is { } chatRoute)
         {
@@ -118,6 +121,62 @@ public static class Menus
         if (!spark.IsConfigured) menu.Items.Add(Item("Connect a Spark Swapper…", () => model.ShowSwapperGuide(), Icons.Connect));
         menu.Items.Add(Item("Run Setup Wizard…", model.ShowWizard));
         return menu;
+    }
+
+    /// <summary>The "Guardian" section: the signed-in account's models (those not already saved as routes above), each a click
+    /// away for this chat — or, without a chat, made the primary. Signed out, a chat on a Guardian model says so and offers the
+    /// sign-in.</summary>
+    private static void AddGuardianModels(ContextMenu menu, AppModel model, SessionVM? session, string? chosen)
+    {
+        var guardian = model.Guardian;
+        var config = model.Config;
+        if (session is not null && model.Host.GuardianSignInNeeded(session))
+        {
+            menu.Items.Add(Header("Guardian"));
+            var waiting = new MenuItem
+            {
+                Header = $"{GuardianRoutes.ModelOfRouteId(session.RouteId) ?? session.RouteId} — {GuardianRoutes.SignInNeeded}",
+                IsEnabled = false, IsChecked = true,
+            };
+            menu.Items.Add(waiting);
+            menu.Items.Add(Item("Sign in to Guardian…", model.ShowGuardian, Icons.Shield));
+            return;
+        }
+        var models = guardian.MenuModels.Where(m => config.Providers.All(p => p.RouteId != GuardianRoutes.LiveRouteId(m.Id))).ToList();
+        if (models.Count == 0) return;
+        var org = guardian.Account?.OrgName;
+        menu.Items.Add(Header(org is { Length: > 0 } ? $"Guardian — {org}" : "Guardian"));
+        foreach (var guardianModel in models)
+        {
+            var routeId = GuardianRoutes.LiveRouteId(guardianModel.Id);
+            var facts = new List<string>();
+            if (guardianModel.ContextWindow is > 0 and var window) facts.Add(ShortTokens(window));
+            if (guardianModel.InteractiveOnly == true) facts.Add("interactive only");
+            var title = GuardianRoutes.MenuTitle(guardianModel) + (facts.Count > 0 ? $" — {string.Join(" · ", facts)}" : "");
+            var picked = guardianModel;
+            var item = Item(title, () =>
+            {
+                if (session is not null)
+                {
+                    model.Host.SetChatRoute(session, routeId);
+                    return;
+                }
+                guardian.UseModel(picked, RouteUse.Primary);
+            }, Icons.Shield, isChecked: routeId == chosen);
+            item.ToolTip = $"{guardianModel.Id} through your Guardian account. " +
+                           (session is not null
+                               ? routeId == chosen ? "This chat's model. " : "Use this model in this chat (other chats keep theirs; new chats in this project start with it). "
+                               : "Make this the primary model. ") +
+                           "Not private — sensitive details are masked before anything is sent.";
+            if (routeId == chosen) item.FontWeight = FontWeights.SemiBold;
+            menu.Items.Add(item);
+        }
+        if (session is not null && models.FirstOrDefault(m => GuardianRoutes.LiveRouteId(m.Id) == chosen) is { } current)
+        {
+            var primary = Item("Make this the primary (for new projects and the fleet)", () => guardian.UseModel(current, RouteUse.Primary), Icons.Chat);
+            primary.ToolTip = "Saves this Guardian model as a route in Settings › AI Models and makes it the primary. Other chats keep their own models.";
+            menu.Items.Add(primary);
+        }
     }
 
     /// <summary>Per-chat thinking level: only the levels the chat's model takes (GLM-5.3: Low, High, Max; Kimi K2.6: Off, On;
