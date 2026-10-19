@@ -25,6 +25,9 @@ public sealed record LogSession
     /// Null = not chosen yet (an older chat: it takes the primary when it next sends). The same fields as Vision for macOS.</summary>
     public string? Route { get; set; }
     public string? Thinking { get; set; }
+    /// <summary>This chat's sensitivity: true = Sensitive, false = Standard, null = its project's default (see
+    /// <see cref="RouteAdmission"/>). The same field as Vision for macOS.</summary>
+    public bool? Sensitive { get; set; }
 }
 
 /// <summary>Per-session conversation store: one JSON file per session under
@@ -88,6 +91,14 @@ public sealed class ConversationLog
         row.UpdatedAt = DateTimeOffset.Now;
         if (!string.IsNullOrEmpty(cwd)) row.Cwd = cwd;
         if (preset is not null) row.Preset = preset;
+        Persist(id);
+    }
+
+    /// <summary>Store the chat's own sensitivity (null = follow its project's default).</summary>
+    public void SetSensitive(string id, bool? sensitive)
+    {
+        if (!_rows.TryGetValue(id, out var row) || row.Sensitive == sensitive) return;
+        row.Sensitive = sensitive;
         Persist(id);
     }
 
