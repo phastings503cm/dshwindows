@@ -220,6 +220,9 @@ High, Max; Kimi K2.6: Off, On; Kimi K2.7 Code: none — it always thinks).
 When a server refuses a setting it doesn't take ("invalid temperature: only 1 is allowed for this
 model"), Vision leaves that setting out, tries once more, remembers it for that server and model
 (`request-adaptations.json` in the data folder), and says so in one line in the chat instead of failing.
+Only optional settings are ever left out this way (temperature, thinking, max_tokens and the like): a
+refusal that points at the messages, the tools or the model is reported as it is, and a lesson of that kind
+saved by an earlier build is dropped when the file is read.
 
 ### Two or more model servers
 
@@ -356,7 +359,9 @@ Vision gets whatever your Guardian role allows:
   through Guardian's model proxy, charged to you within your organization's limits. The page shows each
   spend, token and request limit, what is left and when it resets.
 - **Prompt history** — every prompt, task and `/goal` goes to your Guardian Prompt Notebook when it starts and
-  again with how it ended.
+  again with how it ended. Guardian isn't private, so the copy that goes up is masked like a request to a model
+  that isn't: the keys and passwords in your vault always, and — with the sensitive-data shield on — whatever it
+  masks. **Send my prompts to the notebook** (Settings › Guardian) turns it off.
 - **Skills, chats and projects** — take your account's skills, deposit yours, export chats and bring them back
   (Vision for macOS reads the same format), and upload the open project (files that hold keys, such as `.env`,
   are never sent).
@@ -455,7 +460,9 @@ every agent is doing, grouped by chat: each main agent, subagent, background age
 was given (the goal, the prompt, the plan step), the model and route it runs on and why there (*tried
 first: Spark 2: didn't answer*), its status, time, tokens and current step, with **Log**, **Open its
 chat** and **Stop**. **Stop all** is at the top and each model server's load at the bottom. The Plan panel
-lists the subagents working each step (*↳ Write tests · qwen3-coder on Spark 2*).
+lists the subagents working each step (*↳ Write tests · qwen3-coder on Spark 2*): the step the `agent` (or
+`delegate`) call names with `step` (its number in the plan or its text), else the open step whose words match
+the subagent's task best — and none, rather than a wrong one, when two steps match it equally.
 
 ## Permissions
 
@@ -494,11 +501,22 @@ a scoped task). On top of those:
     control — so the cursor doesn't move, the app doesn't have to be in front, and several chats can
     work at once. Only what needs the real mouse or keyboard (games, drags, right-clicks, shortcuts)
     uses them: one chat at a time (the others say "Waiting for the mouse"), never while you are using
-    them, and the cursor goes back where you left it. **Keep each chat to the apps it started**
-    (same page) limits a chat's input to programs it launched.
+    them, and the cursor goes back where you left it — and so does the window you had in front.
+    **Keep each chat to the apps it started** (same page) limits a chat's input to programs it launched.
+  - **Each chat's input goes to its own window.** A chat that took a screenshot of a window (or read
+    its tree, or named it) clicks into *that* window by coordinates, even where your window or another
+    chat's app covers the point, and a point outside it on another app is refused rather than clicked.
+    Keystrokes without an app go to the field the chat last clicked or the window it last used — never
+    to whatever you have in front (with neither, the agent is told to name the app). Text ending in a
+    line break is typed and then submitted: Enter in a web form's field presses the form's one submit
+    button in the background. Parallel subagents of one chat each keep their own field and window.
+    Vision's own windows are never clicked or typed into, so a chat can't answer its own permission
+    question.
   - **The glow.** While a chat uses the computer, the edges of every monitor glow and a label says
     *Machine in use by Vision AI*, which chat has the mouse or works in the background, and that
-    **Ctrl+Alt+.** stops — from any app. The glow is left out of the agent's screenshots.
+    **Ctrl+Alt+.** stops — from any app (when another app holds that key, the label says **Ctrl+Shift+.**
+    in Vision stops all). A click or keystroke waits for the glow to be on screen first (up to half a
+    second). The glow is left out of the agent's screenshots.
 - **`queue_task`** adds follow-up work to the chat's own task list; **`vault_search`** finds credentials by
   name (never their values).
 - **Kinds of subagent, and fan-out** — `agent` takes an `agent_type`: `general` (the default),
@@ -542,7 +560,10 @@ soon as the chat is free, in order, and you can keep adding while the list moves
 **Now** card for what the chat is doing — the prompt, `/goal` or task, its phase and runtime against the
 estimate, its plan steps and the subagent on each — then *Up next* and *Done*. A Stop, a failure or a goal
 that needs you pauses the rest (*Paused — you stopped the current work.*) until **Resume**, and after a
-restart they wait for Resume too. A queued task can't carry attachments: send those when the agent is free.
+restart they wait for Resume too. A queued prompt takes its attachments with it — files, pictures and a
+large paste's chip (a 10,000-line prompt goes on the list like any other): they are kept in the chat's
+attachments folder until the task is deleted and are read and sent with the prompt when its turn comes. A
+queued prompt whose chat's model server is switching models waits for it, and runs once it's ready.
 
 Task lists are saved to `task-queue.json` and survive restarts: if the app quits or crashes mid-task,
 the task goes back in line and that chat's list picks up where it left off on the next launch (unless
@@ -645,8 +666,9 @@ first* unless you choose otherwise) and its **model servers** (as routes). The f
 runs:
 
 - **This PC** — Vision looks in the usual places (`~/.openclaw`, the older `.clawdbot` and `.moltbot`
-  names, profile folders such as `.openclaw-work`, `OPENCLAW_STATE_DIR`) and, failing that, searches for
-  `openclaw.json`.
+  names, profile folders such as `.openclaw-work`, `OPENCLAW_STATE_DIR`), inside each WSL distro
+  (`\\wsl.localhost\<distro>\home\<user>\.openclaw` and `/root` — OpenClaw's own Windows guide recommends
+  WSL2; what is found there says *in WSL (Ubuntu)*) and, failing that, searches for `openclaw.json`.
 - **Another computer (over SSH)** — give an address (a name from your `~/.ssh/config` works) and a
   password or key file, or leave both blank to try the keys in your `~/.ssh` folder. Vision signs in,
   finds the install the same way (Docker bind mounts and the usual `/data`, `/app` and `/home/node`
@@ -667,7 +689,8 @@ there; **Preview and import…** brings it in as above, and **Export to OpenClaw
 remembered notes (as a marked block in OpenClaw's `MEMORY.md`, which an export again updates in place), its
 keys and passwords (into OpenClaw's `.env`, only after you confirm — they are plain text there) and its
 model servers (into `openclaw.json`, after a backup; a file with comments gets a separate file to paste
-from). When a name is already taken, you choose: keep both, replace what is there, or skip it.
+from) — to the install you pick, inside WSL too. When a name is already taken, you choose: keep both, replace
+what is there, or skip it.
 
 ## Remembered notes
 
