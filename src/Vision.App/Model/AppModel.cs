@@ -12,7 +12,7 @@ namespace Vision.App.Model;
 public enum WorkspaceMode { Chat, Code }
 
 /// <summary>Settings pages. (<see cref="Spark"/> is the "Model servers" page: the Spark Swapper boxes.)</summary>
-public enum SettingsTab { General, Models, Spark, Skills, Plugins, Editor, Guardian, ImportExport }
+public enum SettingsTab { General, Models, Spark, Skills, Plugins, Editor, Guardian, ImportExport, ClaudeCode }
 
 public enum SkillsAction { Generate, Import, NewManual }
 

@@ -393,6 +393,32 @@ Vision gets whatever your Guardian role allows:
 When Guardian says no, Vision says why in a dialog — what is missing and who can grant it, or which limit was
 reached and when it resets — never as a bare HTTP code.
 
+## Claude Code (your Claude plan)
+
+**Settings › Claude Code** (or *Claude Code — your Claude Pro or Max plan* on the wizard's first page) puts
+chats on the official [Claude Code](https://code.claude.com) app on this PC, so a Pro or Max plan does the
+work. Vision runs `claude` in headless mode (`claude -p`, stream-json both ways) and never touches its sign-in:
+it checks with `claude --version` and `claude auth status` (which say *whether* it is signed in), shows the
+install and `claude auth login` steps when it isn't, and Claude Code talks to Anthropic itself. **Add Claude
+Code** puts *Claude Code · Opus*, *Sonnet* and *Haiku* in every chat's model menu; pick one for a chat and:
+
+- each message is one Claude Code turn in the chat's project folder, carrying on the same Claude Code session
+  (`--resume`) — a chat that moves onto it part-way, or whose session is gone, starts a new one with a recap of
+  the chat so far. Its replies, thinking, tool calls, file changes, todo lists and plans show as rows and in the
+  plan panel, each with its time;
+- the chat's permission setting decides: *Workspace write* lets edits inside the project and commands that only
+  read go ahead and asks you on the chat's card for the rest; *Plan only* runs Claude Code in plan mode and shows
+  its plan; *Full access* lets everything go ahead (a safety check Claude Code says needs a person still asks);
+- `/goal` (one Claude Code turn per round), the task list, run phases, time estimates and the Prompts timeline
+  work as with any model; Stop interrupts Claude Code's turn; `/compact` compacts its session;
+- after each turn the chat says what it used: steps, tokens and Claude Code's own cost estimate — covered by
+  your plan, unless Claude Code is set up with an API key (`ANTHROPIC_API_KEY`), which the chat then says it bills.
+
+Claude Code answers chats only: Vision's own side jobs (subagents, summaries) keep using your other models, and
+it is never a backup or subagent server. **Sensitive chats can't use it** — it reads your files itself, so the
+shield can't stand between them and Anthropic. Advanced: the `claude` path to use, and *Run Claude Code inside
+WSL* for one installed in Linux.
+
 ## The window
 
 **Chat** (Ctrl+1) — the transcript interleaves messages and tool calls in the order they happened,
@@ -636,6 +662,7 @@ Press Stop to give up. Nothing already done is lost: tool calls that ran stay in
 | `/skills` · `/skill <name>` · `/skill new <what>` · `/<name> args` | List skills, select one for this chat, have the model write one, or run one. |
 | `/remember <note>` · `/memory [search]` | Save a note to long-term memory, or open the remembered-notes window (with a search word: list the matches). |
 | `/agents` | The kinds of subagent, the model servers they run on, and what is running now. |
+| `/sensitive [on\|off]` | Shows or sets whether this chat is Sensitive: then it uses only private models (your own hardware, Guardian, Amazon Bedrock in your AWS account) or others through the shield; engines that read files themselves, like Claude Code, are refused with the reason. |
 | `/help` | Lists these. |
 
 ### No "continue"

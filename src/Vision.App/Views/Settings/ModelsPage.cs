@@ -455,6 +455,12 @@ public sealed class ModelsPage : UserControl
 
     private void Edit(ProviderProfile provider)
     {
+        // Claude Code has nothing to edit here (no address, no key): its own page has the CLI, its sign-in and WSL.
+        if (ClaudeCodeRoutes.IsClaudeCode(provider))
+        {
+            _model.ShowClaudeCode();
+            return;
+        }
         var editor = new ProviderEditorWindow(_model, provider) { Owner = Ui.Owner(this) };
         if (editor.ShowDialog() == true) Rebuild();
     }

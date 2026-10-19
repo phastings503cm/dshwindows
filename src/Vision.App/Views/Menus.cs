@@ -84,7 +84,10 @@ public static class Menus
             foreach (var provider in routes)
             {
                 var route = provider.RouteId;
-                var item = Item(provider.DisplayName, () =>
+                var claudeCode = ClaudeCodeRoutes.IsClaudeCode(provider);
+                // A Sensitive chat can't pick a model it may not use (Claude Code reads files itself; see SensitivityPolicy).
+                var refusal = session is not null && route != chosen ? model.Host.SensitivityRefusal(session, provider) : null;
+                var item = Item(claudeCode ? $"{provider.Name} · {ClaudeCodeRoutes.ModelTitle(provider.Model)}" : provider.DisplayName, () =>
                 {
                     if (session is not null)
                     {
@@ -94,11 +97,13 @@ public static class Menus
                     if (config.ActiveRoute == route) return;
                     config.MakePrimary(route);
                     model.Host.ResetRouteCache();
-                }, provider.IsPrivateRoute ? Icons.Lock : Icons.Shield, isChecked: route == chosen);
-                item.ToolTip = (session is not null
+                }, claudeCode ? Icons.Code : provider.IsPrivateRoute ? Icons.Lock : Icons.Shield, isChecked: route == chosen, enabled: refusal is null);
+                item.ToolTip = refusal ?? (session is not null
                                    ? route == chosen ? "This chat's model. " : "Use this model in this chat (other chats keep theirs; new chats in this project start with it). "
                                    : role == RouteRole.Primary ? "The primary model: it answers you. " : "Make this the primary model. ") +
-                               (provider.IsPrivateRoute ? "Private — it may see sensitive data." : "Not private — sensitive details are masked before anything is sent.");
+                               (claudeCode ? "Claude Code on this computer — your Claude plan, through the claude app (it reads your files itself, so nothing is masked)."
+                                : provider.IsPrivateRoute ? "Private — it may see sensitive data." : "Not private — sensitive details are masked before anything is sent.");
+                if (refusal is not null) ToolTipService.SetShowOnDisabled(item, true);
                 if (route == chosen) item.FontWeight = FontWeights.SemiBold;
                 menu.Items.Add(item);
             }
@@ -118,6 +123,7 @@ public static class Menus
         }
         menu.Items.Add(new Separator());
         menu.Items.Add(Item("Configure Models…", () => model.ShowSettings(SettingsTab.Models), Icons.Settings));
+        if (!model.ClaudeCode.InMenu) menu.Items.Add(Item("Use Claude Code (your Claude plan)…", model.ShowClaudeCode, Icons.Code));
         if (!spark.IsConfigured) menu.Items.Add(Item("Connect a Spark Swapper…", () => model.ShowSwapperGuide(), Icons.Connect));
         menu.Items.Add(Item("Run Setup Wizard…", model.ShowWizard));
         return menu;

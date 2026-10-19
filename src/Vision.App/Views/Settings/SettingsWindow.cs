@@ -26,6 +26,7 @@ public sealed class SettingsWindow : Window
         new(SettingsTab.Models, "AI Models", Icons.Robot),
         new(SettingsTab.Spark, "Model servers", Icons.Bolt),
         new(SettingsTab.Guardian, "Guardian", Icons.Shield),
+        new(SettingsTab.ClaudeCode, "Claude Code", Icons.Code),
         new(SettingsTab.Skills, "Skills", Icons.Education),
         new(SettingsTab.ImportExport, "Import & Export", Icons.Import),
         new(SettingsTab.Plugins, "Plugins", Icons.Puzzle),
@@ -104,6 +105,7 @@ public sealed class SettingsWindow : Window
             SettingsTab.Plugins => new PluginsPage(_model),
             SettingsTab.Editor => new EditorPage(_model),
             SettingsTab.Guardian => new GuardianPage(_model),
+            SettingsTab.ClaudeCode => new ClaudeCodePage(_model),
             SettingsTab.ImportExport => new ImportExportPage(_model),
             _ => new GeneralPage(_model),
         };

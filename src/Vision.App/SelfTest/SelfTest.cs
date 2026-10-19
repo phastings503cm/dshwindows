@@ -166,6 +166,7 @@ public sealed partial class SelfTest
 
             await CaptureImport(window, model);
             await CaptureGuardian(window, model);
+            await CaptureClaudeCode(window, model);
             await CaptureImportExport(window, model);
 
             FillQueue(model, chat.Id);
