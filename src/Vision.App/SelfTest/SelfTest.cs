@@ -227,6 +227,7 @@ public sealed partial class SelfTest
 
             // Then a chat of 2,000 messages with a 10,214-line one: opened, paged, searched, copied and measured.
             await ProbeLongChat(window, model);
+            await ProbeLongChatPrompts(window, model);
         }
         catch (Exception error)
         {

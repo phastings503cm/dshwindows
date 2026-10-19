@@ -436,6 +436,9 @@ public partial class MainWindow : Window
     /// <summary>The chat view, for the self-test's measurements.</summary>
     internal ChatView SelfTestChatView => _chatView;
 
+    /// <summary>The Prompts timeline's Jump, for the self-test.</summary>
+    internal void SelfTestJumpToPrompt(PromptRecord record) => JumpToPrompt(record);
+
     /// <summary>The panel is on the right, so dragging left makes it wider and the chat gives way (never past its minimum).</summary>
     private void QueueSplitter_DragDelta(object sender, DragDeltaEventArgs e)
     {
