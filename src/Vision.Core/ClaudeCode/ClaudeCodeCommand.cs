@@ -134,8 +134,8 @@ public static class ClaudeCodeCommand
 
     /// <summary>How Claude Code takes attachments, within what the Messages API accepts in one request (32 MB, base64
     /// included; a picture's 5 MB counted on its base64): up to 20 pictures (PNG, JPEG, GIF, WebP) of at most 3.75 MB and up
-    /// to 5 PDFs of at most 20 MB, at most <see cref="MaxAttachmentBytes"/> of them per message, as themselves; past that —
-    /// and everything else — as the text Vision read out of it. The same limits as Vision for macOS.</summary>
+    /// to 5 PDFs of at most 20 MB, at most 20 MB of them per message (<see cref="AttachmentRoute.MaxRequestMediaBytes"/>), as
+    /// themselves; past that — and everything else — as the text Vision read out of it. The same limits as Vision for macOS.</summary>
     public static readonly AttachmentRoute Attachments = new()
     {
         Vision = true,
@@ -145,44 +145,12 @@ public static class ClaudeCodeCommand
         MaxImageBytes = 3_750_000,
         MaxDocuments = 5,
         MaxDocumentBytes = 20L * 1024 * 1024,
+        MaxRequestMediaBytes = 20L * 1024 * 1024,
     };
 
-    /// <summary>The most picture and PDF bytes one message carries as themselves (base64 makes them a third bigger).</summary>
-    public const long MaxAttachmentBytes = 20L * 1024 * 1024;
-
-    /// <summary>The attachments as the user message's content blocks (<see cref="Attachments"/>): an attachment whose pictures
-    /// or PDF would take the message past <see cref="MaxAttachmentBytes"/> goes as its text instead.</summary>
-    public static IReadOnlyList<AttachmentWirePart> AttachmentParts(IReadOnlyList<MessageAttachment> attachments)
-    {
-        var output = new List<AttachmentWirePart>();
-        long bytes = 0;
-        int images = 0, documents = 0;
-        foreach (var attachment in attachments)
-        {
-            var route = Attachments with
-            {
-                MaxImages = Math.Max(0, Attachments.MaxImages!.Value - images),
-                MaxDocuments = Math.Max(0, Attachments.MaxDocuments!.Value - documents),
-            };
-            var parts = AttachmentWire.Parts([attachment], route);
-            var size = parts.Sum(p => p switch
-            {
-                AttachmentWirePart.Image image => image.Data.LongLength,
-                AttachmentWirePart.Document doc => doc.Data.LongLength,
-                _ => 0L,
-            });
-            if (size > 0 && bytes + size > MaxAttachmentBytes)
-            {
-                output.Add(new AttachmentWirePart.Text(AttachmentWire.FallbackText(attachment)));
-                continue;
-            }
-            bytes += size;
-            images += parts.Count(p => p is AttachmentWirePart.Image);
-            documents += parts.Count(p => p is AttachmentWirePart.Document);
-            output.AddRange(parts);
-        }
-        return output;
-    }
+    /// <summary>The attachments as the user message's content blocks (<see cref="Attachments"/>).</summary>
+    public static IReadOnlyList<AttachmentWirePart> AttachmentParts(IReadOnlyList<MessageAttachment> attachments) =>
+        AttachmentWire.Parts(attachments, Attachments);
 
     private static readonly JsonSerializerOptions Compact = new() { WriteIndented = false };
 
