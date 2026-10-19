@@ -113,6 +113,17 @@ public sealed partial class SelfTest
             await Settle(350);
             Capture(window, "long-chat-jump");
 
+            // Find (Ctrl+F) searches every row, loaded or not, and jumps to the newest match.
+            view.SelfTestFind("Prompt 42:");
+            await Settle(350);
+            var found = prompts[41];
+            var foundRow = view.SelfTestPagingContainer(found);
+            var foundTop = foundRow?.TranslatePoint(new Point(0, 0), scroller).Y ?? double.NaN;
+            Note($"probe find: “Prompt 42:” — {view.SelfTestFindCount}; window {pager.Start:N0}–{pager.End:N0}; the match's top is {foundTop:F0} px into the viewport");
+            if (foundRow is null || foundTop < -1 || foundTop > scroller.ViewportHeight - 20) throw new InvalidOperationException("Find didn't bring its match into view");
+            Capture(window, "long-chat-find");
+            view.SelfTestCloseFind();
+
             // Back to the newest page, then a reply streamed in: the transcript follows it to the end.
             view.JumpToLatest();
             await Settle(400);

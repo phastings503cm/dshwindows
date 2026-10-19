@@ -146,6 +146,24 @@ public sealed class TranscriptPagingTests
     }
 
     [Fact]
+    public void FindSearchesEveryRowOfTheChat()
+    {
+        var rows = new List<ChatEntryVM>
+        {
+            new MessageEntryVM(MessageRole.User, "Prompt 1: check SKU-1000"),
+            new ToolEntryVM("read_file", "data/stock-1000.csv") { Summary = "20 lines", IsOk = true },
+            new MessageEntryVM(MessageRole.Assistant, "SKU-1000 is fine"),
+            new CompactionEntryVM(3, "Earlier: the SKU-0999 report"),
+            new MessageEntryVM(MessageRole.User, "prompt 2: and sku-1001?"),
+        };
+        Assert.Equal([rows[0], rows[4]], ChatView.FindIn(rows, "PROMPT"));
+        Assert.Equal([rows[1]], ChatView.FindIn(rows, "stock-1000.csv"));
+        Assert.Equal([rows[3]], ChatView.FindIn(rows, "sku-0999"));
+        Assert.Empty(ChatView.FindIn(rows, "   "));
+        Assert.Empty(ChatView.FindIn(rows, "nothing like this"));
+    }
+
+    [Fact]
     public void TheCopyButtonSaysCopiedThenGoesBack() => UiThread.Run(async () =>
     {
         var button = new CopyButton();
