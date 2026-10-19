@@ -20,6 +20,13 @@ public sealed record FleetTarget(ILlmClient Client, string Model, int? ContextWi
     public bool? Vision { get; init; }
     public double? Temperature { get; init; }
     public int? MaxOutputTokens { get; init; }
+    /// <summary>The target is another route's server, with settings of its own: its temperature, output limit and thinking
+    /// level are that route's (null = that provider's default), never the parent chat's. A Kimi or GLM worker must not be
+    /// sent the temperature, max_tokens or reasoning effort the main model's route was set up with — a server that rejects
+    /// them answers 400 and the subagent quietly ends up somewhere else. False (the primary): the parent's, as before.</summary>
+    public bool OwnSettings { get; init; }
+    /// <summary>The thinking level for this target when it has <see cref="OwnSettings"/> (null = the route's own default).</summary>
+    public ThinkingLevel? Thinking { get; init; }
 }
 
 /// <summary>One model server as the fleet sees it.</summary>
@@ -72,16 +79,20 @@ public sealed class FleetLease : IDisposable
     private bool _failed;
     private bool _abandoned;
 
-    internal FleetLease(AgentFleet fleet, FleetServer server, FleetTarget target)
+    internal FleetLease(AgentFleet fleet, FleetServer server, FleetTarget target, IReadOnlyList<string>? skipped = null)
     {
         _fleet = fleet;
         Server = server;
         Target = target;
+        Skipped = skipped ?? [];
     }
 
     public FleetServer Server { get; }
     public FleetTarget Target { get; }
     public string Label => Server.Label;
+    /// <summary>Servers tried first that couldn't take the work, and why ("DGX Spark: didn't answer") — so the person can
+    /// see why a subagent runs where it does.</summary>
+    public IReadOnlyList<string> Skipped { get; }
 
     /// <summary>The server misbehaved (unreachable, overloaded, erroring): keep new work away from it for a while.</summary>
     public void Fail(Exception error)
@@ -191,6 +202,7 @@ public sealed class AgentFleet
     public async Task<FleetLease> AcquireAsync(string? preferred, CancellationToken cancellationToken, bool sensitive = false, bool unattended = false)
     {
         var tried = new HashSet<string>(StringComparer.Ordinal);
+        var skipped = new List<string>();
         Exception? lastError = null;
         while (true)
         {
@@ -245,7 +257,7 @@ public sealed class AgentFleet
             try
             {
                 var target = await chosen.Resolve(cancellationToken).ConfigureAwait(false);
-                return new FleetLease(this, chosen, target);
+                return new FleetLease(this, chosen, target, skipped.ToList());
             }
             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
             {
@@ -256,12 +268,27 @@ public sealed class AgentFleet
             {
                 // Couldn't reach it: note that, free the slot, and try the next server.
                 lastError = error;
+                skipped.Add($"{chosen.Label}: {TextUtil.Prefix(error.Message, 140)}");
                 tried.Add(chosen.Id);
                 MarkFailed(chosen.Id, error);
                 Release(chosen.Id, failed: true);
             }
         }
     }
+
+    /// <summary>Whether <paramref name="server"/> is the one a preference names (its label or route id contains it, any case) —
+    /// how an agent file's <c>server:</c> line picks a server.</summary>
+    public static bool Matches(FleetServer server, string preferred)
+    {
+        var wanted = preferred.Trim();
+        return wanted.Length > 0 && (server.Label.Contains(wanted, StringComparison.OrdinalIgnoreCase)
+                                     || server.Id.Contains(wanted, StringComparison.OrdinalIgnoreCase));
+    }
+
+    /// <summary>A worker counts as reachable only if it lists its models — true for a server you run yourself (a Spark that is
+    /// down or swapping lists nothing). A hosted API (Kimi, Z.ai, OpenRouter…) is trusted with its configured model instead:
+    /// some plans' keys can't list models, and treating that as "down" sent every subagent to the main model without a word.</summary>
+    public static bool WorkerNeedsModelList(ProviderProfile route) => route.IsSelfHosted || string.IsNullOrWhiteSpace(route.Model);
 
     /// <summary>Whether <paramref name="error"/> is the server's fault rather than the request's — the kind
     /// of failure another server might not have.</summary>
@@ -342,9 +369,7 @@ public sealed class AgentFleet
 
         if (!string.IsNullOrWhiteSpace(preferred))
         {
-            var wanted = preferred.Trim();
-            var matches = healthy.Where(s => s.Label.Contains(wanted, StringComparison.OrdinalIgnoreCase)
-                                             || s.Id.Contains(wanted, StringComparison.OrdinalIgnoreCase)).ToList();
+            var matches = healthy.Where(s => Matches(s, preferred)).ToList();
             if (PickFrom(matches) is { } favourite) return favourite;
         }
         var workers = healthy.Where(s => !s.IsPrimary).ToList();

@@ -138,16 +138,25 @@ public sealed partial class AgentHost
             }
             if (info is null)
             {
-                info = await client.ModelInfoAsync(null, cancellationToken).ConfigureAwait(false);
-                if (info.Served.Count == 0) throw LlmException.Connection($"{route.BaseUrl} didn't answer");
-                lock (_workerProbe) _workerProbe[route.RouteId] = (info, DateTimeOffset.Now);
+                var fresh = await client.ModelInfoAsync(null, cancellationToken).ConfigureAwait(false);
+                if (fresh.Served.Count > 0)
+                {
+                    lock (_workerProbe) _workerProbe[route.RouteId] = (fresh, DateTimeOffset.Now);
+                    info = fresh;
+                }
+                // A hosted API (Kimi, Z.ai, OpenRouter…) may not list models for this key or plan: its configured model is the
+                // answer, and the first request says whether it works (a refusal moves the task on). Only a server you run
+                // yourself — a Spark that is down or swapping lists nothing — counts as not answering.
+                else if (AgentFleet.WorkerNeedsModelList(profile)) throw LlmException.Connection($"{route.BaseUrl} didn't answer");
             }
-            if (!string.IsNullOrEmpty(info.Id)) model = info.Id;
-            window ??= info.ContextWindow;
+            if (!string.IsNullOrEmpty(info?.Id)) model = info.Id;
+            window ??= info?.ContextWindow;
         }
+        // The worker's own settings — never the main route's temperature, output limit or thinking level.
         return new FleetTarget(client, model, window ?? FallbackContextWindow.Limit(model) ?? FallbackContextWindow.DefaultLimit)
         {
             Vision = vision, Temperature = profile.Temperature, MaxOutputTokens = profile.MaxOutputTokens,
+            OwnSettings = true, Thinking = profile.Thinking,
         };
     }
 
