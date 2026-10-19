@@ -7,8 +7,8 @@
 <p align="center">
   A native Windows coding agent that <em>is</em> the harness. It runs the tool loop itself and talks
   straight to an OpenAI-compatible model server — a DGX Spark or Strix Halo on your LAN, a local
-  Ollama or LM Studio, a GLM, Kimi, Qwen or OpenAI plan, or Amazon Bedrock. No Node, no sidecar
-  process, no web view.
+  Ollama or LM Studio, a GLM, Kimi, Qwen or OpenAI plan, Amazon Bedrock, or your organization's
+  Guardian. No Node, no sidecar process, no web view.
 </p>
 
 <p align="center">
@@ -288,7 +288,7 @@ Alibaba allows the Qwen Coding Plan only for interactive use, so its route is ma
 only (plan terms)** (a switch in the route editor, for any route): while it is a chat's model, that chat's
 task list won't start (or stops before its next task) and a `/goal` doesn't carry on by itself — pick
 another model for the chat for unattended work — and unattended work never falls back to it as a backup or
-sends subagents to it. Chats, and the subagents they start, are fine.
+sends subagents to it. Chats, the subagents they start, and prompts you queue with *Add to tasks* are fine.
 
 ## Using Amazon Bedrock
 
@@ -334,6 +334,29 @@ Need a **Bedrock API key** for another tool? The guide's last page can create on
 
 Costs are billed by AWS to your account (Amazon Bedrock, and AWS Marketplace for Marketplace models).
 To remove Vision's sign-in: `aws logout --profile vision-bedrock`.
+
+## Guardian
+
+**Settings › Guardian** (or *My Guardian account* on the wizard's first page) signs Vision in to your
+organization's [Guardian](https://guardian.503cm.com): with your email and password (and the authenticator
+code, when your account has one), or **Sign in with your browser…** for Microsoft and other single sign-on
+accounts — Guardian's page opens, you choose the organization, and Vision gets a sign-in you can revoke
+there (*Profile › API keys › Connected apps*). The sign-in is kept in Windows Credential Manager. Signed in,
+Vision gets whatever your Guardian role allows:
+
+- **Guardian's models** — **Use as my primary model** (or *Use for subagents*, *Just add it*) adds a route
+  through Guardian's model proxy, charged to you within your organization's limits. The page shows each
+  spend, token and request limit, what is left and when it resets.
+- **Prompt history** — every prompt, task and `/goal` goes to your Guardian Prompt Notebook when it starts and
+  again with how it ended.
+- **Skills, chats and projects** — take your account's skills, deposit yours, export chats and bring them back
+  (Vision for macOS reads the same format), and upload the open project (files that hold keys, such as `.env`,
+  are never sent).
+- **Secrets** — the ones you marked *Usable in Vision* in Guardian, used for this session only and never
+  saved on this PC (every use is recorded in Guardian).
+
+When Guardian says no, Vision says why in a dialog — what is missing and who can grant it, or which limit was
+reached and when it resets — never as a bare HTTP code.
 
 ## The window
 
@@ -402,6 +425,29 @@ is on. It reads the agent's `todo_write` list, or a plan written in a reply ("He
 2. … 3. …"). It opens by itself the first time a chat makes a plan; a checkbox at the bottom turns that
 off. While it is open, the plan card in the transcript shrinks to one line (*Plan updated — 3 of 7 done
 · Show*), so the plan isn't shown twice.
+
+**The turn card.** Every prompt runs *Planning → Execution → Validation → Results*, shown on a card under
+the newest message: the phases (the one in progress pulses), the runtime against an estimate learned from
+how long the same kind of work took before on this PC (and across your organization when you are signed in
+to Guardian), the plan's draft while it is written, what the agent is doing step by step, and at the end
+*Completed with results*, *Completed* or *Finished with issues*, how long it took against the estimate, and
+the evidence: the checks it ran (*Ran dotnet test*), the files it changed, its closing summary. A `/goal`
+or a task that says it is done while its own closing words report a failure is sent back to fix it and
+check again — as often as it takes, unless two attempts in a row make no progress on the same failure.
+
+**Prompts** (Ctrl+Shift+H, the history button in the top bar, or the *Prompts* tab beside *Tasks*) —
+every prompt sent in the chat, newest first under day headings: how it ended, how long it took against its
+estimate, attempts, the model and route it ran on, and its evidence. Search it; select one to **Copy** it,
+**Add to composer** (quoted with how it ended), **Jump to it** in the transcript, or open its **Results**.
+**All prompts** (Ctrl+Alt+H, or *Session › All Prompts…*) searches every chat on this PC; double-click one
+to open it in its chat. Prompts sent before this version are filled in once from the chats' transcripts.
+
+**Background activity** (Ctrl+Shift+A, or the bolt in the top bar, which counts what is working) — what
+every agent is doing, grouped by chat: each main agent, subagent, background agent and task list, what it
+was given (the goal, the prompt, the plan step), the model and route it runs on and why there (*tried
+first: Spark 2: didn't answer*), its status, time, tokens and current step, with **Log**, **Open its
+chat** and **Stop**. **Stop all** is at the top and each model server's load at the bottom. The Plan panel
+lists the subagents working each step (*↳ Write tests · qwen3-coder on Spark 2*).
 
 ## Permissions
 
@@ -480,6 +526,15 @@ A task that needs you is marked blocked and that chat's list pauses, so the next
 over the question: answer in the chat and press **Resume** on the task. Drag waiting tasks (or use
 the arrows) to reorder them; edit or delete any task that isn't running. The log (the clock button)
 records when each task started, every round, retries, and how it ended, with token counts and speed.
+
+**Add to tasks while it works.** The composer stays open while the agent works: **Enter** puts what you
+typed on the chat's tasks (the Send button becomes **Add to tasks**, beside Stop), and **Ctrl+Enter** does it
+any time. Each runs as the chat's next prompt exactly as written — a `/goal` stays a goal, a skill runs — as
+soon as the chat is free, in order, and you can keep adding while the list moves. The Tasks tab starts with a
+**Now** card for what the chat is doing — the prompt, `/goal` or task, its phase and runtime against the
+estimate, its plan steps and the subagent on each — then *Up next* and *Done*. A Stop, a failure or a goal
+that needs you pauses the rest (*Paused — you stopped the current work.*) until **Resume**, and after a
+restart they wait for Resume too. A queued task can't carry attachments: send those when the agent is free.
 
 Task lists are saved to `task-queue.json` and survive restarts: if the app quits or crashes mid-task,
 the task goes back in line and that chat's list picks up where it left off on the next launch (unless
@@ -599,6 +654,13 @@ keys, a file with a key inside) — the window says which. Skills that bundle sc
 approval in **Settings › Skills** (importing never runs a script); importing again updates notes rather
 than duplicating them, and a skill that hasn't changed isn't copied twice.
 
+**Settings › Import & Export** works with OpenClaw on this PC in both directions. It shows what it found
+there; **Preview and import…** brings it in as above, and **Export to OpenClaw…** sends Vision's skills, its
+remembered notes (as a marked block in OpenClaw's `MEMORY.md`, which an export again updates in place), its
+keys and passwords (into OpenClaw's `.env`, only after you confirm — they are plain text there) and its
+model servers (into `openclaw.json`, after a backup; a file with comments gets a separate file to paste
+from). When a name is already taken, you choose: keep both, replace what is there, or skip it.
+
 ## Remembered notes
 
 Vision keeps a long-term memory that survives between chats: short notes about you and your projects — *the
@@ -717,8 +779,8 @@ script; CI's upgrade test uses it.
 | `src/Vision.App` | The WPF app |
 | `src/Vision.Windows` | The computer-use tools (screen capture, UI Automation, input) |
 | `tests/Vision.Core.Tests` | xUnit tests (Windows-only ones are skipped elsewhere) |
-| `tests/Vision.App.Tests` | The app host against a fake model server: task lists, /goal, background agents, vault |
-| `tests/Vision.Windows.Tests` | The computer-use tools against real windows |
+| `tests/Vision.App.Tests` | The app host against a fake model server and a scripted Guardian: task lists, /goal, turn phases and prompts, attachments, each chat's model, background agents, the glow, Guardian, vault |
+| `tests/Vision.Windows.Tests` | The computer-use tools against real windows, background input included |
 | `installer/Vision.iss` | Inno Setup script |
 | `scripts/` | Packaging, self-test and installer-test scripts used by CI |
 | `.github/workflows` | `ci.yml` (pull requests and branches), `release.yml` (default branch → GitHub release) |
