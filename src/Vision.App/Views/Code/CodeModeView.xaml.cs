@@ -188,6 +188,10 @@ public partial class CodeModeView : UserControl
         ChatOnlySwitch.IsChecked = layout.ChatOnly;
         EditorSwitchText.Text = _code.Buffers.Count > 0 ? $"Editor · {_code.Buffers.Count}" : "Editor";
 
+        // Beside the editor the chat is narrow: the switches show their icons only (their tooltips name them).
+        foreach (var label in new[] { FilesSwitchText, EditorSwitchText, TerminalSwitchText, ChatOnlySwitchText })
+            label.Visibility = layout.ChatIsMain ? Visibility.Visible : Visibility.Collapsed;
+
         foreach (var toggle in new ToggleButton[] { TreeToggle, ChatToggle, TerminalToggle, FilesSwitch, EditorSwitch, TerminalSwitch, ChatOnlySwitch })
             toggle.SetResourceReference(ForegroundProperty, toggle.IsChecked == true ? "AccentTextFillColorPrimaryBrush" : "TextFillColorSecondaryBrush");
     }
