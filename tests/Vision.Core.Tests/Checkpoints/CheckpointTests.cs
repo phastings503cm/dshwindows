@@ -331,25 +331,30 @@ public sealed class CheckpointTests : IDisposable
         var (recorder, _) = Open();
         var before = recorder.BeforeShell(_tools.Root.Path);
         Assert.NotNull(before);
-        // "The command": it edits a clean file and the dirty one, deletes one, and makes an untracked one.
+        // "The command": it edits a clean file and the dirty one, deletes one, makes a new one, and writes build output git ignores.
         File.WriteAllText(clean, "clean v2\n");
         File.WriteAllText(dirty, "dirty v3\n");
         File.Delete(removed);
-        _tools.Root.Write("untracked.txt", "new");
+        _tools.Root.Write("made.txt", "new");
+        _tools.Root.Write(".gitignore", "bin/\n");
+        _tools.Root.Write("bin/out.dll", "ignored");
         var found = recorder.AfterShell(before, "run_shell_command");
 
-        Assert.Equal(3, found.Count);
+        Assert.Equal(5, found.Count); // clean, dirty, removed, made.txt and .gitignore (new); never bin/
         var turn = recorder.Finish()!;
         string Before(string path) => Text(Store.Get(turn.Files.Single(f => f.Path == Path.GetFullPath(path)).Before!));
         Assert.Equal("clean v1\n", Before(clean));
         Assert.Equal("dirty v2 (uncommitted, before the command)\n", Before(dirty));
         Assert.Equal("removed v1\n", Before(removed));
-        Assert.DoesNotContain(turn.Files, f => f.Path.EndsWith("untracked.txt", StringComparison.Ordinal));
+        Assert.Equal(CheckpointChange.Created, turn.Files.Single(f => f.Path.EndsWith("made.txt", StringComparison.Ordinal)).Change);
+        Assert.DoesNotContain(turn.Files, f => f.Path.Contains("out.dll", StringComparison.Ordinal));
 
         CheckpointRewind.Apply(Store, CheckpointRewind.Plan(Store, turn), includeConflicts: false);
         Assert.Equal("clean v1\n", File.ReadAllText(clean));
         Assert.Equal("dirty v2 (uncommitted, before the command)\n", File.ReadAllText(dirty));
         Assert.Equal("removed v1\n", File.ReadAllText(removed));
+        Assert.False(File.Exists(_tools.Root["made.txt"]));
+        Assert.True(File.Exists(_tools.Root["bin/out.dll"]));
     }
 
     [Fact]

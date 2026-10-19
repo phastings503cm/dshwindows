@@ -66,11 +66,11 @@ public sealed class StdioMcpTransport : IMcpTransport
         foreach (var (key, value) in _env) start.Environment[key] = value;
         try
         {
-            _process = Process.Start(start) ?? throw new McpException($"Couldn't start {_command}.");
+            _process = Process.Start(start) ?? throw new McpException($"The server didn't start: {_command}.");
         }
         catch (System.ComponentModel.Win32Exception error)
         {
-            throw new McpException($"Couldn't start {_command}: {error.Message}. Is it installed, and on the PATH?");
+            throw new McpException($"The server didn't start: {error.Message} ({_command} — is it installed, and on the PATH?)");
         }
         _ = Task.Run(() => ReadOutAsync(_process));
         _ = Task.Run(() => ReadErrorsAsync(_process));
@@ -292,8 +292,9 @@ public sealed class HttpMcpTransport : IMcpTransport
             _diagnostics = $"HTTP {(int)response.StatusCode}: {TextUtil.Prefix(body, 300)}";
             throw new McpException(response.StatusCode switch
             {
-                HttpStatusCode.Unauthorized or HttpStatusCode.Forbidden => $"{_url.Host} refused the request (HTTP {(int)response.StatusCode}). It may need a sign-in header (Authorization) in Settings › MCP Servers.",
-                _ => $"{_url.Host} answered HTTP {(int)response.StatusCode}: {TextUtil.Prefix(body, 200)}",
+                HttpStatusCode.Unauthorized or HttpStatusCode.Forbidden =>
+                    $"The server turned Vision away (HTTP {(int)response.StatusCode}) — check its key or token in Settings › MCP Servers. {TextUtil.Prefix(body, 200)}".Trim(),
+                _ => $"The server answered HTTP {(int)response.StatusCode}: {TextUtil.Prefix(body, 200)}".Trim(),
             });
         }
         if (response.StatusCode == HttpStatusCode.Accepted || response.Content.Headers.ContentLength == 0)
@@ -327,6 +328,7 @@ public sealed class HttpMcpTransport : IMcpTransport
     private HttpRequestMessage Request(HttpMethod method, Uri url)
     {
         var request = new HttpRequestMessage(method, url);
+        request.Headers.TryAddWithoutValidation("User-Agent", $"Vision/{AppInfo.Version} (Windows)");
         foreach (var (name, value) in _headers)
             if (!request.Headers.TryAddWithoutValidation(name, value)) _diagnostics = $"Header {name} couldn't be sent.";
         if (_sessionId is not null) request.Headers.TryAddWithoutValidation("Mcp-Session-Id", _sessionId);

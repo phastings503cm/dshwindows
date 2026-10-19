@@ -822,7 +822,8 @@ public sealed partial class AgentHost : ObservableObject
             case SlashCommand.Mcp mcp:
                 if (mcp.Argument?.Trim().ToLowerInvariant() is "reload" or "restart" or "reconnect")
                 {
-                    vm.Note("Reconnecting the MCP servers…");
+                    var count = Mcp.Statuses.Count(s => s.Config.Enabled);
+                    vm.Note($"Reconnecting {count} MCP server{(count == 1 ? "" : "s")}…");
                     _ = Task.Run(() => Mcp.ReconnectAllAsync());
                 }
                 else McpCommand(vm);
@@ -1215,7 +1216,7 @@ public sealed partial class AgentHost : ObservableObject
     {
         var store = AttachmentStoreFor(vm.Id);
         var route = AttachmentRouteFor(profile);
-        if (WithholdsPictures(vm, profile)) route = route with { Vision = false };
+        if (WithholdsPictures(vm, profile)) route = route with { Vision = false, Documents = false };
         var previous = vm.Activity;
         if (attachments.Any(a => a.Digest is null)) vm.Activity = "Reading attachments…";
         AttachmentPrep.Prepared prepared;

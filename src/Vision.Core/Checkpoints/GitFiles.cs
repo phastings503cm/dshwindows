@@ -6,11 +6,12 @@ namespace Vision.Core;
 // MARK: - What a shell command changed, through git
 //
 // A shell command names no files, so its changes are found through git when the project is a repository: before it runs,
-// the tracked files that are already changed (`git status`) are kept as they are; after it, every tracked file whose
-// status or content moved is one it changed, and its content before the command is either what was kept or — for a file
-// that was clean — what git has for it. Files git doesn't track are left alone (a rewind never deletes a build's output).
+// every file `git status` lists (changed, and new files git doesn't ignore) is kept as it is; after it, every file listed
+// before or after whose content moved is one it changed, and its content before the command is what was kept, else — for a
+// file that was clean — git's own copy, else nothing (the command created it). Ignored files (build output) are never
+// looked at. The same rules and git flags as Vision for macOS (GitChanges.swift).
 
-/// <summary>The tracked files of a repository that were changed before a shell command, as they were then.</summary>
+/// <summary>The files of a repository git listed before a shell command, as they were then.</summary>
 public sealed class ShellSnapshot
 {
     public required string RepoRoot { get; init; }
@@ -22,9 +23,9 @@ public sealed class ShellSnapshot
 /// the folder isn't a repository, or git takes too long.</summary>
 public static class GitFiles
 {
-    public static TimeSpan Timeout { get; set; } = TimeSpan.FromSeconds(8);
-    /// <summary>A repository with more changed files than this before a command isn't tracked for that command.</summary>
-    public const int MaxDirtyFiles = 400;
+    public static TimeSpan Timeout { get; set; } = TimeSpan.FromSeconds(15);
+    /// <summary>A repository listing more files than this isn't tracked for the command.</summary>
+    public const int MaxDirtyFiles = 3_000;
 
     /// <summary>The repository root that contains <paramref name="folder"/>, or null — spelled from <paramref name="folder"/> (git's
     /// own --show-toplevel resolves links: /var → /private/var on a Mac, a junction on Windows), so the paths found through git
@@ -51,30 +52,39 @@ public static class GitFiles
         return false;
     }
 
-    /// <summary>The tracked files git lists as changed (relative to <paramref name="root"/>, forward slashes), or null.</summary>
-    public static IReadOnlyList<string>? ChangedTracked(string root)
+    /// <summary>The files git lists — changed ones and new ones it doesn't ignore (relative to <paramref name="root"/>, forward
+    /// slashes) — or null.</summary>
+    public static IReadOnlyList<string>? ChangedTracked(string root) => Status(root)?.Select(e => e.Path).Distinct(StringComparer.Ordinal).ToList();
+
+    /// <summary>`git status` as (two-letter status, path) pairs ("??" = new, not ignored), or null.</summary>
+    public static IReadOnlyList<(string Status, string Path)>? Status(string root)
     {
-        if (Run(root, ["status", "--porcelain=v1", "-z", "--untracked-files=no", "--ignore-submodules=all"]) is not { } output) return null;
-        return ParseStatus(Encoding.UTF8.GetString(output));
+        if (Run(root, ["-c", "core.quotepath=off", "status", "--porcelain=v1", "-z", "--untracked-files=all", "--no-renames", "--ignore-submodules=all"]) is not { } output)
+            return null;
+        return ParseEntries(Encoding.UTF8.GetString(output));
     }
 
-    /// <summary>The paths in `git status --porcelain=v1 -z` output: "XY path\0", and for a rename or copy "XY new\0old\0"
-    /// (both paths count — the old one was removed).</summary>
-    public static IReadOnlyList<string> ParseStatus(string output)
+    /// <summary>The entries of `git status --porcelain=v1 -z` output: "XY path\0", a rename or copy "XY new\0old\0" (both
+    /// paths count — the old one was removed).</summary>
+    public static IReadOnlyList<(string Status, string Path)> ParseEntries(string output)
     {
-        var paths = new List<string>();
+        var entries = new List<(string, string)>();
         var parts = output.Split('\0');
         for (var i = 0; i < parts.Length; i++)
         {
             var entry = parts[i];
             if (entry.Length < 4) continue;
             var status = entry[..2];
-            paths.Add(entry[3..]);
+            entries.Add((status, entry[3..]));
             if ((status[0] is 'R' or 'C' || status[1] is 'R' or 'C') && i + 1 < parts.Length && parts[i + 1].Length > 0)
-                paths.Add(parts[++i]);
+                entries.Add((" D", parts[++i]));
         }
-        return paths.Distinct(StringComparer.Ordinal).ToList();
+        return entries;
     }
+
+    /// <summary>The paths in `git status --porcelain=v1 -z` output (both sides of a rename or copy).</summary>
+    public static IReadOnlyList<string> ParseStatus(string output) =>
+        ParseEntries(output).Select(e => e.Path).Distinct(StringComparer.Ordinal).ToList();
 
     /// <summary>What git's index has for <paramref name="relative"/> (a clean file's content), or null when it has nothing.</summary>
     public static byte[]? IndexContent(string root, string relative) => Run(root, ["cat-file", "blob", ":" + relative]);

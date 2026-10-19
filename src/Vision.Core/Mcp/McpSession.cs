@@ -95,14 +95,22 @@ public sealed class McpSession : IAsyncDisposable
         for (var page = 0; page < 50; page++)
         {
             var parameters = cursor is null ? new JsonObject() : new JsonObject { ["cursor"] = cursor };
-            var result = await RequestAsync("tools/list", parameters, cancellationToken).ConfigureAwait(false) as JsonObject;
+            JsonObject? result;
+            try
+            {
+                result = await RequestAsync("tools/list", parameters, cancellationToken).ConfigureAwait(false) as JsonObject;
+            }
+            catch (McpException error) when (error.Code == -32601)
+            {
+                break; // a server with no tools at all
+            }
             if (result?["tools"] is JsonArray list)
             {
                 foreach (var node in list.OfType<JsonObject>())
                 {
                     var name = Text(node, "name");
                     if (string.IsNullOrWhiteSpace(name)) continue;
-                    var schema = node["inputSchema"] is JsonObject s ? s.ToJsonString() : """{"type":"object","properties":{}}""";
+                    var schema = Schema(node["inputSchema"] as JsonObject);
                     var readOnly = node["annotations"] is JsonObject a && a["readOnlyHint"] is JsonValue r && r.TryGetValue<bool>(out var ro) && ro;
                     tools.Add(new McpToolInfo(name, Text(node, "description") ?? "", schema, readOnly, Text(node, "title")));
                 }
@@ -173,7 +181,7 @@ public sealed class McpSession : IAsyncDisposable
             if (Closed) throw new McpException("The server stopped." + Tail());
             // Tell the server to stop working on it.
             try { await NotifyAsync("notifications/cancelled", new JsonObject { ["requestId"] = id, ["reason"] = "timeout" }, CancellationToken.None).ConfigureAwait(false); } catch (Exception) { }
-            throw new McpException($"The server didn't answer {method} within {limit.TotalSeconds:0} seconds.");
+            throw new McpException($"The server didn't answer “{method}” in time.");
         }
         catch (OperationCanceledException)
         {
@@ -237,7 +245,10 @@ public sealed class McpSession : IAsyncDisposable
             // An answer to one of ours.
             if (!hasId || !TryId(idNode!, out var id) || !_pending.TryGetValue(id, out var waiter)) return;
             if (message["error"] is JsonObject error)
-                waiter.TrySetException(new McpException(Text(error, "message") ?? "The server reported an error.", (error["code"] as JsonValue)?.TryGetValue<int>(out var code) == true ? code : null));
+            {
+                int? code = (error["code"] as JsonValue)?.TryGetValue<int>(out var number) == true ? number : null;
+                waiter.TrySetException(new McpException($"The server refused it ({code?.ToString() ?? "?"}): {Text(error, "message") ?? "no reason given"}", code));
+            }
             else waiter.TrySetResult(message["result"]?.DeepClone());
             return;
         }
@@ -268,6 +279,15 @@ public sealed class McpSession : IAsyncDisposable
         if (value.TryGetValue<int>(out var small)) { id = small; return true; }
         if (value.TryGetValue<double>(out var d) && d == Math.Floor(d)) { id = (long)d; return true; }
         return value.TryGetValue<string>(out var s) && long.TryParse(s, out id);
+    }
+
+    /// <summary>A tool's input schema as the model APIs want it: an object type with properties, even when the server left them out.</summary>
+    internal static string Schema(JsonObject? schema)
+    {
+        var copy = schema?.DeepClone() as JsonObject ?? new JsonObject();
+        if (copy["type"] is null) copy["type"] = "object";
+        if (copy["properties"] is null) copy["properties"] = new JsonObject();
+        return copy.ToJsonString();
     }
 
     internal static string? Text(JsonObject obj, string key) =>

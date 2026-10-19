@@ -96,6 +96,7 @@ public static class Menus
                 // A Sensitive chat can't pick a route its policy refuses (Claude Code; online ones while the shield is off).
                 if (session is not null && model.Host.AdmissionFor(session, provider) is { IsAllowed: false, Refusal: { } refusal })
                 {
+                    item.Header = provider.DisplayName + " — not in a Sensitive chat";
                     item.IsEnabled = route == chosen;
                     item.ToolTip = refusal;
                     ToolTipService.SetShowOnDisabled(item, true);

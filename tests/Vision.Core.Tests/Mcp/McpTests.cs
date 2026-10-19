@@ -48,7 +48,7 @@ public sealed class McpTests : IDisposable
         await using var session = new McpSession(new LoopbackMcpTransport(new McpLoopbackServer()));
         await session.ConnectAsync(default);
         var error = await Assert.ThrowsAsync<McpException>(() => session.CallToolAsync("missing", new JsonObject(), default));
-        Assert.Equal(("Unknown tool: missing", -32602), (error.Message, error.Code));
+        Assert.Equal(("The server refused it (-32602): Unknown tool: missing", -32602), (error.Message, error.Code));
     }
 
     [Fact]
@@ -130,11 +130,11 @@ public sealed class McpTests : IDisposable
             ]}
             """.Replace("PNG", png))!.AsObject();
         var presented = McpTool.Present(result);
-        Assert.Equal("Found 2 issues\n[image 2: image/png]\n[resource file:///a.txt]\nhello\n[link: spec https://x/y]", presented.Output);
+        Assert.Equal("Found 2 issues\n[image 2]\nResource file:///a.txt:\nhello\n[resource: spec https://x/y]", presented.Output);
         Assert.Equal([1, 2, 3], Assert.Single(presented.Images).Data);
         Assert.Equal("Error: boom", McpTool.Present(JsonNode.Parse("""{"content":[{"type":"text","text":"boom"}],"isError":true}""")!.AsObject()).Output);
         Assert.Equal("Error: the tool reported an error.", McpTool.Present(JsonNode.Parse("""{"content":[],"isError":true}""")!.AsObject()).Output);
-        Assert.Equal("""{"total":3}""", McpTool.Present(JsonNode.Parse("""{"content":[],"structuredContent":{"total":3}}""")!.AsObject()).Output);
+        Assert.Equal("{\n  \"total\": 3\n}", McpTool.Present(JsonNode.Parse("""{"content":[],"structuredContent":{"total":3}}""")!.AsObject()).Output.Replace("\r\n", "\n"));
     }
 
     private async Task<(McpManager Manager, McpServerStore Store)> Connected(params McpServerConfig[] servers)
@@ -237,7 +237,7 @@ public sealed class McpTests : IDisposable
         Assert.Equal(2, manager.ToolsFor(null).Count);
         Assert.Equal(4, manager.ToolsFor(_dir.Path).Count);
         Assert.Single(manager.ToolsFor(null, ["mcp__everywhere__echo"]));
-        Assert.Equal("MCP servers connected (their tools are named mcp__<server>__<tool>): everywhere (2 tools). Each call asks the user first unless they allowed that server.",
+        Assert.Equal("--- MCP servers ---\nMCP servers connected (their tools are named mcp__<server>__<tool>): everywhere (2 tools). Each call asks the user first unless they allowed that server.",
             manager.PromptSection(null));
 
         // A tool kept from the model.
@@ -430,7 +430,7 @@ public sealed class McpTests : IDisposable
         var handler = new FakeHttpHandler(_ => new HttpResponseMessage(HttpStatusCode.Unauthorized) { Content = new StringContent("no") });
         await using var session = new McpSession(new HttpMcpTransport(new Uri("https://mcp.example.com/mcp"), new Dictionary<string, string>(), handler: handler));
         var error = await Assert.ThrowsAsync<McpException>(() => session.ConnectAsync(default));
-        Assert.Contains("may need a sign-in header", error.Message);
+        Assert.StartsWith("The server turned Vision away (HTTP 401) — check its key or token in Settings › MCP Servers.", error.Message);
     }
 
     [Fact]

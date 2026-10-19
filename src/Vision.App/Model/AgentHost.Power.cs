@@ -222,7 +222,7 @@ public sealed partial class AgentHost
         var statuses = Mcp.Statuses;
         if (statuses.Count == 0)
         {
-            vm.Note("No MCP servers yet. Add one, or import the ones Claude Code, Claude Desktop and Cursor already have, in Settings › MCP Servers.");
+            vm.Note("No MCP servers yet. Add one, or import the ones Claude Code, Claude Desktop or Cursor already have, in Settings › MCP Servers.");
             return;
         }
         vm.Note("MCP servers:\n" + string.Join("\n", statuses.Select(s =>
@@ -231,11 +231,10 @@ public sealed partial class AgentHost
             var applies = s.Config.AppliesTo(vm.WorkspacePath) ? "" : " — not used in this chat";
             var offered = s.Tools.Where(t => !s.Config.DisabledTools.Contains(t.Name)).ToList();
             var tools = s.State == McpState.Connected && offered.Count > 0
-                ? $" · {offered.Count} tool{(offered.Count == 1 ? "" : "s")}: " +
-                  string.Join(", ", offered.Take(12).Select(t => $"`{McpNames.ToolName(s.Config.Name, t.Name)}`")) + (offered.Count > 12 ? $" and {offered.Count - 12} more" : "")
+                ? $" · {offered.Count} tool{(offered.Count == 1 ? "" : "s")}: " + string.Join(", ", offered.Take(8).Select(t => t.Name)) + (offered.Count > 8 ? " …" : "")
                 : "";
             return $"• **{s.Config.Name}**{scope} — {s.Headline}{applies}{tools}";
-        })) + "\nManage them in Settings › MCP Servers.");
+        })) + "\n\nTheir tools are offered as `mcp__<server>__<tool>`. Settings › MCP Servers adds, imports and switches them; `/mcp reload` reconnects them.");
     }
 
     private void StopMcp()

@@ -27,7 +27,8 @@ public sealed class McpTool : IToolExecutor
         Spec = info is null
             ? new ToolSpec(Name, prefix + "List the server's resources, or read one by its uri.",
                 """{"type":"object","properties":{"uri":{"type":"string","description":"The resource to read; leave out to list them"}}}""")
-            : new ToolSpec(Name, prefix + TextUtil.Prefix(info.Description.Length > 0 ? info.Description : info.Title ?? info.Name, 2_000), info.InputSchema);
+            : new ToolSpec(Name, prefix + TextUtil.Prefix(info.Description.Length > 0 ? info.Description : info.Title ?? info.Name, 2_000),
+                McpSession.Schema(System.Text.Json.Nodes.JsonNode.Parse(info.InputSchema) as JsonObject));
     }
 
     public McpToolInfo? Info { get; }
@@ -103,26 +104,27 @@ public sealed class McpTool : IToolExecutor
                     {
                         var extension = (McpSession.Text(item, "mimeType") ?? "image/png").Split('/').LastOrDefault() ?? "png";
                         images.Add(new MessageAttachment(AttachmentKind.Image, $"mcp-image-{index}.{extension}", bytes));
-                        Line(text, $"[image {index}: {McpSession.Text(item, "mimeType") ?? "image"}]");
+                        Line(text, $"[image {index}]");
                     }
                     break;
                 case "audio":
-                    Line(text, $"[audio {index} ({McpSession.Text(item, "mimeType") ?? "audio"}) — not shown]");
+                    Line(text, $"[audio ({McpSession.Text(item, "mimeType") ?? "audio"}) — not shown]");
                     break;
                 case "resource":
                     if (item["resource"] is JsonObject resource)
                     {
                         var uri = McpSession.Text(resource, "uri") ?? "";
-                        if (McpSession.Text(resource, "text") is { } body) Line(text, $"[resource {uri}]\n{body}");
-                        else Line(text, $"[resource {uri} ({McpSession.Text(resource, "mimeType") ?? "binary"}) — not text]");
+                        if (McpSession.Text(resource, "text") is { } body) Line(text, $"Resource {uri}:\n{body}");
+                        else Line(text, $"[binary resource {uri} ({McpSession.Text(resource, "mimeType") ?? "application/octet-stream"})]");
                     }
                     break;
                 case "resource_link":
-                    Line(text, $"[link: {McpSession.Text(item, "name") ?? ""} {McpSession.Text(item, "uri") ?? ""}]".Replace("  ", " "));
+                    Line(text, $"[resource: {McpSession.Text(item, "name") ?? ""} {McpSession.Text(item, "uri") ?? ""}]".Replace("  ", " "));
                     break;
             }
         }
-        if (text.Length == 0 && result["structuredContent"] is JsonNode structured) text.Append(structured.ToJsonString());
+        if (text.Length == 0 && result["structuredContent"] is JsonNode structured)
+            text.Append(structured.ToJsonString(new System.Text.Json.JsonSerializerOptions { WriteIndented = true }));
         var output = text.ToString().Trim();
         var isError = result["isError"] is JsonValue flag && flag.TryGetValue<bool>(out var e) && e;
         if (isError) return "Error: " + (output.Length == 0 ? "the tool reported an error." : output);

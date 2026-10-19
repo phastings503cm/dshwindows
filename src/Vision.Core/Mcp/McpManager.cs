@@ -87,7 +87,7 @@ public sealed class McpConnection
                 session.Disconnected += () =>
                 {
                     if (!ReferenceEquals(_session, session)) return;
-                    Fail("it stopped." + (session.Transport.Diagnostics is { Length: > 0 } d ? " " + TextUtil.Suffix(d.Trim(), 400) : ""));
+                    Fail("The server stopped" + (session.Transport.Diagnostics is { Length: > 0 } d ? ": " + TextUtil.Suffix(d.Trim(), 400) : "."));
                 };
                 Changed?.Invoke();
             }
@@ -95,7 +95,7 @@ public sealed class McpConnection
                                               or System.Text.Json.JsonException or HttpRequestException)
             {
                 var why = error is OperationCanceledException && !cancellationToken.IsCancellationRequested
-                    ? $"it didn't answer within {ConnectTimeout.TotalSeconds:0} seconds."
+                    ? "The server didn't answer “initialize” in time."
                     : error.Message;
                 if (transport.Diagnostics is { Length: > 0 } diagnostics && !why.Contains(diagnostics, StringComparison.Ordinal))
                     why += " " + TextUtil.Suffix(diagnostics.Trim(), 400);
@@ -304,7 +304,7 @@ public sealed class McpManager : IAsyncDisposable
     {
         var live = Live(project);
         if (live.Count == 0) return null;
-        return "MCP servers connected (their tools are named mcp__<server>__<tool>): " +
+        return "--- MCP servers ---\nMCP servers connected (their tools are named mcp__<server>__<tool>): " +
                string.Join(", ", live.Select(c => $"{c.Config.Name} ({c.Tools.Count} tool{(c.Tools.Count == 1 ? "" : "s")})")) +
                ". Each call asks the user first unless they allowed that server.";
     }

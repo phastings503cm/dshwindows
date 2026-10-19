@@ -97,14 +97,16 @@ public sealed class TurnRecorder
     public IReadOnlyList<FileChange> AfterShell(ShellSnapshot? before, string by)
     {
         var found = new List<FileChange>();
-        if (before is null || GitFiles.ChangedTracked(before.RepoRoot) is not { } changed) return found;
+        if (before is null || GitFiles.Status(before.RepoRoot) is not { } changed) return found;
         var candidates = new HashSet<string>(before.Dirty.Keys, PathComparer);
         var relativeOf = new Dictionary<string, string>(PathComparer);
-        foreach (var relative in changed)
+        var untracked = new HashSet<string>(PathComparer);
+        foreach (var (status, relative) in changed)
         {
             if (Full(before.RepoRoot, relative) is not { } full) continue;
             candidates.Add(full);
             relativeOf[full] = relative;
+            if (status == "??") untracked.Add(full);
         }
         foreach (var full in candidates)
         {
@@ -122,10 +124,12 @@ public sealed class TurnRecorder
             }
             else
             {
-                // Clean before the command: what git has is what it was.
+                // Clean before the command: what git has is what it was — or, when git has nothing, the command created it.
                 var relative = relativeOf.GetValueOrDefault(full) ?? Path.GetRelativePath(before.RepoRoot, full).Replace('\\', '/');
-                if (GitFiles.IndexContent(before.RepoRoot, relative) is not { } content) continue;
-                if (content.LongLength > CheckpointStore.MaxFileBytes)
+                var content = untracked.Contains(full) ? null : GitFiles.IndexContent(before.RepoRoot, relative);
+                if (content is null && !untracked.Contains(full)) continue; // git couldn't say what it was: leave it alone
+                if (content is null) was = null;
+                else if (content.LongLength > CheckpointStore.MaxFileBytes)
                 {
                     was = CheckpointStore.Hash(content);
                     skipped = TooLarge(content.LongLength);
