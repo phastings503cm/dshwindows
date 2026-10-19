@@ -321,6 +321,44 @@
             <chat:PhaseCardView Visibility="{Binding IsVisible, Converter={StaticResource BoolToVisibility}}" />
         </DataTemplate>
 
+        <!-- The windowed transcript's edges (10-19 #14): "Load earlier messages · 1,950 earlier" above the window, and below one
+             that stops short of the newest row "Load newer messages · 120 newer" and "Jump to latest". -->
+        <DataTemplate DataType="{x:Type chat:TranscriptPagerRow}">
+            <Grid x:Name="Pager" Margin="28,0,0,16" Visibility="{Binding IsVisible, Converter={StaticResource BoolToVisibility}}">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="*" />
+                </Grid.ColumnDefinitions>
+                <Border Height="1" VerticalAlignment="Center" Margin="0,0,10,0" Background="{DynamicResource DividerStrokeColorDefaultBrush}" />
+                <StackPanel Grid.Column="1" Orientation="Horizontal">
+                    <Button Style="{StaticResource SubtleButton}" Padding="10,4" Click="PagerRow_Click" ToolTip="{Binding ToolTip}">
+                        <StackPanel Orientation="Horizontal">
+                            <TextBlock x:Name="Arrow" Style="{StaticResource Glyph}" FontSize="11" Text="{x:Static infra:Icons.Up}" Margin="0,1,7,0"
+                                       Foreground="{DynamicResource AccentTextFillColorPrimaryBrush}" />
+                            <TextBlock Text="{Binding Title}" FontSize="12.5" Foreground="{DynamicResource AccentTextFillColorPrimaryBrush}" />
+                            <TextBlock Text="{Binding Count, StringFormat=' · {0}'}" FontSize="12.5" Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
+                        </StackPanel>
+                    </Button>
+                    <Button x:Name="Latest" Style="{StaticResource SubtleButton}" Padding="10,4" Margin="4,0,0,0" Click="JumpToLatest_Click"
+                            Visibility="Collapsed" ToolTip="Show the newest messages and follow the chat again">
+                        <StackPanel Orientation="Horizontal">
+                            <TextBlock Style="{StaticResource Glyph}" FontSize="11" Text="{x:Static infra:Icons.Down}" Margin="0,1,7,0"
+                                       Foreground="{DynamicResource AccentTextFillColorPrimaryBrush}" />
+                            <TextBlock Text="Jump to latest" FontSize="12.5" Foreground="{DynamicResource AccentTextFillColorPrimaryBrush}" />
+                        </StackPanel>
+                    </Button>
+                </StackPanel>
+                <Border Grid.Column="2" Height="1" VerticalAlignment="Center" Margin="10,0,0,0" Background="{DynamicResource DividerStrokeColorDefaultBrush}" />
+            </Grid>
+            <DataTemplate.Triggers>
+                <DataTrigger Binding="{Binding IsTop}" Value="False">
+                    <Setter TargetName="Arrow" Property="Text" Value="{x:Static infra:Icons.Down}" />
+                    <Setter TargetName="Latest" Property="Visibility" Value="Visible" />
+                </DataTrigger>
+            </DataTemplate.Triggers>
+        </DataTemplate>
+
         <!-- While the agent works: what it is doing, and a live tail of its reasoning. -->
         <DataTemplate DataType="{x:Type chat:ThinkingFooter}">
             <Grid Margin="0,0,0,14" Visibility="{Binding IsVisible, Converter={StaticResource BoolToVisibility}}">
@@ -386,7 +424,7 @@
 
         <!-- Transcript -->
         <ItemsControl x:Name="Transcript" Grid.Row="0" Focusable="False"
-                      VirtualizingPanel.IsVirtualizing="True" VirtualizingPanel.VirtualizationMode="Standard"
+                      VirtualizingPanel.IsVirtualizing="True" VirtualizingPanel.VirtualizationMode="Recycling"
                       VirtualizingPanel.ScrollUnit="Pixel" VirtualizingPanel.CacheLength="2,2" VirtualizingPanel.CacheLengthUnit="Page"
                       ScrollViewer.CanContentScroll="True">
             <ItemsControl.Template>

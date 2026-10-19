@@ -48,6 +48,7 @@ public partial class ChatView : UserControl
     {
         _model = model;
         InitializeComponent();
+        InitPaging();
         AttachmentList.ItemsSource = _attachments;
         _attachments.CollectionChanged += (_, _) =>
         {
@@ -125,6 +126,7 @@ public partial class ChatView : UserControl
         old.PendingGates.CollectionChanged -= OnGatesChanged;
         old.ContentChanged -= ScrollIfPinned;
         old.BackgroundJobs.CollectionChanged -= OnBackgroundJobsChanged;
+        DetachPaging();
     }
 
     private void Attach()
@@ -145,13 +147,7 @@ public partial class ChatView : UserControl
         session.ContentChanged += ScrollIfPinned;
         session.BackgroundJobs.CollectionChanged += OnBackgroundJobsChanged;
 
-        Transcript.ItemsSource = new CompositeCollection
-        {
-            new CollectionContainer { Collection = session.Entries },
-            _phase,
-            _thinking,
-            _files,
-        };
+        Transcript.ItemsSource = TranscriptSource(session);
         if (_drafts.Remove(session.Id, out var draft))
         {
             Composer.Text = draft.Text;
@@ -223,6 +219,7 @@ public partial class ChatView : UserControl
     {
         UpdateStarter();
         if (e.NewItems is { } added && added.OfType<TodosEntryVM>().Any()) UpdateTodoCards();
+        PageOnEntriesChanged();
         ScrollIfPinned();
     }
 
@@ -333,23 +330,32 @@ public partial class ChatView : UserControl
         if (_scroller is null) return;
         _scroller.ScrollChanged += (_, e) =>
         {
-            if (e.ExtentHeightChange == 0 && e.ViewportHeightChange == 0)
+            // The user scrolled (the wheel, the scrollbar, a key — even when rows laid out on the way changed the extent in the
+            // same pass, which used to snap a pinned transcript straight back to its end), or only the offset changed: stay put
+            // unless they came back to the bottom (of the newest page).
+            if ((e.VerticalChange != 0 && ReaderScrolling) || (e.ExtentHeightChange == 0 && e.ViewportHeightChange == 0))
             {
-                // The user scrolled: stay put unless they came back to the bottom.
-                _pinned = _scroller.VerticalOffset >= _scroller.ScrollableHeight - 32;
+                _pinned = _scroller.VerticalOffset >= _scroller.ScrollableHeight - 32 && _window is not { IsLive: false };
+                PageOnScroll();
             }
             else if (_pinned)
             {
                 _scroller.ScrollToEnd();
             }
         };
+        WatchReaderScrolling(_scroller);
     }
+
+    private bool _scrollQueued;
 
     private void ScrollIfPinned()
     {
-        if (!_pinned || _scroller is null) return;
+        // A streamed reply changes the transcript many times a second: one scroll per frame is enough.
+        if (!_pinned || _scroller is null || _scrollQueued) return;
+        _scrollQueued = true;
         Dispatcher.BeginInvoke(DispatcherPriority.Background, () =>
         {
+            _scrollQueued = false;
             if (_pinned) _scroller?.ScrollToEnd();
         });
     }
