@@ -172,7 +172,9 @@ public sealed class PromptsPanel : UserControl
         Host.RunsChanged += QueueRefresh;
         _clock.Tick += (_, _) =>
         {
-            if (_watched?.CurrentPrompt is not null) Refresh();
+            // A running prompt's clock moves: redraw the rows (never under a click in progress).
+            if (_watched?.CurrentPrompt is null || (IsMouseOver && Mouse.LeftButton == MouseButtonState.Pressed)) return;
+            Refresh();
         };
         IsVisibleChanged += (_, _) =>
         {
@@ -249,8 +251,16 @@ public sealed class PromptsPanel : UserControl
         }
         var selected = _selectedId is { } id ? records.FirstOrDefault(r => r.Id == id) : null;
         _detailHost.Visibility = selected is null ? Visibility.Collapsed : Visibility.Visible;
-        _detail.Content = selected is null ? null : PromptRows.Detail(selected, vm.Title, _actions, Window.GetWindow(this));
+        // The detail is rebuilt only when what it shows changed, so text selected in it stays selected.
+        var stamp = selected is null ? "" : $"{selected.Id}|{selected.Outcome}|{selected.FinishedAt}|{selected.Evidence.Count}|{selected.Attempts}|{selected.Rounds}";
+        if (stamp != _detailStamp)
+        {
+            _detailStamp = stamp;
+            _detail.Content = selected is null ? null : PromptRows.Detail(selected, vm.Title, _actions, Window.GetWindow(this));
+        }
     }
+
+    private string _detailStamp = "";
 }
 
 /// <summary>How a prompt is drawn — the same in the Prompts panel and All prompts.</summary>

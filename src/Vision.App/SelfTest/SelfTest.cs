@@ -525,14 +525,16 @@ public sealed class SelfTest
             });
             var menu = window.SelfTestActivityMenu();
             if (menu.Parent is System.Windows.Controls.Primitives.Popup popup) popup.Child = null;
+            var frame = new System.Windows.Controls.Border { Child = menu, Padding = new Thickness(12) };
             var host = new Window
             {
                 Owner = window, Width = 500, SizeToContent = SizeToContent.Height, WindowStyle = WindowStyle.ToolWindow, Title = "Background activity",
-                Content = new System.Windows.Controls.Border { Child = menu, Padding = new Thickness(12) },
+                Content = frame,
             };
             host.SetResourceReference(Window.BackgroundProperty, "SolidBackgroundFillColorBaseBrush");
             await ShowAndCapture(host, "activity-menu");
             host.Content = null;
+            frame.Child = null;
             window.RestoreActivityMenu(menu);
             chat.Running = false;
             chat.Goal = null;
