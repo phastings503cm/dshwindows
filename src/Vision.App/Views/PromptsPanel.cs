@@ -509,10 +509,26 @@ public sealed class AllPromptsWindow : Window
         root.Children.Add(hint);
         root.Children.Add(body);
         Content = root;
-        _model.Host.RunsChanged += Reload;
-        Closed += (_, _) => _model.Host.RunsChanged -= Reload;
+        // Prompts change often while chats work: read every chat's timeline at most twice a second.
+        _later.Tick += (_, _) =>
+        {
+            _later.Stop();
+            Reload();
+        };
+        void Soon()
+        {
+            if (!_later.IsEnabled) _later.Start();
+        }
+        _model.Host.RunsChanged += Soon;
+        Closed += (_, _) =>
+        {
+            _model.Host.RunsChanged -= Soon;
+            _later.Stop();
+        };
         Reload();
     }
+
+    private readonly DispatcherTimer _later = new() { Interval = TimeSpan.FromMilliseconds(500) };
 
     public void Reload()
     {
