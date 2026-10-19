@@ -126,6 +126,16 @@ public static class TranscriptCopy
         return shown;
     }
 
+    /// <summary>A prompt with the text of what was pasted into it (a large paste travels as an attachment, not in the
+    /// message): what was typed, then each paste, a blank line apart; a paste sent on its own comes back exactly.</summary>
+    public static string WithPastes(string typed, IEnumerable<string> pasted)
+    {
+        var parts = new List<string>();
+        if (typed.Length > 0) parts.Add(typed);
+        parts.AddRange(pasted.Where(p => p.Length > 0));
+        return string.Join("\n\n", parts);
+    }
+
     private static readonly (string Prefix, string Replacement)[] Decorations =
     [
         ("🎯 /goal (resuming) ", "/goal "),

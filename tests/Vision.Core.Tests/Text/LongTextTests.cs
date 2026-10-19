@@ -110,4 +110,14 @@ public sealed class LongTextTests
     [InlineData("  keeps its own spacing\n\nand lines  ", "  keeps its own spacing\n\nand lines  ")]
     [InlineData("a 🎯 /goal in the middle stays", "a 🎯 /goal in the middle stays")]
     public void CopyGivesAPromptBackAsItWasSent(string shown, string copied) => Assert.Equal(copied, TranscriptCopy.Prompt(shown));
+
+    [Fact]
+    public void CopyPutsAPromptsPastesBackAfterWhatWasTyped()
+    {
+        var paste = Lines(10_214);
+        Assert.Equal(paste, TranscriptCopy.WithPastes("", [paste]));
+        Assert.Equal("why is this slow?\n\n" + paste, TranscriptCopy.WithPastes("why is this slow?", [paste]));
+        Assert.Equal("a\n\nb\n\nc", TranscriptCopy.WithPastes("a", ["b", "", "c"]));
+        Assert.Equal("typed only", TranscriptCopy.WithPastes("typed only", []));
+    }
 }
