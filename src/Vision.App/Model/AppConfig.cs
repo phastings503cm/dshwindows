@@ -18,8 +18,9 @@ public sealed record SessionSkillSelection(IReadOnlyList<string> Pinned, bool Au
     public static SessionSkillSelection Default { get; } = new([], true);
 }
 
-/// <summary>What code mode reopens with for one project.</summary>
-public sealed record CodeState(IReadOnlyList<string> Files, string? Active, bool Terminal, bool Tree, bool Chat = true);
+/// <summary>What code mode reopens with for one project. <paramref name="Editor"/>: whether the editor showed in the
+/// centre (null in layouts saved before it had a switch: shown when files were open).</summary>
+public sealed record CodeState(IReadOnlyList<string> Files, string? Active, bool Terminal, bool Tree, bool Chat = true, bool? Editor = null);
 
 /// <summary>Settings › AI Models › Sensitive data: whether the shield masks what goes to models that aren't private,
 /// which kinds of value, and the user's own terms (one per line; "re:" for a regular expression).</summary>

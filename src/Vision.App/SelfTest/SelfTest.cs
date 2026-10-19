@@ -110,6 +110,7 @@ public sealed partial class SelfTest
             await Settle(4000);
             Capture(window, "code");
             Note($"terminal: {model.Code.ActiveTerminal?.Transcript.Split('\n').FirstOrDefault(l => l.Trim().Length > 0) ?? "(none)"}");
+            await CaptureCodeLayouts(window, model);
 
             model.Mode = WorkspaceMode.Chat;
             model.NewChat();

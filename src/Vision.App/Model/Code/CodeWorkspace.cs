@@ -29,11 +29,14 @@ public sealed partial class CodeWorkspace : ObservableObject
 
     public ObservableCollection<TerminalSession> Terminals { get; } = [];
     [ObservableProperty] private TerminalSession? _activeTerminal;
-    [ObservableProperty] private bool _terminalVisible;
+    [ObservableProperty] [NotifyPropertyChangedFor(nameof(Layout))] private bool _terminalVisible;
 
-    [ObservableProperty] private bool _showTree = true;
-    /// <summary>Whether code mode shows the chat pane beside the editor.</summary>
-    [ObservableProperty] private bool _showChat = true;
+    [ObservableProperty] [NotifyPropertyChangedFor(nameof(Layout))] private bool _showTree = true;
+    /// <summary>Whether code mode shows the chat pane beside the editor (with the editor hidden, the chat always shows).</summary>
+    [ObservableProperty] [NotifyPropertyChangedFor(nameof(Layout))] private bool _showChat = true;
+    /// <summary>Whether code mode shows the editor in the centre. Off — the default for a project — the chat is the main
+    /// view; opening a file turns it on.</summary>
+    [ObservableProperty] [NotifyPropertyChangedFor(nameof(Layout))] private bool _showEditor;
     /// <summary>Raised when a file could not be opened, renamed, or deleted.</summary>
     [ObservableProperty] private string? _errorMessage;
 
@@ -60,7 +63,39 @@ public sealed partial class CodeWorkspace : ObservableObject
             OnPropertyChanged(nameof(HasUnsavedChanges));
             OnPropertyChanged(nameof(HasBuffers));
         };
-        Terminals.CollectionChanged += (_, _) => OnPropertyChanged(nameof(HasTerminals));
+        Terminals.CollectionChanged += (_, _) =>
+        {
+            OnPropertyChanged(nameof(HasTerminals));
+            OnPropertyChanged(nameof(Layout));
+        };
+    }
+
+    /// <summary>What code mode shows now (see <see cref="CodeLayout"/>).</summary>
+    public CodeLayout Layout => CodeLayout.For(ShowTree, ShowEditor, TerminalVisible, ShowChat, Terminals.Count > 0);
+
+    /// <summary>The panes "Chat only" hid, to bring back when it is turned off.</summary>
+    private (bool Tree, bool Editor, bool Terminal)? _beforeChatOnly;
+
+    /// <summary>Hide the file tree, the editor and the terminal so the chat and the project status fill the window — or,
+    /// when that is how it is, bring back what was showing before (the file tree, if nothing was).</summary>
+    public void ToggleChatOnly()
+    {
+        if (Layout.ChatOnly)
+        {
+            var before = _beforeChatOnly ?? (true, false, false);
+            _beforeChatOnly = null;
+            if (!before.Tree && !before.Editor && !before.Terminal) before = (true, false, false);
+            ShowTree = before.Tree;
+            ShowEditor = before.Editor && Buffers.Count > 0;
+            TerminalVisible = before.Terminal && Terminals.Count > 0;
+            if (!ShowTree && !ShowEditor && !TerminalVisible) ShowTree = true;
+            return;
+        }
+        _beforeChatOnly = (ShowTree, ShowEditor, TerminalVisible && Terminals.Count > 0);
+        ShowTree = false;
+        ShowEditor = false;
+        TerminalVisible = false;
+        ShowChat = true;
     }
 
     public bool HasUnsavedChanges => Buffers.Any(b => b.IsDirty);
@@ -71,6 +106,7 @@ public sealed partial class CodeWorkspace : ObservableObject
     partial void OnRootChanged(string? value) => OnPropertyChanged(nameof(RootName));
     partial void OnShowTreeChanged(bool value) => PersistState();
     partial void OnShowChatChanged(bool value) => PersistState();
+    partial void OnShowEditorChanged(bool value) => PersistState();
     partial void OnTerminalVisibleChanged(bool value) => PersistState();
     partial void OnActiveBufferChanged(CodeDocument? value)
     {
@@ -92,6 +128,11 @@ public sealed partial class CodeWorkspace : ObservableObject
         if (string.Equals(root, Root, StringComparison.OrdinalIgnoreCase)) return;
         Close();
         Root = root;
+        // A project opens on the chat; its own last layout, if it has one, follows.
+        _restoring = true;
+        ShowEditor = false;
+        _beforeChatOnly = null;
+        _restoring = false;
         var node = new FileNode(root, isDirectory: true);
         node.Load();
         node.IsExpanded = true;
@@ -131,6 +172,7 @@ public sealed partial class CodeWorkspace : ObservableObject
         if (Buffers.FirstOrDefault(b => SamePath(b.Path, path)) is { } existing)
         {
             ActiveBuffer = existing;
+            ShowEditor = true;
             return;
         }
         if (Directory.Exists(path)) return;
@@ -153,6 +195,8 @@ public sealed partial class CodeWorkspace : ObservableObject
         }
         Buffers.Add(buffer);
         ActiveBuffer = buffer;
+        // A file opens in the centre.
+        ShowEditor = true;
         if (FindNode(path) is { } node) node.IsDirty = false;
         PersistState();
     }
@@ -166,6 +210,8 @@ public sealed partial class CodeWorkspace : ObservableObject
         if (FindNode(buffer.Path) is { } node) node.IsDirty = false;
         if (ReferenceEquals(ActiveBuffer, buffer))
             ActiveBuffer = Buffers.Count == 0 ? null : Buffers[Math.Min(index, Buffers.Count - 1)];
+        // The last file closed: the chat takes the centre again.
+        if (Buffers.Count == 0) ShowEditor = false;
         PersistState();
     }
 
@@ -360,7 +406,7 @@ public sealed partial class CodeWorkspace : ObservableObject
     {
         if (_restoring || Root is null) return;
         _config.SetCodeState(Root, new CodeState(Buffers.Select(b => b.Path).ToList(), ActiveBuffer?.Path,
-                                                 TerminalVisible, ShowTree, ShowChat));
+                                                 TerminalVisible, ShowTree, ShowChat, ShowEditor));
     }
 
     private void RestoreState(string root)
@@ -377,6 +423,8 @@ public sealed partial class CodeWorkspace : ObservableObject
                 ActiveBuffer = buffer;
                 Tree?.ExpandToward(buffer.Path);
             }
+            // Layouts saved before the editor had a switch showed it whenever files were open.
+            ShowEditor = (state.Editor ?? true) && Buffers.Count > 0;
         }
         finally
         {

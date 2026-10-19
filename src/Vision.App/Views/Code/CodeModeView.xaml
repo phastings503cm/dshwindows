@@ -36,17 +36,24 @@
         </Style>
     </UserControl.Resources>
 
+    <!-- The chat is the main view: it fills what the editor leaves (CodeLayout). The file tree, the editor and the terminal
+         each switch on and off from the project status bar above the chat; the terminal runs under both. -->
     <Grid x:Name="Root">
         <Grid.ColumnDefinitions>
             <ColumnDefinition x:Name="TreeColumn" Width="250" MinWidth="160" MaxWidth="520" />
             <ColumnDefinition Width="Auto" />
-            <ColumnDefinition Width="*" MinWidth="300" />
+            <ColumnDefinition x:Name="EditorColumn" Width="*" MinWidth="300" />
             <ColumnDefinition Width="Auto" />
             <ColumnDefinition x:Name="ChatColumn" Width="420" MinWidth="320" MaxWidth="760" />
         </Grid.ColumnDefinitions>
+        <Grid.RowDefinitions>
+            <RowDefinition Height="*" MinHeight="120" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition x:Name="TerminalRow" Height="240" MinHeight="0" />
+        </Grid.RowDefinitions>
 
         <!-- File tree -->
-        <Grid x:Name="TreePane" Grid.Column="0" Background="{DynamicResource LayerFillColorDefaultBrush}">
+        <Grid x:Name="TreePane" Grid.Column="0" Grid.RowSpan="3" Background="{DynamicResource LayerFillColorDefaultBrush}">
             <Grid.RowDefinitions>
                 <RowDefinition Height="Auto" />
                 <RowDefinition Height="*" />
@@ -122,17 +129,11 @@
                         Click="OpenFolder_Click" />
             </StackPanel>
         </Grid>
-        <GridSplitter x:Name="TreeSplitter" Grid.Column="1" Style="{StaticResource PaneSplitter}" />
+        <GridSplitter x:Name="TreeSplitter" Grid.Column="1" Grid.RowSpan="3" Style="{StaticResource PaneSplitter}" />
 
-        <!-- Editor and terminal -->
+        <!-- Editor: files open here, in the centre -->
         <Grid Grid.Column="2" x:Name="CenterPane">
-            <Grid.RowDefinitions>
-                <RowDefinition Height="*" MinHeight="120" />
-                <RowDefinition Height="Auto" />
-                <RowDefinition x:Name="TerminalRow" Height="240" MinHeight="0" />
-            </Grid.RowDefinitions>
-
-            <DockPanel Grid.Row="0">
+            <DockPanel>
                 <!-- Tab strip with layout toggles -->
                 <Border DockPanel.Dock="Top" Height="34" BorderThickness="0,0,0,1" BorderBrush="{DynamicResource DividerStrokeColorDefaultBrush}"
                         Background="{DynamicResource LayerFillColorAltBrush}">
@@ -251,62 +252,119 @@
                 </Grid>
             </DockPanel>
 
-            <GridSplitter x:Name="TerminalSplitter" Grid.Row="1" Style="{StaticResource PaneSplitterRow}" />
-
-            <!-- Terminal panel -->
-            <DockPanel x:Name="TerminalPane" Grid.Row="2">
-                <Border DockPanel.Dock="Top" Height="32" BorderThickness="0,0,0,1" BorderBrush="{DynamicResource DividerStrokeColorDefaultBrush}"
-                        Background="{DynamicResource LayerFillColorAltBrush}">
-                    <DockPanel>
-                        <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" Margin="4,0">
-                            <Button Style="{StaticResource IconButton}" Content="{x:Static infra:Icons.Add}" FontSize="11" MinWidth="26" MinHeight="26"
-                                    Padding="5" Click="NewTerminal_Click" ToolTip="New terminal (Ctrl+Shift+`)" />
-                            <Button Style="{StaticResource IconButton}" Content="{x:Static infra:Icons.Erase}" FontSize="11" MinWidth="26" MinHeight="26"
-                                    Padding="5" Click="ClearTerminal_Click" ToolTip="Clear" />
-                            <Button Style="{StaticResource IconButton}" Content="{x:Static infra:Icons.Delete}" FontSize="11" MinWidth="26" MinHeight="26"
-                                    Padding="5" Click="KillTerminal_Click" ToolTip="Close this terminal" />
-                            <Button Style="{StaticResource IconButton}" Content="{x:Static infra:Icons.ChevronDown}" FontSize="10" MinWidth="26" MinHeight="26"
-                                    Padding="5" Click="HideTerminal_Click" ToolTip="Hide the panel (Ctrl+`)" />
-                        </StackPanel>
-                        <ListBox x:Name="TerminalTabs" BorderThickness="0" Background="Transparent" ItemContainerStyle="{StaticResource TabItemStyle}"
-                                 ScrollViewer.HorizontalScrollBarVisibility="Hidden" ScrollViewer.VerticalScrollBarVisibility="Disabled"
-                                 SelectionChanged="TerminalTabs_SelectionChanged">
-                            <ListBox.ItemsPanel>
-                                <ItemsPanelTemplate>
-                                    <StackPanel Orientation="Horizontal" />
-                                </ItemsPanelTemplate>
-                            </ListBox.ItemsPanel>
-                            <ListBox.ItemTemplate>
-                                <DataTemplate DataType="{x:Type code:TerminalSession}">
-                                    <StackPanel Orientation="Horizontal" Height="30" ToolTip="{Binding Cwd}">
-                                        <TextBlock Style="{StaticResource Glyph}" FontSize="11" Text="{x:Static infra:Icons.Terminal}" Margin="0,0,6,0"
-                                                   Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
-                                        <TextBlock Text="{Binding Title}" FontSize="12" VerticalAlignment="Center" MaxWidth="180" TextTrimming="CharacterEllipsis" />
-                                        <Button Style="{StaticResource IconButton}" Content="{x:Static infra:Icons.Close}" FontSize="8" Margin="4,0,0,0"
-                                                MinWidth="20" MinHeight="20" Padding="3" Click="CloseTerminal_Click" ToolTip="Close" />
-                                    </StackPanel>
-                                </DataTemplate>
-                            </ListBox.ItemTemplate>
-                        </ListBox>
-                    </DockPanel>
-                </Border>
-                <Grid>
-                    <Grid.ColumnDefinitions>
-                        <ColumnDefinition Width="*" />
-                        <ColumnDefinition Width="Auto" />
-                    </Grid.ColumnDefinitions>
-                    <views:TerminalControl x:Name="Terminal" />
-                    <ScrollBar x:Name="TerminalScroll" Grid.Column="1" Orientation="Vertical" SmallChange="1" LargeChange="10"
-                               Scroll="TerminalScroll_Scroll" />
-                </Grid>
-            </DockPanel>
         </Grid>
 
         <GridSplitter x:Name="ChatSplitter" Grid.Column="3" Style="{StaticResource PaneSplitter}" />
 
-        <!-- The agent, where the side panel would be -->
+        <!-- The agent: the main view, or beside the editor while a file is open -->
         <Border Grid.Column="4" x:Name="ChatPane" BorderThickness="1,0,0,0" BorderBrush="{DynamicResource DividerStrokeColorDefaultBrush}">
-            <ContentControl x:Name="ChatHost" Focusable="False" />
+            <DockPanel>
+                <!-- Project status: the project, its branch, what the agent is doing, and the switches for every pane. -->
+                <Border x:Name="ProjectStatusBar" DockPanel.Dock="Top" MinHeight="38" BorderThickness="0,0,0,1" Padding="12,3,6,3"
+                        BorderBrush="{DynamicResource DividerStrokeColorDefaultBrush}" Background="{DynamicResource LayerFillColorAltBrush}">
+                    <DockPanel>
+                        <StackPanel x:Name="PaneSwitches" DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Center">
+                            <ToggleButton x:Name="FilesSwitch" Style="{StaticResource SubtleButton}" Padding="7,4" Click="TreeToggle_Click"
+                                          ToolTip="Show or hide the file tree (Ctrl+B)" AutomationProperties.Name="Files">
+                                <StackPanel Orientation="Horizontal">
+                                    <TextBlock Style="{StaticResource Glyph}" FontSize="12" Text="{x:Static infra:Icons.Pane}" Margin="0,0,5,0" VerticalAlignment="Center" />
+                                    <TextBlock Text="Files" FontSize="12" VerticalAlignment="Center" />
+                                </StackPanel>
+                            </ToggleButton>
+                            <ToggleButton x:Name="EditorSwitch" Style="{StaticResource SubtleButton}" Padding="7,4" Click="EditorToggle_Click"
+                                          ToolTip="Show or hide the editor (Ctrl+Shift+D). Opening a file shows it." AutomationProperties.Name="Editor">
+                                <StackPanel Orientation="Horizontal">
+                                    <TextBlock Style="{StaticResource Glyph}" FontSize="12" Text="{x:Static infra:Icons.Code}" Margin="0,0,5,0" VerticalAlignment="Center" />
+                                    <TextBlock x:Name="EditorSwitchText" Text="Editor" FontSize="12" VerticalAlignment="Center" />
+                                </StackPanel>
+                            </ToggleButton>
+                            <ToggleButton x:Name="TerminalSwitch" Style="{StaticResource SubtleButton}" Padding="7,4" Click="TerminalToggle_Click"
+                                          ToolTip="Show or hide the terminal (Ctrl+`)" AutomationProperties.Name="Terminal">
+                                <StackPanel Orientation="Horizontal">
+                                    <TextBlock Style="{StaticResource Glyph}" FontSize="12" Text="{x:Static infra:Icons.Terminal}" Margin="0,0,5,0" VerticalAlignment="Center" />
+                                    <TextBlock Text="Terminal" FontSize="12" VerticalAlignment="Center" />
+                                </StackPanel>
+                            </ToggleButton>
+                            <Border Width="1" Height="18" Margin="6,0" Background="{DynamicResource DividerStrokeColorDefaultBrush}" />
+                            <ToggleButton x:Name="ChatOnlySwitch" Style="{StaticResource SubtleButton}" Padding="7,4" Click="ChatOnly_Click"
+                                          ToolTip="Chat only: hide the file tree, the editor and the terminal (Ctrl+Shift+F). Again to bring them back."
+                                          AutomationProperties.Name="Chat only">
+                                <StackPanel Orientation="Horizontal">
+                                    <TextBlock Style="{StaticResource Glyph}" FontSize="12" Text="{x:Static infra:Icons.Chat}" Margin="0,0,5,0" VerticalAlignment="Center" />
+                                    <TextBlock Text="Chat only" FontSize="12" VerticalAlignment="Center" />
+                                </StackPanel>
+                            </ToggleButton>
+                        </StackPanel>
+                        <WrapPanel VerticalAlignment="Center" Margin="0,0,8,0">
+                            <StackPanel Orientation="Horizontal" Margin="0,2,14,2" VerticalAlignment="Center">
+                                <TextBlock Style="{StaticResource Glyph}" FontSize="12" Text="{x:Static infra:Icons.Folder}" Margin="0,0,6,0" VerticalAlignment="Center"
+                                           Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
+                                <TextBlock x:Name="StatusProject" FontSize="12.5" FontWeight="SemiBold" VerticalAlignment="Center" MaxWidth="220"
+                                           TextTrimming="CharacterEllipsis" />
+                                <TextBlock x:Name="StatusBranch" Style="{StaticResource MetaText}" Margin="8,0,0,0" VerticalAlignment="Center" />
+                            </StackPanel>
+                            <StackPanel Orientation="Horizontal" Margin="0,2,14,2" VerticalAlignment="Center">
+                                <Ellipse x:Name="StatusDot" Width="7" Height="7" Margin="0,0,6,0" VerticalAlignment="Center" />
+                                <TextBlock x:Name="StatusAgent" Style="{StaticResource MetaText}" VerticalAlignment="Center" MaxWidth="360"
+                                           TextTrimming="CharacterEllipsis" />
+                            </StackPanel>
+                            <TextBlock x:Name="StatusChanges" Style="{StaticResource MetaText}" Margin="0,2,0,2" VerticalAlignment="Center" />
+                        </WrapPanel>
+                    </DockPanel>
+                </Border>
+                <ContentControl x:Name="ChatHost" Focusable="False" />
+            </DockPanel>
         </Border>
+
+        <GridSplitter x:Name="TerminalSplitter" Grid.Row="1" Grid.Column="2" Grid.ColumnSpan="3" Style="{StaticResource PaneSplitterRow}" />
+
+        <!-- Terminal panel, under the editor and the chat -->
+        <DockPanel x:Name="TerminalPane" Grid.Row="2" Grid.Column="2" Grid.ColumnSpan="3">
+            <Border DockPanel.Dock="Top" Height="32" BorderThickness="0,0,0,1" BorderBrush="{DynamicResource DividerStrokeColorDefaultBrush}"
+                    Background="{DynamicResource LayerFillColorAltBrush}">
+                <DockPanel>
+                    <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" Margin="4,0">
+                        <Button Style="{StaticResource IconButton}" Content="{x:Static infra:Icons.Add}" FontSize="11" MinWidth="26" MinHeight="26"
+                                Padding="5" Click="NewTerminal_Click" ToolTip="New terminal (Ctrl+Shift+`)" />
+                        <Button Style="{StaticResource IconButton}" Content="{x:Static infra:Icons.Erase}" FontSize="11" MinWidth="26" MinHeight="26"
+                                Padding="5" Click="ClearTerminal_Click" ToolTip="Clear" />
+                        <Button Style="{StaticResource IconButton}" Content="{x:Static infra:Icons.Delete}" FontSize="11" MinWidth="26" MinHeight="26"
+                                Padding="5" Click="KillTerminal_Click" ToolTip="Close this terminal" />
+                        <Button Style="{StaticResource IconButton}" Content="{x:Static infra:Icons.ChevronDown}" FontSize="10" MinWidth="26" MinHeight="26"
+                                Padding="5" Click="HideTerminal_Click" ToolTip="Hide the panel (Ctrl+`)" />
+                    </StackPanel>
+                    <ListBox x:Name="TerminalTabs" BorderThickness="0" Background="Transparent" ItemContainerStyle="{StaticResource TabItemStyle}"
+                             ScrollViewer.HorizontalScrollBarVisibility="Hidden" ScrollViewer.VerticalScrollBarVisibility="Disabled"
+                             SelectionChanged="TerminalTabs_SelectionChanged">
+                        <ListBox.ItemsPanel>
+                            <ItemsPanelTemplate>
+                                <StackPanel Orientation="Horizontal" />
+                            </ItemsPanelTemplate>
+                        </ListBox.ItemsPanel>
+                        <ListBox.ItemTemplate>
+                            <DataTemplate DataType="{x:Type code:TerminalSession}">
+                                <StackPanel Orientation="Horizontal" Height="30" ToolTip="{Binding Cwd}">
+                                    <TextBlock Style="{StaticResource Glyph}" FontSize="11" Text="{x:Static infra:Icons.Terminal}" Margin="0,0,6,0"
+                                               Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
+                                    <TextBlock Text="{Binding Title}" FontSize="12" VerticalAlignment="Center" MaxWidth="180" TextTrimming="CharacterEllipsis" />
+                                    <Button Style="{StaticResource IconButton}" Content="{x:Static infra:Icons.Close}" FontSize="8" Margin="4,0,0,0"
+                                            MinWidth="20" MinHeight="20" Padding="3" Click="CloseTerminal_Click" ToolTip="Close" />
+                                </StackPanel>
+                            </DataTemplate>
+                        </ListBox.ItemTemplate>
+                    </ListBox>
+                </DockPanel>
+            </Border>
+            <Grid>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+                <views:TerminalControl x:Name="Terminal" />
+                <ScrollBar x:Name="TerminalScroll" Grid.Column="1" Orientation="Vertical" SmallChange="1" LargeChange="10"
+                           Scroll="TerminalScroll_Scroll" />
+            </Grid>
+        </DockPanel>
+
     </Grid>
 </UserControl>

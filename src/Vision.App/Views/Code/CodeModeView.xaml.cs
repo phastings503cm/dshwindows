@@ -9,6 +9,7 @@ using System.Windows.Input;
 using Vision.App.Infrastructure;
 using Vision.App.Model;
 using Vision.App.Model.Code;
+using Vision.Core;
 
 namespace Vision.App.Views.Code;
 
@@ -50,12 +51,25 @@ public partial class CodeModeView : UserControl
         Terminal.SizeChanged += (_, _) => UpdateTerminalScroll();
 
         _code.PropertyChanged += OnCodeChanged;
-        _code.Buffers.CollectionChanged += (_, _) => UpdateEditor();
+        _code.Buffers.CollectionChanged += (_, _) =>
+        {
+            UpdateEditor();
+            UpdateLayoutPanes();
+        };
         _code.Terminals.CollectionChanged += (_, _) => UpdateTerminal();
         model.PropertyChanged += (_, e) =>
         {
-            if (e.PropertyName == nameof(AppModel.Project)) UpdateTree();
+            if (e.PropertyName == nameof(AppModel.Project))
+            {
+                UpdateTree();
+                UpdateProjectStatus();
+            }
         };
+        model.Host.PropertyChanged += (_, e) =>
+        {
+            if (e.PropertyName is nameof(AgentHost.SelectedId) or nameof(AgentHost.Selected)) WatchSession(model.Host.Selected);
+        };
+        WatchSession(model.Host.Selected);
         model.Config.PropertyChanged += (_, e) =>
         {
             if (e.PropertyName == nameof(AppConfig.TerminalFontSize)) Terminal.FontSize = model.Config.TerminalFontSize;
@@ -88,6 +102,7 @@ public partial class CodeModeView : UserControl
                 break;
             case nameof(CodeWorkspace.ShowTree):
             case nameof(CodeWorkspace.ShowChat):
+            case nameof(CodeWorkspace.ShowEditor):
                 UpdateLayoutPanes();
                 break;
             case nameof(CodeWorkspace.ErrorMessage):
@@ -130,30 +145,123 @@ public partial class CodeModeView : UserControl
 
     private void UpdateLayoutPanes()
     {
-        var showTree = _code.ShowTree;
-        if (!showTree && TreeColumn.ActualWidth > 0) _treeWidth = TreeColumn.Width;
-        TreePane.Visibility = TreeSplitter.Visibility = showTree ? Visibility.Visible : Visibility.Collapsed;
-        TreeColumn.MinWidth = showTree ? 160 : 0;
-        TreeColumn.Width = showTree ? _treeWidth : new GridLength(0);
-        TreeToggle.IsChecked = showTree;
+        var layout = _code.Layout;
 
-        var showChat = _code.ShowChat;
-        if (!showChat && ChatColumn.ActualWidth > 0) _chatWidth = ChatColumn.Width;
-        ChatPane.Visibility = ChatSplitter.Visibility = showChat ? Visibility.Visible : Visibility.Collapsed;
-        ChatColumn.MinWidth = showChat ? 320 : 0;
-        ChatColumn.Width = showChat ? _chatWidth : new GridLength(0);
-        ChatToggle.IsChecked = showChat;
+        if (!layout.Tree && TreeColumn.ActualWidth > 0) _treeWidth = TreeColumn.Width;
+        TreePane.Visibility = TreeSplitter.Visibility = layout.Tree ? Visibility.Visible : Visibility.Collapsed;
+        TreeColumn.MinWidth = layout.Tree ? 160 : 0;
+        TreeColumn.Width = layout.Tree ? _treeWidth : new GridLength(0);
 
-        var showTerminal = _code.TerminalVisible && _code.Terminals.Count > 0;
-        if (!showTerminal && TerminalRow.ActualHeight > 0) _terminalHeight = TerminalRow.Height;
-        TerminalPane.Visibility = TerminalSplitter.Visibility = showTerminal ? Visibility.Visible : Visibility.Collapsed;
-        TerminalRow.MinHeight = showTerminal ? 80 : 0;
-        TerminalRow.Height = showTerminal ? _terminalHeight : new GridLength(0);
-        TerminalToggle.IsChecked = showTerminal;
+        // The editor, in the centre, while it is on.
+        CenterPane.Visibility = layout.Editor ? Visibility.Visible : Visibility.Collapsed;
+        EditorColumn.MinWidth = layout.Editor ? 300 : 0;
+        EditorColumn.Width = layout.Editor ? new GridLength(1, GridUnitType.Star) : new GridLength(0);
 
-        foreach (var toggle in new[] { TreeToggle, ChatToggle, TerminalToggle })
+        // The chat: the main view without the editor, beside it with one, or hidden (only beside an editor).
+        if (ChatColumn.Width.IsAbsolute && ChatColumn.ActualWidth > 0) _chatWidth = ChatColumn.Width;
+        ChatPane.Visibility = layout.Chat ? Visibility.Visible : Visibility.Collapsed;
+        ChatSplitter.Visibility = layout.Chat && layout.Editor ? Visibility.Visible : Visibility.Collapsed;
+        if (layout.ChatIsMain)
+        {
+            ChatColumn.MinWidth = 320;
+            ChatColumn.MaxWidth = double.PositiveInfinity;
+            ChatColumn.Width = new GridLength(1, GridUnitType.Star);
+        }
+        else
+        {
+            ChatColumn.MinWidth = layout.Chat ? 320 : 0;
+            ChatColumn.MaxWidth = 760;
+            ChatColumn.Width = layout.Chat ? _chatWidth : new GridLength(0);
+        }
+        ChatPane.BorderThickness = new Thickness(layout.Tree || layout.Editor ? 1 : 0, 0, 0, 0);
+        ChatToggle.IsChecked = layout.Chat;
+        ChatToggle.IsEnabled = layout.Editor; // with the editor hidden, the chat is all there is
+
+        if (!layout.Terminal && TerminalRow.ActualHeight > 0) _terminalHeight = TerminalRow.Height;
+        TerminalPane.Visibility = TerminalSplitter.Visibility = layout.Terminal ? Visibility.Visible : Visibility.Collapsed;
+        TerminalRow.MinHeight = layout.Terminal ? 80 : 0;
+        TerminalRow.Height = layout.Terminal ? _terminalHeight : new GridLength(0);
+
+        TreeToggle.IsChecked = FilesSwitch.IsChecked = layout.Tree;
+        TerminalToggle.IsChecked = TerminalSwitch.IsChecked = layout.Terminal;
+        EditorSwitch.IsChecked = layout.Editor;
+        ChatOnlySwitch.IsChecked = layout.ChatOnly;
+        EditorSwitchText.Text = _code.Buffers.Count > 0 ? $"Editor · {_code.Buffers.Count}" : "Editor";
+
+        foreach (var toggle in new ToggleButton[] { TreeToggle, ChatToggle, TerminalToggle, FilesSwitch, EditorSwitch, TerminalSwitch, ChatOnlySwitch })
             toggle.SetResourceReference(ForegroundProperty, toggle.IsChecked == true ? "AccentTextFillColorPrimaryBrush" : "TextFillColorSecondaryBrush");
     }
+
+    // MARK: - Project status
+
+    private SessionVM? _statusSession;
+
+    /// <summary>Follow the selected chat, so the status bar says what it is doing.</summary>
+    private void WatchSession(SessionVM? session)
+    {
+        if (ReferenceEquals(session, _statusSession))
+        {
+            UpdateProjectStatus();
+            return;
+        }
+        if (_statusSession is { } old)
+        {
+            old.PropertyChanged -= OnStatusSessionChanged;
+            old.PendingGates.CollectionChanged -= OnStatusCollectionChanged;
+            old.ChangedFiles.CollectionChanged -= OnStatusCollectionChanged;
+        }
+        _statusSession = session;
+        if (session is not null)
+        {
+            session.PropertyChanged += OnStatusSessionChanged;
+            session.PendingGates.CollectionChanged += OnStatusCollectionChanged;
+            session.ChangedFiles.CollectionChanged += OnStatusCollectionChanged;
+        }
+        UpdateProjectStatus();
+    }
+
+    private void OnStatusSessionChanged(object? sender, PropertyChangedEventArgs e)
+    {
+        if (e.PropertyName is nameof(SessionVM.Running) or nameof(SessionVM.Stopping) or nameof(SessionVM.RunningTool)
+            or nameof(SessionVM.Activity) or nameof(SessionVM.Retry) or nameof(SessionVM.Goal) or nameof(SessionVM.BlockedGoal)
+            or nameof(SessionVM.Todos))
+            UpdateProjectStatus();
+    }
+
+    private void OnStatusCollectionChanged(object? sender, NotifyCollectionChangedEventArgs e) => UpdateProjectStatus();
+
+    private void UpdateProjectStatus()
+    {
+        var root = _model.Project;
+        StatusProject.Text = root is null ? "No folder open" : Path.GetFileName(root.TrimEnd('\\', '/'));
+        ProjectStatusBar.ToolTip = root;
+        var branch = GitHead.Branch(root);
+        StatusBranch.Text = branch is null ? "" : "on " + branch;
+        StatusBranch.Visibility = branch is null ? Visibility.Collapsed : Visibility.Visible;
+        var (text, tone) = ProjectStatus.Agent(_statusSession);
+        StatusAgent.Text = text;
+        StatusAgent.ToolTip = text;
+        StatusDot.SetResourceReference(System.Windows.Shapes.Shape.FillProperty, tone switch
+        {
+            ProjectStatus.Tone.Busy => "AccentFillColorDefaultBrush",
+            ProjectStatus.Tone.Waiting => "SystemFillColorCautionBrush",
+            _ => "ControlStrongFillColorDisabledBrush",
+        });
+        var changes = ProjectStatus.Changes(_statusSession);
+        StatusChanges.Text = changes;
+        StatusChanges.Visibility = changes.Length == 0 ? Visibility.Collapsed : Visibility.Visible;
+    }
+
+    private void EditorToggle_Click(object sender, RoutedEventArgs e) => ToggleEditor();
+
+    /// <summary>Show or hide the editor; shown with no file open, it offers the file tree to pick one.</summary>
+    public void ToggleEditor()
+    {
+        _code.ShowEditor = !_code.ShowEditor;
+        if (_code.ShowEditor && _code.Buffers.Count == 0) _code.ShowTree = true;
+    }
+
+    private void ChatOnly_Click(object sender, RoutedEventArgs e) => _code.ToggleChatOnly();
 
     private void TreeToggle_Click(object sender, RoutedEventArgs e) => _code.ShowTree = !_code.ShowTree;
     private void ChatToggle_Click(object sender, RoutedEventArgs e) => _code.ShowChat = !_code.ShowChat;
