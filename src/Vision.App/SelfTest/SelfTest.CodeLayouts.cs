@@ -1,3 +1,4 @@
+using Vision.App.Infrastructure;
 using Vision.App.Model;
 using Vision.App.Views;
 
@@ -15,12 +16,14 @@ public sealed partial class SelfTest
         {
             var code = model.Code;
             var before = (code.ShowTree, code.ShowEditor, code.TerminalVisible);
+            NoteTranscriptFit(window, "beside the editor");
 
             code.ShowEditor = false;
             code.TerminalVisible = false;
             code.ShowTree = true;
             await Settle(800);
             Note($"layout: {code.Layout}");
+            NoteTranscriptFit(window, "as the main view");
             Capture(window, "code-chat-main");
 
             code.ToggleChatOnly();
@@ -36,11 +39,26 @@ public sealed partial class SelfTest
             Capture(window, "code-chat-terminal");
 
             (code.ShowTree, code.ShowEditor, code.TerminalVisible) = before;
-            await Settle(600);
+            await Settle(800);
+            NoteTranscriptFit(window, "beside the editor again");
+            Capture(window, "code-chat-side-again");
         }
         catch (Exception error)
         {
             Fail("code-layouts", error);
         }
+    }
+
+    /// <summary>Whether the transcript's rows fit its viewport (a row arranged wider than the chat is cut off on the right).</summary>
+    private void NoteTranscriptFit(MainWindow window, string where)
+    {
+        if (window.SelfTestChatView.SelfTestScroller is not { } scroller) return;
+        var panel = scroller.FindDescendant<System.Windows.Controls.VirtualizingStackPanel>();
+        var widest = 0.0;
+        if (panel is not null)
+            foreach (var child in panel.Children.OfType<System.Windows.FrameworkElement>())
+                widest = Math.Max(widest, child.ActualWidth + child.Margin.Left + child.Margin.Right);
+        Note($"transcript {where}: viewport {scroller.ViewportWidth:F0}, extent {scroller.ExtentWidth:F0}, widest row {widest:F0} " +
+             $"({(widest <= scroller.ViewportWidth + 1 ? "fits" : "CUT OFF")})");
     }
 }

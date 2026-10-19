@@ -174,6 +174,14 @@ public partial class CodeModeView : UserControl
             ChatColumn.Width = layout.Chat ? _chatWidth : new GridLength(0);
         }
         ChatPane.BorderThickness = new Thickness(layout.Tree || layout.Editor ? 1 : 0, 0, 0, 0);
+        if (_chatWasMain is { } wasMain && wasMain != layout.ChatIsMain && ChatHost.Content is { } chat)
+        {
+            // The chat moved between the centre and the side: host it afresh, as a switch from chat mode does, so its
+            // transcript lays its rows out for the new width (rows kept from the wide layout overflow the narrow one).
+            ChatHost.Content = null;
+            ChatHost.Content = chat;
+        }
+        _chatWasMain = layout.ChatIsMain;
         ChatToggle.IsChecked = layout.Chat;
         ChatToggle.IsEnabled = layout.Editor; // with the editor hidden, the chat is all there is
 
@@ -195,6 +203,9 @@ public partial class CodeModeView : UserControl
         foreach (var toggle in new ToggleButton[] { TreeToggle, ChatToggle, TerminalToggle, FilesSwitch, EditorSwitch, TerminalSwitch, ChatOnlySwitch })
             toggle.SetResourceReference(ForegroundProperty, toggle.IsChecked == true ? "AccentTextFillColorPrimaryBrush" : "TextFillColorSecondaryBrush");
     }
+
+    /// <summary>Whether the chat was the main view at the last layout pass (null before the first).</summary>
+    private bool? _chatWasMain;
 
     // MARK: - Project status
 
