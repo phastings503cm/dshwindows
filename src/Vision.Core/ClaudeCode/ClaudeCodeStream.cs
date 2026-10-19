@@ -308,6 +308,9 @@ public sealed class ClaudeCodeStream
     public bool Progressed { get; private set; }
     /// <summary>Lines that weren't JSON (a crash's stack trace on stdout, a shell's banner) — kept for the error message.</summary>
     public StringBuilder Unparsed { get; } = new();
+    /// <summary>The permission question the line just fed withdrew (<c>control_cancel_request</c>): Claude Code no longer waits
+    /// for its answer. Null for every other line.</summary>
+    public string? CancelledRequest { get; private set; }
 
     /// <summary>Read one stdout line. A permission question comes back to the caller (who answers it on stdin); every
     /// other control request is the caller's to refuse (<see cref="ClaudeCodeCommand.Unhandled"/>), reported here as
@@ -315,6 +318,7 @@ public sealed class ClaudeCodeStream
     public ClaudeCodePermissionRequest? Feed(string line, out (string RequestId, string Subtype)? unhandled)
     {
         unhandled = null;
+        CancelledRequest = null;
         if (string.IsNullOrWhiteSpace(line)) return null;
         JsonNode? node;
         try
@@ -352,6 +356,9 @@ public sealed class ClaudeCodeStream
             case "control_request":
                 if (ClaudeCodePermissionRequest.From(o) is { } permission) return permission;
                 unhandled = (Str(o["request_id"]) ?? "", Str(o["request"]?["subtype"]) ?? "unknown");
+                break;
+            case "control_cancel_request":
+                CancelledRequest = Str(o["request_id"]);
                 break;
         }
         return null;

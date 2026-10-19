@@ -24,7 +24,9 @@ public static class ClaudeFixtures
 /// back until something is written (an interrupt), and closes stdout only once stdin is closed (or it is killed).</summary>
 public sealed class ScriptedClaudeProcess : IClaudeCodeProcess
 {
-    public sealed record Step(string Line, Func<IReadOnlyList<string>, bool>? WaitFor = null);
+    /// <param name="Unanswered">Comes even though the permission question before it was never answered (the CLI withdrew
+    /// it, or ended the turn another way).</param>
+    public sealed record Step(string Line, Func<IReadOnlyList<string>, bool>? WaitFor = null, bool Unanswered = false);
 
     private readonly List<Step> _steps;
     private readonly List<string> _written = [];
@@ -34,13 +36,20 @@ public sealed class ScriptedClaudeProcess : IClaudeCodeProcess
     private bool _inputClosed;
     private bool _started;
 
-    public ScriptedClaudeProcess(IEnumerable<Step> steps, string stderr = "", int exitCode = 0, bool exitWithoutInputClose = false)
+    /// <param name="holdStdoutAfterExit">Like a CLI whose background child inherited its stdout: the process exits, but
+    /// stdout never closes (a read waits until the process is disposed).</param>
+    public ScriptedClaudeProcess(IEnumerable<Step> steps, string stderr = "", int exitCode = 0, bool exitWithoutInputClose = false,
+                                 bool holdStdoutAfterExit = false)
     {
         _steps = steps.ToList();
         StderrText = stderr;
         _exitCode = exitCode;
         _exitWithoutInputClose = exitWithoutInputClose;
+        _holdStdoutAfterExit = holdStdoutAfterExit;
     }
+
+    private readonly bool _holdStdoutAfterExit;
+    private readonly TaskCompletionSource _disposed = new(TaskCreationOptions.RunContinuationsAsynchronously);
 
     /// <summary>Replay a capture: every line as it came, each permission question waiting for its answer.</summary>
     public static ScriptedClaudeProcess Replay(IEnumerable<string> lines, string stderr = "", int exitCode = 0) =>
@@ -71,13 +80,14 @@ public sealed class ScriptedClaudeProcess : IClaudeCodeProcess
         if (_next >= _steps.Count)
         {
             if (!_exitWithoutInputClose) await Until(() => _inputClosed || _killed).ConfigureAwait(false);
+            if (_holdStdoutAfterExit) await _disposed.Task.ConfigureAwait(false);
             return null;
         }
         var step = _steps[_next];
         if (step.WaitFor is { } wait) await Until(() => wait(Written) || _killed).ConfigureAwait(false);
         if (_killed) return null;
         // A permission question is followed by nothing until it is answered.
-        if (_next > 0 && JsonNode.Parse(_steps[_next - 1].Line) is JsonObject previous && (string?)previous["type"] == "control_request"
+        if (_next > 0 && !step.Unanswered && JsonNode.Parse(_steps[_next - 1].Line) is JsonObject previous && (string?)previous["type"] == "control_request"
             && (string?)previous["request"]?["subtype"] == "can_use_tool")
         {
             var id = (string)previous["request_id"]!;
@@ -123,7 +133,7 @@ public sealed class ScriptedClaudeProcess : IClaudeCodeProcess
         _inputClosed = true;
     }
 
-    public void Dispose() { }
+    public void Dispose() => _disposed.TrySetResult();
 
     /// <summary>A starter that hands out these processes in order (recording each one's arguments).</summary>
     public static ClaudeCodeProcessStarter Starter(params ScriptedClaudeProcess[] processes)
