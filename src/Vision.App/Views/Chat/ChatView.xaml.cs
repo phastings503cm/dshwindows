@@ -280,6 +280,9 @@ public partial class ChatView : UserControl
     /// <summary>Attach a file the way a drop does, for the self-test.</summary>
     internal void SelfTestStage(string path) => Stage(path);
 
+    /// <summary>Empty the composer's attachments (as sending does), for the self-test.</summary>
+    internal void SelfTestClearAttachments() => _attachments.Clear();
+
     /// <summary>The transcript's scroll viewer, for the self-test's measurements.</summary>
     internal ScrollViewer? SelfTestScroller
     {
@@ -733,7 +736,7 @@ public partial class ChatView : UserControl
                 return;
             }
             var data = File.ReadAllBytes(path);
-            if (FileFilter.IsImage(path) && ImageTools.ToPng(data) is { } png)
+            if (FileFilter.IsImage(path) && ImageTools.ToAttachmentPng(data) is { } png)
             {
                 Add(new MessageAttachment(AttachmentKind.Image, Path.ChangeExtension(info.Name, ".png"), png));
             }
@@ -863,7 +866,7 @@ public partial class ChatView : UserControl
                 foreach (var path in Clipboard.GetFileDropList().Cast<string>()) Stage(path);
                 return true;
             }
-            if (Clipboard.ContainsImage() && Clipboard.GetImage() is { } image && ImageTools.ToPng(image) is { } png)
+            if (Clipboard.ContainsImage() && Clipboard.GetImage() is { } image && ImageTools.ToAttachmentPng(image) is { } png)
             {
                 var index = _attachments.Count(a => a.Name.StartsWith("pasted-image", StringComparison.Ordinal)) + 1;
                 Add(new MessageAttachment(AttachmentKind.Image, $"pasted-image-{index}.png", png));

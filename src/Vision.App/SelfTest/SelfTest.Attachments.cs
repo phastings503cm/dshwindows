@@ -36,6 +36,19 @@ public sealed partial class SelfTest
                 Write(folder, "scanned invoice.pdf", DemoScanPdf("INVOICE 4711")),
             };
 
+            // Windows' own OCR, on a picture of a page (the runner may have no OCR language: then it says so).
+            if (AttachmentReader.Ocr is Infrastructure.WindowsOcr ocr)
+            {
+                var read = await Task.Run(() => ocr.Read(RenderPng("INVOICE 4711", 1240, 600)));
+                Note($"ocr ({ocr.Language}): {read.Replace('\n', ' ')}");
+                var scan = await Task.Run(() => AttachmentReader.Read("scan.pdf", DemoScanPdf("INVOICE 4711"), AttachmentKind.File));
+                Note($"ocr of a scanned PDF: {scan.Summary}; ocr={scan.Ocr}; {scan.Text.Replace('\n', ' ')}");
+            }
+            else
+            {
+                Note("ocr: Windows has no OCR language for this user, so pictures carry no text");
+            }
+
             var chat = model.NewChat();
             chat.Title = "Attachments";
             model.Mode = WorkspaceMode.Chat;
@@ -62,6 +75,7 @@ public sealed partial class SelfTest
             var wire = AttachmentWire.Parts(prepared.Attachments, route);
             Note($"wire on {model.Config.ActiveProvider?.DisplayName}: {string.Join(", ", wire.Select(p => p.GetType().Name))}");
             view.SelfTestComposer.Clear();
+            view.SelfTestClearAttachments();
             chat.AppendMessage(MessageRole.User, "Summarise the report and tell me what the log says about slow requests.", attachments: badges);
             chat.AppendMessage(MessageRole.Assistant,
                 "The report covers three regions; revenue grew in two. The log's slow requests all go through `/api/stock/reserve` — " +

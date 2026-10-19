@@ -4,7 +4,11 @@
        and talks straight to an OpenAI-compatible model server. -->
   <PropertyGroup>
     <OutputType>WinExe</OutputType>
-    <TargetFramework>net10.0-windows</TargetFramework>
+    <!-- The Windows 10 SDK projection, for Windows.Media.Ocr (text in attached pictures and scanned PDFs). The app still
+         runs on any Windows 10/11: SupportedOSPlatformVersion keeps the floor where it was, and OCR is used only where
+         Windows has it. -->
+    <TargetFramework>net10.0-windows10.0.19041.0</TargetFramework>
+    <SupportedOSPlatformVersion>10.0.17763.0</SupportedOSPlatformVersion>
     <UseWPF>true</UseWPF>
     <AssemblyName>Vision</AssemblyName>
     <RootNamespace>Vision.App</RootNamespace>
