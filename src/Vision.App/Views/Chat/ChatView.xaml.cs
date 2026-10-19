@@ -458,7 +458,8 @@ public partial class ChatView : UserControl
         if (_model.Host.GuardianSignInNeeded(session))
         {
             // On one of Guardian's models while signed out: it waits for the sign-in rather than moving to another model.
-            ModelMenuText.Text = $"{GuardianRoutes.ModelOfRouteId(session.RouteId) ?? "Guardian"} · Sign in to Guardian";
+            // What to do first: the composer's line is narrow and a Bedrock-style id is long.
+            ModelMenuText.Text = $"Sign in to Guardian · {GuardianRoutes.ModelOfRouteId(session.RouteId) ?? "Guardian"}";
             ModelMenuButton.ToolTip = GuardianRoutes.SignInNeeded + " (Settings › Guardian), or pick another model for this chat.";
         }
         else

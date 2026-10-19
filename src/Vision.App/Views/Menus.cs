@@ -138,6 +138,7 @@ public static class Menus
             var title = guardian.Models.FirstOrDefault(m => m.Id == id) is { } known ? GuardianRoutes.MenuTitle(known) : id;
             var waiting = Item($"{title} — {GuardianRoutes.SignInNeeded}", model.ShowGuardian, Icons.Shield, isChecked: true);
             waiting.ToolTip = "Opens Settings › Guardian. Or pick another model for this chat.";
+            waiting.FontWeight = FontWeights.SemiBold;
             menu.Items.Add(waiting);
             return;
         }

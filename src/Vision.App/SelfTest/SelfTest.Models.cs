@@ -23,8 +23,8 @@ public sealed partial class SelfTest
         {
             wizard.Show();
             await Settle(600);
-            // The welcome page's new cards, under the others.
-            wizard.ScrollGuide(1.0);
+            // The welcome page's new cards, in the middle of the others.
+            wizard.ScrollGuide(0.4);
             await Settle(400);
             Capture(wizard, "wizard-welcome-more");
             var shots = new (string Plan, PlanPage Page, string Key, IReadOnlyList<string>? Listed, string Name)[]
@@ -76,6 +76,8 @@ public sealed partial class SelfTest
             await Settle(800);
             Capture(window, "chat-guardian-signed-out");
             await CaptureMenu(window, Menus.Model(model, chat), "menu-model-guardian-signed-out");
+            // Later pictures start their chats on the primary again.
+            if (model.Config.ActiveRoute is { } primary) model.Host.SetChatRoute(chat, primary);
         }
         catch (Exception error)
         {

@@ -423,6 +423,16 @@ public sealed class PlanGuide : IWizardGuide
         return offered.FirstOrDefault(id => id == plan.Recommended.Id) ?? offered.FirstOrDefault() ?? plan.Recommended.Id;
     }
 
+    /// <summary>"  · 1M context" for a preset with a known window — unless its note already says it ("V4 Pro · 1M context · text",
+    /// "Fable 5.1 · the most capable · 1M").</summary>
+    private static string WindowText(PlanModel? model)
+    {
+        if (model?.Context is not { } context) return "";
+        var size = Fmt.Short(context);
+        if (model.Note is { } note && (note.Contains("context", StringComparison.OrdinalIgnoreCase) || note.Contains(size, StringComparison.Ordinal))) return "";
+        return $"  · {size} context";
+    }
+
     private UIElement ModelPage()
     {
         var plan = _plan!;
@@ -434,8 +444,7 @@ public sealed class PlanGuide : IWizardGuide
         foreach (var id in Offered())
         {
             var known = plan.Models.FirstOrDefault(m => m.Id == id);
-            var label = id + (id == recommended ? "  — recommended" : "") + (known?.Note is { } note ? $"  · {note}" : "")
-                        + (known?.Context is { } context ? $"  · {Fmt.Short(context)} context" : "");
+            var label = id + (id == recommended ? "  — recommended" : "") + (known?.Note is { } note ? $"  · {note}" : "") + WindowText(known);
             var radio = new RadioButton { Content = label, GroupName = "plan-model", IsChecked = _chosen == id, Margin = new Thickness(0, 3, 0, 3) };
             var value = id;
             radio.Checked += (_, _) =>
