@@ -330,6 +330,10 @@ public partial class ChatView : UserControl
         if (_scroller is null) return;
         _scroller.ScrollChanged += (_, e) =>
         {
+            // ScrollChanged bubbles: every text box and document inside a row raises its own as it is laid out (its extent
+            // and viewport grow), and taken for the transcript's, each one snapped a pinned transcript back to its end — the
+            // wheel couldn't move a long chat up. Only the transcript's own scroll viewer counts.
+            if (!ReferenceEquals(e.OriginalSource, _scroller)) return;
             // The user scrolled (the wheel, the scrollbar, a key — even when rows laid out on the way changed the extent in the
             // same pass, which used to snap a pinned transcript straight back to its end), or only the offset changed: stay put
             // unless they came back to the bottom (of the newest page).
