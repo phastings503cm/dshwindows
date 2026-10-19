@@ -95,6 +95,24 @@ public sealed class GuardianEtaTests
         Assert.Equal(("unauthorized", "Guardian didn't accept the sign-in — sign in again."), (signedOut.Error, signedOut.Message));
     }
 
+    [Fact]
+    public async Task APromptGoesToTheAccountsPromptHistoryWithItsOutcome()
+    {
+        var handler = new FakeHttpHandler(_ => FakeHttpHandler.Json("""{"accepted":1}"""));
+        var record = new PromptRecord
+        {
+            ChatId = "c1", Text = "Fix the parser", Source = PromptSource.Goal, Outcome = PromptOutcome.Completed, TurnId = "t1", Model = "qwen3",
+            At = new DateTimeOffset(2026, 10, 18, 9, 0, 0, TimeSpan.Zero), FinishedAt = new DateTimeOffset(2026, 10, 18, 9, 1, 30, TimeSpan.Zero),
+        };
+        await new GuardianEtaClient(Endpoint, handler).PushPromptsAsync([(record, "Parser work", "inventory")]);
+        var sent = Assert.Single(handler.Requests);
+        Assert.Equal("https://guardian.example.test/api/harness/prompts", sent.Url.ToString());
+        var prompt = JsonNode.Parse(sent.Body)!["prompts"]![0]!;
+        Assert.Equal(("Fix the parser", "2026-10-18T09:00:00.000Z", "completed", "goal", "c1", "Parser work", "inventory", "qwen3", 90.0, "t1"),
+            ((string)prompt["text"]!, (string)prompt["at"]!, (string)prompt["outcome"]!, (string)prompt["source"]!, (string)prompt["chatId"]!,
+             (string)prompt["chatTitle"]!, (string)prompt["project"]!, (string)prompt["model"]!, (double)prompt["durationSeconds"]!, (string)prompt["runId"]!));
+    }
+
     [Theory]
     [InlineData("https://guardian.503cm.com/api/harness/v1", "https://guardian.503cm.com")]
     [InlineData("https://dev.guardian.503cm.com/api/harness/v1/", "https://dev.guardian.503cm.com")]

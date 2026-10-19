@@ -452,6 +452,7 @@ public sealed partial class AgentHost
         vm.CurrentPromptId = record.Id;
         if (taskId is not null) _chatTaskRecord[taskId] = record.Id;
         SavePrompts(vm);
+        PushPrompt(vm, record);
         return record;
     }
 
@@ -498,7 +499,9 @@ public sealed partial class AgentHost
             record.EtaSeconds = state.EtaSeconds ?? record.EtaSeconds;
             record.TaskKind = state.TaskKind?.RawValue() ?? record.TaskKind;
             record.Attempts = state.Loopbacks + 1;
-            record.Evidence = [.. state.Evidence];
+            // The record keeps the newest eight, each trimmed, so a long chat's timeline file stays small (as on the Mac).
+            record.Evidence = state.Evidence.TakeLast(MaxRecordEvidence)
+                .Select(e => e with { Detail = TextUtil.Prefix(e.Detail, MaxEvidenceDetail) }).ToList();
             if (state.Phase == TurnPhase.Results && state.Steps.LastOrDefault()?.Text is { } line) notes.Add(line);
         }
         var start = (record.EntryAt ?? record.At).AddSeconds(-1);
@@ -510,13 +513,42 @@ public sealed partial class AgentHost
         if (vm.TurnModel is { } model) record.Model = model;
         if (vm.TurnRoute is { } routeName) record.Route = routeName;
         SavePrompts(vm);
+        PushPrompt(vm, record);
+    }
+
+    private const int MaxRecordEvidence = 8;
+    private const int MaxEvidenceDetail = 400;
+
+    /// <summary>With a route through Guardian: the prompt goes to the account's prompt history (Guardian's Prompt Notebook) —
+    /// when it starts and again when it ends, which Guardian keeps as one row. Silent on failure.</summary>
+    private void PushPrompt(SessionVM vm, PromptRecord record)
+    {
+        if (GuardianEta() is not { } client) return;
+        var snapshot = record.Clone();
+        var title = vm.Title;
+        var project = vm.ProjectName;
+        _ = PushAsync();
+
+        async Task PushAsync()
+        {
+            try
+            {
+                await client.PushPromptsAsync([(snapshot, title, project)]);
+            }
+            catch (Exception error) when (error is GuardianException or HttpRequestException or TaskCanceledException)
+            {
+                // The timeline file has it; Guardian's copy is a convenience.
+            }
+        }
     }
 
     /// <summary>The transcript row a record points at, in a loaded chat.</summary>
     public string? EntryIdFor(PromptRecord record, SessionVM vm)
     {
         Hydrate(vm);
-        var candidates = vm.Entries.OfType<MessageEntryVM>().Where(m => m.Role == MessageRole.User)
+        // A prompt the model never received became a notice ("Not delivered to the model: …"): still its row.
+        var candidates = vm.Entries.OfType<MessageEntryVM>()
+            .Where(m => m.Role == MessageRole.User || (m.Role == MessageRole.Notice && m.Text.StartsWith(UndeliveredPrefix, StringComparison.Ordinal)))
             .Select(m => new PromptTimeline.EntryRef(m.Id, m.Text, m.At));
         return PromptTimeline.MatchEntry(record, candidates);
     }

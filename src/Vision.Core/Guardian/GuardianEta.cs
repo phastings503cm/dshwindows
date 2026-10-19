@@ -138,6 +138,37 @@ public sealed class GuardianEtaClient
         return changed;
     }
 
+    // MARK: The Prompt Notebook (contract §Sync)
+
+    /// <summary>Push prompts to the account's prompt history (Guardian's Prompt Notebook), which deduplicates on (user, text,
+    /// at) — so a prompt pushed when it starts and again when it ends is one row, the second carrying its outcome.</summary>
+    public async Task PushPromptsAsync(IEnumerable<(PromptRecord Record, string? ChatTitle, string? Project)> prompts, CancellationToken cancellationToken = default)
+    {
+        var list = new JsonArray();
+        foreach (var (record, chatTitle, project) in prompts)
+        {
+            var item = new JsonObject
+            {
+                ["text"] = record.Text,
+                ["at"] = record.At.ToUniversalTime().ToString("yyyy-MM-dd'T'HH:mm:ss.fff'Z'", System.Globalization.CultureInfo.InvariantCulture),
+                ["outcome"] = record.Outcome.RawValue(),
+                ["source"] = record.Source.RawValue(),
+                ["chatId"] = record.ChatId,
+            };
+            if (chatTitle is { Length: > 0 }) item["chatTitle"] = chatTitle;
+            if (project is { Length: > 0 }) item["project"] = project;
+            if (record.Model is { Length: > 0 } model) item["model"] = model;
+            if (record.DurationSeconds is { } seconds) item["durationSeconds"] = Math.Round(seconds, 1);
+            if (record.TurnId is { Length: > 0 } turn) item["runId"] = turn;
+            list.Add(item);
+        }
+        if (list.Count == 0) return;
+        using var request = Request(HttpMethod.Post, "/api/harness/prompts");
+        request.Content = new StringContent(new JsonObject { ["prompts"] = list }.ToJsonString(), Encoding.UTF8, "application/json");
+        using var response = await _http.SendAsync(request, cancellationToken).ConfigureAwait(false);
+        await EnsureOkAsync(response, cancellationToken).ConfigureAwait(false);
+    }
+
     // MARK: Wire helpers
 
     private HttpRequestMessage Request(HttpMethod method, string path)
