@@ -464,13 +464,15 @@ public partial class ChatView : UserControl
         }
         else
         {
-            var current = _model.Host.ModelIdFor(session) ?? route?.Model ?? "No model";
+            var current = _model.Host.ModelLabelFor(session) ?? route?.Model ?? "No model";
             var limit = _model.Host.ContextLimit(session);
             ModelMenuText.Text = $"{current} · {Menus.ShortTokens(limit)}";
-            var masked = route is { IsPrivateRoute: false } && _model.Config.Privacy.Mask;
+            var claudeCode = ClaudeCodeRoutes.IsClaudeCode(route);
+            var masked = route is { IsPrivateRoute: false } && _model.Config.Privacy.Mask && !claudeCode;
             ModelMenuButton.ToolTip = $"This chat's model{(route is null ? "" : $" ({route.DisplayName})")} and its context window. Pick another model for this chat " +
                                       "(other chats keep theirs; new chats in this project start with it), or a Spark Swapper model to switch what that box serves (also /swap)." +
-                                      (masked ? "\nNot private: sensitive details are masked before anything is sent to it." : "");
+                                      (masked ? "\nNot private: sensitive details are masked before anything is sent to it." : "") +
+                                      (claudeCode ? "\nClaude Code on this computer, on your Claude plan: it reads your files itself, so nothing is masked." : "");
         }
 
         ThinkingText.Text = Menus.ThinkingLabel(_model, session);

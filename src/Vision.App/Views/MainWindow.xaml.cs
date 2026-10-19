@@ -246,10 +246,12 @@ public partial class MainWindow : Window
             return;
         }
         var provider = Model.Host.ChatRoute(selected);
-        var served = Model.Host.ModelIdFor(selected);
+        var served = Model.Host.ModelLabelFor(selected);
         ModelLabel.Text = provider is null ? "No model" : served ?? provider.Model;
         ModelButton.ToolTip = provider is null
             ? "No model configured — run the setup wizard"
+            : ClaudeCodeRoutes.IsClaudeCode(provider)
+            ? $"{served}\nClaude Code on this computer — your Claude plan, through the claude app"
             : $"{provider.DisplayName}\n{provider.BaseUrl}" + (provider.IsPrivateRoute ? "\nPrivate" : "\nNot private: sensitive details are masked") +
               (Model.Spark.IsSwitchingFor(provider) ? $"\n{Model.Spark.BoxFor(provider)?.Name} is switching models…" : "");
     }

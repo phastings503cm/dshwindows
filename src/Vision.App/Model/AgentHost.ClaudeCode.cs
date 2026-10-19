@@ -42,6 +42,13 @@ public sealed partial class AgentHost
         _claudeUnsupported.Clear();
     }
 
+    /// <summary>How the top bar and the composer name a chat's model: "Claude Code · Sonnet" for Claude Code (its alias alone
+    /// would read like any route's), else the model the route serves.</summary>
+    public string? ModelLabelFor(SessionVM? vm) =>
+        ChatRoute(vm) is { } route && ClaudeCodeRoutes.IsClaudeCode(route)
+            ? $"{RouteLabel(route)} · {ClaudeCodeRoutes.ModelTitle(route.Model)}"
+            : ModelIdFor(vm);
+
     /// <summary>The chat runs on Claude Code.</summary>
     public bool IsClaudeCodeChat(SessionVM? vm) => ClaudeCodeRoutes.IsClaudeCode(ChatRoute(vm));
 

@@ -158,6 +158,7 @@ public sealed class ClaudeCodePage : UserControl
                 Background = System.Windows.Media.Brushes.Transparent,
                 TextWrapping = TextWrapping.Wrap,
                 Margin = new Thickness(0, 4, 0, 0),
+                FontSize = 12.5,
             };
             text.SetResourceReference(Control.FontFamilyProperty, "MonoFont");
             text.SetResourceReference(Control.ForegroundProperty, "TextFillColorPrimaryBrush");
