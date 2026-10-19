@@ -174,13 +174,10 @@ public partial class CodeModeView : UserControl
             ChatColumn.Width = layout.Chat ? _chatWidth : new GridLength(0);
         }
         ChatPane.BorderThickness = new Thickness(layout.Tree || layout.Editor ? 1 : 0, 0, 0, 0);
-        if (_chatWasMain is { } wasMain && wasMain != layout.ChatIsMain && ChatHost.Content is { } chat)
-        {
-            // The chat moved between the centre and the side: host it afresh, as a switch from chat mode does, so its
-            // transcript lays its rows out for the new width (rows kept from the wide layout overflow the narrow one).
-            ChatHost.Content = null;
-            ChatHost.Content = chat;
-        }
+        // The chat moved from the centre to the side: its transcript's rows keep the width they were given in the wide
+        // layout (the virtualizing panel arranges a row at no less than the size it remembers for it) and are cut off on
+        // the right. Re-creating the rows lays them out for the narrow column.
+        if (_chatWasMain == true && !layout.ChatIsMain && ChatHost.Content is Chat.ChatView chat) chat.RelayoutTranscript();
         _chatWasMain = layout.ChatIsMain;
         ChatToggle.IsChecked = layout.Chat;
         ChatToggle.IsEnabled = layout.Editor; // with the editor hidden, the chat is all there is

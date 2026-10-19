@@ -60,5 +60,17 @@ public sealed partial class SelfTest
                 widest = Math.Max(widest, child.ActualWidth + child.Margin.Left + child.Margin.Right);
         Note($"transcript {where}: viewport {scroller.ViewportWidth:F0}, extent {scroller.ExtentWidth:F0}, widest row {widest:F0} " +
              $"({(widest <= scroller.ViewportWidth + 1 ? "fits" : "CUT OFF")})");
+        if (widest <= scroller.ViewportWidth + 1 || panel is null) return;
+        // Where the width comes from: each ancestor's measured (desired) and arranged width, and the widest rows.
+        var chain = new List<string>();
+        for (System.Windows.DependencyObject? at = scroller; at is not null && chain.Count < 14; at = System.Windows.Media.VisualTreeHelper.GetParent(at))
+        {
+            if (at is System.Windows.FrameworkElement e)
+                chain.Add($"{e.GetType().Name}{(e.Name.Length > 0 ? "#" + e.Name : "")} {e.DesiredSize.Width:F0}/{e.ActualWidth:F0}");
+        }
+        Note("  ancestors (desired/actual): " + string.Join(" < ", chain));
+        foreach (var child in panel.Children.OfType<System.Windows.FrameworkElement>().OrderByDescending(c => c.DesiredSize.Width).Take(3))
+            Note($"  row {child.DataContext?.GetType().Name}: desired {child.DesiredSize.Width:F0}, actual {child.ActualWidth:F0}, " +
+                 $"panel {panel.DesiredSize.Width:F0}/{panel.ActualWidth:F0}");
     }
 }

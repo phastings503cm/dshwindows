@@ -266,6 +266,22 @@ public partial class ChatView : UserControl
         menu.IsOpen = true;
     }
 
+    /// <summary>Re-create the transcript's rows, scrolled as they were, after its width shrank (the chat moved beside the
+    /// editor): the virtualizing panel would otherwise keep arranging them at the width they had.</summary>
+    public void RelayoutTranscript()
+    {
+        if (Transcript.ItemsSource is not { } source) return;
+        var pinned = _pinned;
+        var offset = _scroller?.VerticalOffset ?? 0;
+        Transcript.ItemsSource = null;
+        Transcript.ItemsSource = source;
+        Dispatcher.BeginInvoke(DispatcherPriority.Loaded, () =>
+        {
+            if (pinned) _scroller?.ScrollToEnd();
+            else _scroller?.ScrollToVerticalOffset(offset);
+        });
+    }
+
     // MARK: - Self-test hooks
 
     /// <summary>The composer, for the self-test's measurements.</summary>
