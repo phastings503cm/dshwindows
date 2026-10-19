@@ -308,6 +308,8 @@ public static partial class AnthropicErrors
                 return new($"Anthropic's rate limit for this key was reached; Vision waits and tries again.{said}", false);
             case ("overloaded_error", _) or (_, 529):
                 return new("Anthropic is overloaded right now; Vision waits and tries again.", false);
+            case ("invalid_request_error", 400) when message.Length > 0:
+                return new($"Anthropic refused the request: {TextUtil.Prefix(message, 300)}", true);
             default:
                 return null;
         }

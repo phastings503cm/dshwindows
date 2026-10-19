@@ -168,6 +168,9 @@ public sealed class AnthropicClientTests
         var opusOff = Body(Route(), thinking: ThinkingLevel.Off);
         Assert.Null(opusOff["thinking"]);
         Assert.Equal("low", opusOff["output_config"]!["effort"]!.GetValue<string>());
+        // A short reply asked for with Off (the guide's hello) still has room for the little Opus 5.5 thinks.
+        var hello = AnthropicMessages.Request(new LlmRequest("", [LlmMessage.User("hi")], [], "claude-opus-5-5", MaxTokens: 200, Thinking: ThinkingLevel.Off), Route());
+        Assert.Equal(2048, hello["max_tokens"]!.GetValue<int>());
 
         var opusHigh = Body(Route(temperature: 0.4), thinking: ThinkingLevel.High);
         Assert.Equal("adaptive", opusHigh["thinking"]!["type"]!.GetValue<string>());
@@ -307,6 +310,9 @@ public sealed class AnthropicClientTests
         var overloaded = await Fail((HttpStatusCode)529, """{"type":"error","error":{"type":"overloaded_error","message":"Overloaded"},"request_id":"req_5"}""");
         Assert.Equal("Anthropic is overloaded right now; Vision waits and tries again.", overloaded.Message);
         Assert.IsType<RetryDisposition.UntilAvailable>(RequestRetry.Disposition(overloaded));
+
+        var bad = await Fail(HttpStatusCode.BadRequest, """{"type":"error","error":{"type":"invalid_request_error","message":"messages: roles must alternate between \"user\" and \"assistant\""},"request_id":"req_7"}""");
+        Assert.Equal("Anthropic refused the request: messages: roles must alternate between \"user\" and \"assistant\"", bad.Message);
 
         var tooLong = await Fail(HttpStatusCode.BadRequest, """{"type":"error","error":{"type":"invalid_request_error","message":"prompt is too long: 1012345 tokens > 1000000 maximum"},"request_id":"req_6"}""");
         Assert.Equal(LlmErrorKind.Overflow, tooLong.Kind);

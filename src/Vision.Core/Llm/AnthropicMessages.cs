@@ -132,7 +132,10 @@ public static class AnthropicMessages
                         ThinkingOff.Disabled => new ThinkingPlan(new JsonObject { ["type"] = "disabled" }, null, false, 0),
                         // between_tools takes no other field, and effort high or below.
                         ThinkingOff.BetweenTools => new ThinkingPlan(new JsonObject { ["type"] = "between_tools" }, null, true, 0),
-                        ThinkingOff.LowEffort => new ThinkingPlan(null, BedrockConverse.Effort(ThinkingLevel.Low), true, 0),
+                        // Thinking can't be switched off: the lowest effort, with room for the little it still thinks (a short
+                        // reply asked for with Off — a hello — would otherwise be all thinking and no text).
+                        ThinkingOff.LowEffort => new ThinkingPlan(null, BedrockConverse.Effort(ThinkingLevel.Low), true,
+                                                                  BedrockConverse.ThinkingBudget(ThinkingLevel.Low)),
                         _ => ThinkingPlan.None,
                     };
                 }
