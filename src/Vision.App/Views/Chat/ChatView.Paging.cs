@@ -303,8 +303,9 @@ public partial class ChatView
     // MARK: Jumping to a row
 
     /// <summary>Show the row <paramref name="entryId"/> of this chat — moving the window to it when it is outside — with its
-    /// top near the top of the transcript, and flash it. False when the chat no longer has it (compacted away).</summary>
-    public bool ShowEntry(string entryId)
+    /// top <paramref name="below"/> pixels into the transcript, and flash it. False when the chat no longer has it (compacted
+    /// away).</summary>
+    public bool ShowEntry(string entryId, double below = 40)
     {
         if (_session is not { } session || _scroller is null) return false;
         if (_window is null)
@@ -331,8 +332,8 @@ public partial class ChatView
             Transcript.UpdateLayout();
             if (Container(row) is not { } container) return false;
             var top = container.TranslatePoint(new Point(0, 0), _scroller).Y;
-            _scroller.ScrollToVerticalOffset(_scroller.VerticalOffset + top - 16);
-            Hold(row, 16);
+            _scroller.ScrollToVerticalOffset(_scroller.VerticalOffset + top - below);
+            Hold(row, below);
             Dispatcher.BeginInvoke(DispatcherPriority.Loaded, () =>
             {
                 if (Transcript.ItemContainerGenerator.ContainerFromItem(row) is FrameworkElement shown) FlashRow(shown);

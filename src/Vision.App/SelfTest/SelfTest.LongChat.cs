@@ -127,7 +127,7 @@ public sealed partial class SelfTest
             var shownTop = shown?.TranslatePoint(new Point(0, 0), scroller).Y ?? double.NaN;
             Note($"probe paging: jump to prompt 151 (row {targetIndex:N0}) {(jumped ? "done" : "FAILED")} in {jumpMs:N0} ms — window {pager.Start:N0}–{pager.End:N0} " +
                  $"({pager.Earlier:N0} earlier, {pager.Later:N0} newer); its top is {shownTop:F0} px into a {scroller.ViewportHeight:F0} px viewport");
-            if (!jumped || double.IsNaN(shownTop) || shownTop < -1 || shownTop > scroller.ViewportHeight - 20) Fail("probe-long-chat", new InvalidOperationException("the jumped-to prompt isn't in view"));
+            if (!jumped || double.IsNaN(shownTop) || shownTop < 0 || shownTop > scroller.ViewportHeight / 3) Fail("probe-long-chat", new InvalidOperationException("the jumped-to prompt isn't in view"));
             await Settle(350);
             Capture(window, "long-chat-jump");
 
@@ -138,7 +138,7 @@ public sealed partial class SelfTest
             var foundRow = view.SelfTestPagingContainer(found);
             var foundTop = foundRow?.TranslatePoint(new Point(0, 0), scroller).Y ?? double.NaN;
             Note($"probe find: “Prompt 42:” — {view.SelfTestFindCount}; window {pager.Start:N0}–{pager.End:N0}; the match's top is {foundTop:F0} px into the viewport");
-            if (foundRow is null || foundTop < -1 || foundTop > scroller.ViewportHeight - 20) Fail("probe-long-chat", new InvalidOperationException("Find didn't bring its match into view"));
+            if (foundRow is null || foundTop < 48 || foundTop > scroller.ViewportHeight / 3) Fail("probe-long-chat", new InvalidOperationException("Find didn't bring its match into view"));
             Capture(window, "long-chat-find");
             view.SelfTestCloseFind();
 
@@ -167,16 +167,30 @@ public sealed partial class SelfTest
                  $"at the end: {scroller.VerticalOffset >= scroller.ScrollableHeight - 2}");
             if (pager.Items.Count > pager.MaxRows + pager.PageSize) Fail("probe-long-chat", new InvalidOperationException("the live window kept growing"));
 
+            // A scroll up that no input marked as the reader's (UI Automation, a screen reader) also stays where it went.
+            var end = scroller.VerticalOffset;
+            scroller.ScrollToVerticalOffset(end - 600);
+            window.UpdateLayout();
+            await Dispatcher.Yield(DispatcherPriority.ApplicationIdle);
+            Note($"probe paging: a scroll up 600 px from the end without input stayed {end - scroller.VerticalOffset:F0} px up; pinned {view.SelfTestPagingPinned}");
+            if (end - scroller.VerticalOffset < 500) Fail("probe-long-chat", new InvalidOperationException("a scroll up from the end snapped back"));
+
             // The very long prompt: collapsed, Copy gives it back whole, Show more opens it in its own box, Show less closes it.
             var longRow = chat.Entries.OfType<MessageEntryVM>().First(m => ReferenceEquals(m.Text, longText) || m.Text.Length == longText.Length);
             view.ShowEntry(longRow.Id);
-            await Settle(300);
+            // Past the jump's flash, so the pictures show the row as it is.
+            await Settle(2100);
             var row = view.SelfTestPagingContainer(longRow) ?? throw new InvalidOperationException("the long prompt's row isn't laid out");
             var body = LongChatFind<MessageBody>(row) ?? throw new InvalidOperationException("no message body");
             Note($"probe paging: the {LongChatLongLines:N0}-line prompt's row is {row.ActualHeight:F0} px tall, collapsed {body.IsCollapsed}, “{body.ToggleLabel}”");
             if (!body.IsCollapsed || row.ActualHeight > 1500) Fail("probe-long-chat", new InvalidOperationException("the long prompt isn't collapsed"));
             await CheckCopy(window, view, body, longRow, longText);
 
+            // (Copy focused a reply, which scrolled it into view: back to the long prompt.)
+            view.ShowEntry(longRow.Id);
+            await Settle(2100);
+            row = view.SelfTestPagingContainer(longRow) ?? throw new InvalidOperationException("the long prompt's row isn't laid out");
+            body = LongChatFind<MessageBody>(row) ?? throw new InvalidOperationException("no message body");
             watch.Restart();
             body.Toggle();
             window.UpdateLayout();
