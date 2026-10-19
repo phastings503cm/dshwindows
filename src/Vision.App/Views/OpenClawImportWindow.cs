@@ -60,6 +60,11 @@ public sealed class OpenClawImportWindow : Window
     private readonly Dictionary<string, CheckBox> _serverWorker = new(StringComparer.OrdinalIgnoreCase);
     /// <summary>Made afresh each time the choices are shown (a control can have only one parent).</summary>
     private CheckBox _draftSkills = new();
+    private ComboBox _skillConflict = new();
+    private ComboBox _credentialConflict = new();
+    /// <summary>The clash choices made so far (kept when the page is shown again).</summary>
+    private OpenClawConflict _skillConflictChoice = OpenClawConflict.KeepBoth;
+    private OpenClawConflict _credentialConflictChoice = OpenClawConflict.KeepBoth;
     /// <summary>The first page is built once: its controls live as long as the window and cannot be moved into a second copy.</summary>
     private ScrollViewer? _wherePage;
 
@@ -502,6 +507,8 @@ public sealed class OpenClawImportWindow : Window
             IsChecked = bundle.Skills.Any(s => s.HasScripts),
         };
         body.Children.Add(_draftSkills);
+        _skillConflict = ConflictPicker(_skillConflictChoice, choice => _skillConflictChoice = choice);
+        body.Children.Add(ConflictRow("If Vision already has a skill of that name", _skillConflict));
         var count = bundle.Skills.Count(s => !s.Shadowed);
         return Section($"Skills ({count})", "Copied into your Vision skills. Bundled scripts come along untouched — importing never runs them.", body, allCheck: _skillChecks.Values);
     }
@@ -565,6 +572,8 @@ public sealed class OpenClawImportWindow : Window
             brushKey: "TextFillColorTertiaryBrush");
         note.Margin = new Thickness(0, 8, 0, 0);
         body.Children.Add(note);
+        _credentialConflict = ConflictPicker(_credentialConflictChoice, choice => _credentialConflictChoice = choice);
+        body.Children.Add(ConflictRow("If the vault already has that name (with another value)", _credentialConflict));
         return Section($"Keys and passwords ({bundle.Credentials.Count})", "Only the ones you keep ticked are copied.", body, allCheck: _credentialChecks.Values);
     }
 
@@ -599,6 +608,29 @@ public sealed class OpenClawImportWindow : Window
         return Section($"Model servers ({bundle.ModelServers.Count})",
             "Added as routes you can pick in the model menu. With more than one, the main model does the thinking and the others take subagent work.",
             body, allCheck: _serverChecks.Values.Where(c => c.IsEnabled));
+    }
+
+    /// <summary>"Keep both (rename the new one)" · "Replace what is there" · "Skip it" (the Mac's words).</summary>
+    internal static ComboBox ConflictPicker(OpenClawConflict current, Action<OpenClawConflict> changed)
+    {
+        var picker = new ComboBox { MinWidth = 230 };
+        foreach (var conflict in OpenClawConflicts.All) picker.Items.Add(new ComboBoxItem { Content = conflict.Label(), Tag = conflict, IsSelected = conflict == current });
+        picker.SelectionChanged += (_, _) =>
+        {
+            if (picker.SelectedItem is ComboBoxItem { Tag: OpenClawConflict choice }) changed(choice);
+        };
+        return picker;
+    }
+
+    private static UIElement ConflictRow(string label, ComboBox picker)
+    {
+        var row = new DockPanel { Margin = new Thickness(0, 10, 0, 0) };
+        DockPanel.SetDock(picker, Dock.Right);
+        row.Children.Add(picker);
+        var text = Ui.Text(label, 12);
+        text.VerticalAlignment = VerticalAlignment.Center;
+        row.Children.Add(text);
+        return row;
     }
 
     /// <summary>A titled card with a note and, if given, an "all / none" link.</summary>
@@ -636,6 +668,8 @@ public sealed class OpenClawImportWindow : Window
         var selection = new OpenClawSelection
         {
             SkillsAsDrafts = _draftSkills.IsChecked == true,
+            SkillConflict = _skillConflictChoice,
+            CredentialConflict = _credentialConflictChoice,
         };
         foreach (var (key, box) in _skillChecks) if (box.IsChecked == true) selection.Skills.Add(key);
         foreach (var (key, box) in _noteChecks) if (box.IsChecked == true) selection.NoteFiles.Add(key);
@@ -776,6 +810,22 @@ public sealed class OpenClawImportWindow : Window
         _next.Visibility = Visibility.Collapsed;
         _close.Content = "Done";
         SetStatus("");
+    }
+
+    /// <summary>For the self-test: the choose step for <paramref name="bundle"/> (read from this PC).</summary>
+    internal void ShowChooseDemo(OpenClawBundle bundle)
+    {
+        _source = new LocalFileSource();
+        _bundle = bundle;
+        ShowChoose();
+    }
+
+    /// <summary>For the self-test: scroll the choose step to a fraction of its height.</summary>
+    internal void ScrollChoose(double fraction)
+    {
+        if (_page.Content is not ScrollViewer scroll) return;
+        scroll.UpdateLayout();
+        scroll.ScrollToVerticalOffset(scroll.ScrollableHeight * fraction);
     }
 
     // MARK: - Chrome

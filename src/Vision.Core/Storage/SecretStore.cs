@@ -59,13 +59,72 @@ public static class SecretStore
     public static string? Read(string target)
     {
         var store = Store;
-        if (store.Read(target) is { } entry) return entry.Secret;
+        if (store.Read(target) is { } entry) return Joined(store, target, entry.Secret);
         if (LegacyTarget(target) is null) return null;
         lock (BringOverLock)
         {
             // Another thread may have brought it over a moment ago.
-            if (store.Read(target) is { } again) return again.Secret;
+            if (store.Read(target) is { } again) return Joined(store, target, again.Secret);
             return BringOver(store, target, out _);
+        }
+    }
+
+    // MARK: Long secrets
+    //
+    // Credential Manager holds at most 2,560 bytes per entry — 1,280 UTF-16 characters. A longer secret (a session
+    // token with many claims, say) is kept in parts: "<target>#part1"…"#partN", with the entry itself holding
+    // "vision-parts:N". Reading puts it back together; writing a shorter value, or deleting, removes the parts.
+
+    /// <summary>The longest secret one entry holds (2,560 bytes of UTF-16).</summary>
+    public const int MaxEntryChars = 1_280;
+    /// <summary>The size of each part of a longer one.</summary>
+    internal const int PartChars = 1_200;
+    internal const string PartsMarker = "vision-parts:";
+    /// <summary>No secret is cut into more parts than this (about 300 KB).</summary>
+    internal const int MaxParts = 256;
+
+    public static string PartTarget(string target, int n) => $"{target}#part{n}";
+
+    /// <summary>The secret an entry stands for: itself, or its parts put back together (null when one is missing).</summary>
+    private static string? Joined(ICredentialStore store, string target, string stored)
+    {
+        if (!stored.StartsWith(PartsMarker, StringComparison.Ordinal)
+            || !int.TryParse(stored.AsSpan(PartsMarker.Length), System.Globalization.NumberStyles.None, System.Globalization.CultureInfo.InvariantCulture, out var count)
+            || count is < 1 or > MaxParts)
+            return stored;
+        var builder = new StringBuilder(count * PartChars);
+        for (var n = 1; n <= count; n++)
+        {
+            if (store.Read(PartTarget(target, n)) is not { } part) return null;
+            builder.Append(part.Secret);
+        }
+        return builder.ToString();
+    }
+
+    /// <summary>Cut <paramref name="secret"/> into parts that each fit one entry, never between the two halves of a
+    /// surrogate pair.</summary>
+    internal static IReadOnlyList<string> Parts(string secret)
+    {
+        var parts = new List<string>();
+        var at = 0;
+        while (at < secret.Length)
+        {
+            var length = Math.Min(PartChars, secret.Length - at);
+            if (at + length < secret.Length && char.IsHighSurrogate(secret[at + length - 1])) length--;
+            parts.Add(secret.Substring(at, length));
+            at += length;
+        }
+        return parts;
+    }
+
+    /// <summary>Remove parts numbered from <paramref name="from"/> on, as far as they go.</summary>
+    private static void DeleteParts(ICredentialStore store, string target, int from)
+    {
+        for (var n = from; n <= MaxParts; n++)
+        {
+            var part = PartTarget(target, n);
+            if (store.Read(part) is null) break;
+            store.Delete(part);
         }
     }
 
@@ -130,7 +189,20 @@ public static class SecretStore
             return;
         }
         var store = Store;
-        store.Write(target, secret, userName ?? Environment.UserName);
+        var user = userName ?? Environment.UserName;
+        if (secret.Length <= MaxEntryChars && !secret.StartsWith(PartsMarker, StringComparison.Ordinal))
+        {
+            store.Write(target, secret, user);
+            DeleteParts(store, target, 1);
+        }
+        else
+        {
+            var parts = Parts(secret);
+            if (parts.Count > MaxParts) throw new ArgumentException("That secret is too long to store in Credential Manager.");
+            for (var n = 1; n <= parts.Count; n++) store.Write(PartTarget(target, n), parts[n - 1], user);
+            store.Write(target, PartsMarker + parts.Count.ToString(System.Globalization.CultureInfo.InvariantCulture), user);
+            DeleteParts(store, target, parts.Count + 1);
+        }
         // DSH's older copy would otherwise come back if this entry were ever deleted.
         if (LegacyTarget(target) is { } legacy)
         {
@@ -142,6 +214,7 @@ public static class SecretStore
     public static void Delete(string target)
     {
         var store = Store;
+        if (store.Read(target) is { Secret: var stored } && stored.StartsWith(PartsMarker, StringComparison.Ordinal)) DeleteParts(store, target, 1);
         store.Delete(target);
         if (LegacyTarget(target) is { } legacy) store.Delete(legacy);
     }

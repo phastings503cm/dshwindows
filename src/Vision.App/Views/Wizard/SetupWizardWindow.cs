@@ -161,6 +161,25 @@ public sealed class SetupWizardWindow : Window, IGuideHost
         ShowGuide(new PlanGuide(_model, this, plan));
     }
 
+    /// <summary>Show "My Guardian account" in place of the normal steps.</summary>
+    public void StartGuardianGuide()
+    {
+        _guide?.Dispose();
+        ShowGuide(new GuardianGuide(_model, this));
+    }
+
+    /// <summary>The Welcome and backend pages' card for it (the Mac's wording).</summary>
+    private Button GuardianChoice() => Choice(Icons.Shield, "My Guardian account — models, prompts and skills in one place",
+        "Sign in with your guardian.503cm.com login (or Microsoft, in the browser). Your account's models are the proxy; prompts, skills, chats and code projects sync with Guardian too.",
+        false, StartGuardianGuide);
+
+    /// <summary>For the self-test: "My Guardian account" on <paramref name="page"/>, with sample state.</summary>
+    internal void ShowGuardianDemo(GuardianGuidePage page)
+    {
+        if (_guide is not GuardianGuide) StartGuardianGuide();
+        ((GuardianGuide)_guide!).ShowDemo(page);
+    }
+
     /// <summary>For the self-test: "Connect my Spark Swapper" on <paramref name="page"/>, with sample state (its paste page in
     /// the address-and-login form when <paramref name="login"/>).</summary>
     internal void ShowSwapperDemo(SwapperPage page, bool login = false)
@@ -599,6 +618,7 @@ public sealed class SetupWizardWindow : Window, IGuideHost
         panel.Children.Add(Choice(Icons.Cloud, "Use Amazon Bedrock with my AWS account (guided)",
             "Claude, Amazon Nova, Llama and more, billed to your AWS account. Vision installs the AWS CLI if needed, signs you in through your browser, and takes care of each model's first-time form or terms — showing you the price first.",
             false, () => StartBedrockGuide()));
+        panel.Children.Add(GuardianChoice());
         var or = Ui.Secondary("Or press Continue to set Vision up yourself:");
         or.Margin = new Thickness(0, 6, 0, 12);
         panel.Children.Add(or);
@@ -653,6 +673,7 @@ public sealed class SetupWizardWindow : Window, IGuideHost
     private UIElement Backend()
     {
         var panel = Ui.Stack(Heading("Where does the model run?"), Lead("You can change this later, and keep more than one configured."));
+        panel.Children.Add(GuardianChoice());
         panel.Children.Add(Choice(Icons.Connect, "My Spark Swapper (DGX Spark or Strix Halo)",
             "Paste the connection code from the Swapper's Connect tab. Sets up the model, switching, and the security certificate in one go.",
             false, () => StartSwapperGuide()));

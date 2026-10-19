@@ -12,7 +12,7 @@ namespace Vision.App.Model;
 public enum WorkspaceMode { Chat, Code }
 
 /// <summary>Settings pages. (<see cref="Spark"/> is the "Model servers" page: the Spark Swapper boxes.)</summary>
-public enum SettingsTab { General, Models, Spark, Skills, Plugins, Editor }
+public enum SettingsTab { General, Models, Spark, Skills, Plugins, Editor, Guardian, ImportExport }
 
 public enum SkillsAction { Generate, Import, NewManual }
 
@@ -99,6 +99,7 @@ public sealed partial class AppModel : ObservableObject
 
     public void Start()
     {
+        StartGuardian();
         Spark.StartMonitoring();
         Host.EnsureContextProbe();
         // A task list interrupted mid-run (crash, restart, quit) resumes by itself; one the user stopped
@@ -191,8 +192,12 @@ public sealed partial class AppModel : ObservableObject
         return session;
     }
 
-    public void Send(string text, SessionVM session, IReadOnlyList<MessageAttachment>? attachments = null) =>
+    public void Send(string text, SessionVM session, IReadOnlyList<MessageAttachment>? attachments = null)
+    {
+        var wasRunning = session.Running;
         Host.Send(text, session.Id, attachments);
+        SyncPrompt(session, text, wasRunning);
+    }
 
     // MARK: - Stopping
 

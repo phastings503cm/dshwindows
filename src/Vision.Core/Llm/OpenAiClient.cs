@@ -354,6 +354,9 @@ public sealed partial class OpenAiClient : IProviderClient
             {
                 var body = await ReadErrorBodyAsync(response, cancellationToken).ConfigureAwait(false);
                 var code = (int)response.StatusCode;
+                // Guardian's proxy says no in its own words (401 sign-in, 402 budget, 403 role, 429 slow down).
+                if (GuardianProxyRefusals.From(Profile, code, body, response.Headers) is { } refusal)
+                    throw GuardianProxyRefusals.ToLlmException(refusal, body);
                 // A chat template that rejects our effort word ("Unexpected reasoning effort high.
                 // Supported types are xhigh (default), medium, and low.") — learn the nearest
                 // accepted word and retry once.

@@ -211,6 +211,10 @@ public sealed class CredentialVault
     private readonly List<VaultEntry> _entries;
     /// <summary>Decrypted values by entry id, loaded from the store on first need.</summary>
     private Dictionary<string, string>? _values;
+    /// <summary>Entries held for this run of the app only (Guardian's "Usable in Vision" secrets): never written to
+    /// vault.json or vault.bin.</summary>
+    private readonly List<VaultEntry> _sessionEntries = [];
+    private readonly Dictionary<string, string> _sessionValues = new(StringComparer.Ordinal);
     private int _revision;
 
     /// <param name="directory">Where vault.json lives; <see cref="AppPaths.Root"/> by default.</param>
@@ -242,7 +246,7 @@ public sealed class CredentialVault
     {
         get
         {
-            lock (_lock) return _entries.OrderBy(e => e.Name.ToLowerInvariant(), StringComparer.Ordinal).ToList();
+            lock (_lock) return _entries.Concat(_sessionEntries).OrderBy(e => e.Name.ToLowerInvariant(), StringComparer.Ordinal).ToList();
         }
     }
 
@@ -250,7 +254,7 @@ public sealed class CredentialVault
     {
         get
         {
-            lock (_lock) return _entries.Count == 0;
+            lock (_lock) return _entries.Count == 0 && _sessionEntries.Count == 0;
         }
     }
 
@@ -295,6 +299,7 @@ public sealed class CredentialVault
     {
         lock (_lock)
         {
+            if (_sessionValues.TryGetValue(id, out var held)) return held;
             LoadValuesLocked();
             return _values!.GetValueOrDefault(id);
         }
@@ -306,6 +311,7 @@ public sealed class CredentialVault
         lock (_lock)
         {
             if (EntryLocked(name) is not { } entry) return new VaultLookup.Missing();
+            if (_sessionValues.TryGetValue(entry.Id, out var held)) return new VaultLookup.Value(held, entry.Access);
             try
             {
                 LoadValuesLocked();
@@ -327,17 +333,21 @@ public sealed class CredentialVault
     {
         lock (_lock)
         {
-            if (_entries.Count == 0) return [];
-            try
+            if (_entries.Count == 0 && _sessionEntries.Count == 0) return [];
+            var values = new Dictionary<string, string>(_sessionValues, StringComparer.Ordinal);
+            if (_entries.Count > 0)
             {
-                LoadValuesLocked();
+                try
+                {
+                    LoadValuesLocked();
+                    foreach (var (id, value) in _values!) values.TryAdd(id, value);
+                }
+                catch (VaultException)
+                {
+                    // The session's own values still get scrubbed.
+                }
             }
-            catch (VaultException)
-            {
-                return [];
-            }
-            var values = _values!;
-            return _entries
+            return _entries.Concat(_sessionEntries)
                 .Select(e => (e.Name, Value: values.GetValueOrDefault(e.Id)))
                 .Where(p => p.Value is not null && new StringInfo(p.Value).LengthInTextElements >= 4)
                 .Select(p => (p.Name, Value: p.Value!))
@@ -361,7 +371,7 @@ public sealed class CredentialVault
         if (value.Length == 0) throw VaultException.EmptyValue();
         return Change(() =>
         {
-            if (_entries.Any(e => SameName(e.Name, name))) throw VaultException.DuplicateName(name);
+            if (_entries.Concat(_sessionEntries).Any(e => SameName(e.Name, name))) throw VaultException.DuplicateName(name);
             LoadValuesLocked();
             var now = DateTimeOffset.Now;
             var entry = new VaultEntry
@@ -395,6 +405,23 @@ public sealed class CredentialVault
         if (value is { Length: 0 }) throw VaultException.EmptyValue();
         Change(() =>
         {
+            var held = _sessionEntries.FindIndex(e => e.Id == updated.Id);
+            if (held >= 0)
+            {
+                // Held for this session: edited in memory, never saved.
+                var current = _sessionEntries[held];
+                _sessionEntries[held] = current with
+                {
+                    Description = updated.Description,
+                    Access = updated.Access,
+                    Tags = Clean(updated.Tags),
+                    UpdatedAt = DateTimeOffset.Now,
+                    Fingerprint = value is null ? current.Fingerprint : Fingerprint(value),
+                };
+                if (value is not null) _sessionValues[current.Id] = value;
+                Interlocked.Increment(ref _revision);
+                return;
+            }
             var i = _entries.FindIndex(e => e.Id == updated.Id);
             if (i < 0) throw VaultException.NotFound(updated.Name);
             if (_entries.Any(e => e.Id != updated.Id && SameName(e.Name, name))) throw VaultException.DuplicateName(name);
@@ -428,6 +455,13 @@ public sealed class CredentialVault
     {
         Change(() =>
         {
+            if (_sessionEntries.FindIndex(e => e.Id == id) is var held and >= 0)
+            {
+                _sessionEntries.RemoveAt(held);
+                _sessionValues.Remove(id);
+                Interlocked.Increment(ref _revision);
+                return;
+            }
             var i = _entries.FindIndex(e => e.Id == id);
             if (i < 0) return;
             LoadValuesLocked();
@@ -444,6 +478,13 @@ public sealed class CredentialVault
     {
         Change(() =>
         {
+            var held = _sessionEntries.FindIndex(e => SameName(e.Name, name));
+            if (held >= 0)
+            {
+                _sessionEntries[held] = _sessionEntries[held] with { LastUsedAt = DateTimeOffset.Now, UseCount = _sessionEntries[held].UseCount + 1 };
+                Interlocked.Increment(ref _revision);
+                return;
+            }
             var i = _entries.FindIndex(e => SameName(e.Name, name));
             if (i < 0) return;
             _entries[i] = _entries[i] with { LastUsedAt = DateTimeOffset.Now, UseCount = _entries[i].UseCount + 1 };
@@ -455,6 +496,78 @@ public sealed class CredentialVault
             {
                 // Best effort, like the Mac app's `try?`.
             }
+        });
+    }
+
+    // MARK: For this session only
+
+    /// <summary>Hold a secret for this run of the app only — Guardian's opt-in secrets are memory-only on the device. The
+    /// agent reaches it as {{vault:NAME}} like any other; nothing of it is written to disk. A name the saved vault already
+    /// uses gets "_GUARDIAN" added. The same name again replaces the value. Returns the entry.</summary>
+    /// <exception cref="VaultException">An invalid name or an empty value.</exception>
+    public VaultEntry HoldForSession(string name, string value, VaultKind kind = VaultKind.ApiKey, string description = "",
+                                     IEnumerable<string>? tags = null, VaultAccess access = VaultAccess.Ask)
+    {
+        name = name.Trim();
+        if (!IsValidName(name)) throw VaultException.InvalidName(name);
+        if (value.Length == 0) throw VaultException.EmptyValue();
+        return Change(() =>
+        {
+            if (_entries.Any(e => SameName(e.Name, name)))
+            {
+                const string suffix = "_GUARDIAN";
+                name = (name.Length + suffix.Length > MaxNameLength ? name[..(MaxNameLength - suffix.Length)] : name) + suffix;
+            }
+            var existing = _sessionEntries.FindIndex(e => SameName(e.Name, name));
+            var now = DateTimeOffset.Now;
+            var entry = new VaultEntry
+            {
+                Id = existing >= 0 ? _sessionEntries[existing].Id : Guid.NewGuid().ToString("D").ToUpperInvariant(),
+                Name = name,
+                Kind = kind,
+                Description = description,
+                Tags = Clean(tags ?? []),
+                Fingerprint = Fingerprint(value),
+                Access = access,
+                CreatedAt = now,
+                UpdatedAt = now,
+            };
+            if (existing >= 0) _sessionEntries[existing] = entry; else _sessionEntries.Add(entry);
+            _sessionValues[entry.Id] = value;
+            Interlocked.Increment(ref _revision);
+            return entry;
+        });
+    }
+
+    /// <summary>Whether <paramref name="id"/> is held for this session only.</summary>
+    public bool IsSessionOnly(string id)
+    {
+        lock (_lock) return _sessionEntries.Any(e => e.Id == id);
+    }
+
+    /// <summary>The entries held for this session only.</summary>
+    public IReadOnlyList<VaultEntry> SessionEntries
+    {
+        get
+        {
+            lock (_lock) return _sessionEntries.ToList();
+        }
+    }
+
+    /// <summary>Let go of every session-only secret carrying <paramref name="tag"/> (all of them when null) — signing
+    /// out of Guardian does this.</summary>
+    public int ForgetSession(string? tag = null)
+    {
+        return Change(() =>
+        {
+            var gone = _sessionEntries.Where(e => tag is null || e.Tags.Contains(tag.ToLowerInvariant())).ToList();
+            foreach (var entry in gone)
+            {
+                _sessionEntries.Remove(entry);
+                _sessionValues.Remove(entry.Id);
+            }
+            if (gone.Count > 0) Interlocked.Increment(ref _revision);
+            return gone.Count;
         });
     }
 
@@ -474,7 +587,7 @@ public sealed class CredentialVault
 
     private static bool SameName(string a, string b) => string.Equals(a, b, StringComparison.OrdinalIgnoreCase);
 
-    private VaultEntry? EntryLocked(string name) => _entries.FirstOrDefault(e => SameName(e.Name, name));
+    private VaultEntry? EntryLocked(string name) => _entries.FirstOrDefault(e => SameName(e.Name, name)) ?? _sessionEntries.FirstOrDefault(e => SameName(e.Name, name));
 
     private static List<string> Clean(IEnumerable<string> tags)
     {

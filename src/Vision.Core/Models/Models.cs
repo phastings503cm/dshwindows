@@ -222,6 +222,8 @@ public sealed record ProviderProfile
         get
         {
             if (!Uri.TryCreate(BaseUrl, UriKind.Absolute, out var uri) || string.IsNullOrEmpty(uri.Host)) return true;
+            // Guardian's model proxy is a hosted service wherever it runs (its own deployment or a dev box).
+            if (uri.AbsolutePath.Contains("/api/harness/", StringComparison.OrdinalIgnoreCase)) return false;
             var host = uri.Host.ToLowerInvariant();
             return !HostedServices.Any(h => host == h || host.EndsWith("." + h, StringComparison.Ordinal));
         }
