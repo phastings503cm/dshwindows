@@ -44,6 +44,8 @@ public sealed partial class AgentHost : ObservableObject
     private readonly Dictionary<string, (TaskCompletionSource<bool> Tcs, string SessionId)> _gates = new();
     private readonly Dictionary<string, CancellationTokenSource> _runs = new();
     private readonly Dictionary<string, ComputerGrants> _grants = new();
+    /// <summary>Each chat as the machine tools see it (its name on the glow, its turn at the real mouse).</summary>
+    private readonly Dictionary<string, Vision.Windows.MachineChat> _machineChats = new();
     private readonly string _basePrompt;
     /// <summary>A test gave its own system prompt: every chat uses it, with or without a project.</summary>
     private readonly bool _customPrompt;
@@ -225,6 +227,8 @@ public sealed partial class AgentHost : ObservableObject
         _transcripts.Remove(id);
         _systemPrompts.Remove(id);
         _grants.Remove(id);
+        _machineChats.Remove(id);
+        ChatProcesses.Forget(id);
         _vaultGrants.Remove(id);
         _autoContinuations.Remove(id);
         _agentQueuedCount.Remove(id);
@@ -416,7 +420,7 @@ public sealed partial class AgentHost : ObservableObject
         // over their names.
         var agents = CatalogFor(vm);
         var builtins = ToolRegistry.Standard(0, shell, agents, servers).Adding(ExtraTools.Processes());
-        if (Config.ComputerToolsEnabled) builtins = builtins.Adding(ExtraTools.Machine());
+        if (Config.ComputerToolsEnabled) builtins = builtins.Adding(ExtraTools.Machine(MachineChatFor(vm)));
         // A regular chat has no project, so no project plugins: only the user's own.
         var extra = new List<IToolExecutor>(PluginLoader.Tools(plain ? UserPlugins() : Plugins, builtins.Names));
         if (skillState.Active.Count > 0) extra.Add(new UseSkillTool(skillState.Active));
@@ -477,6 +481,44 @@ public sealed partial class AgentHost : ObservableObject
         };
         _engines[sessionId] = engine;
         return engine;
+    }
+
+    /// <summary>The chat as the machine tools see it: made once per chat, so its place in line for the real
+    /// mouse and the field it last clicked survive engine rebuilds.</summary>
+    private Vision.Windows.MachineChat MachineChatFor(SessionVM vm)
+    {
+        if (_machineChats.TryGetValue(vm.Id, out var chat)) return chat;
+        var id = vm.Id;
+        chat = new Vision.Windows.MachineChat(id, () => vm.Title, () => Config.MachineOwnAppsOnly)
+        {
+            // "Waiting for the mouse…" in the chat's status line while it waits its turn.
+            Status = text => _dispatcher.BeginInvoke(() =>
+            {
+                if (Session(id) is not { } session) return;
+                if (text is not null) session.Activity = session.Running ? text : null;
+                else if (session.Activity?.StartsWith("Waiting for", StringComparison.Ordinal) == true) session.Activity = null;
+            }),
+        };
+        _machineChats[id] = chat;
+        return chat;
+    }
+
+    /// <summary>Ctrl+Alt+. (from any app): stop every chat that is using the machine.</summary>
+    public int StopMachineChats()
+    {
+        var stopped = 0;
+        foreach (var session in Vision.Windows.MachineControl.Activity.Sessions())
+        {
+            if (Session(session.ChatId) is not { } vm) continue;
+            if (vm.Running || _runs.ContainsKey(vm.Id) || _backgroundPools.ContainsKey(vm.Id))
+            {
+                StopSession(vm.Id);
+                vm.Note("Stopped with Ctrl+Alt+. — the stop key works from any app while Vision uses the computer.");
+                stopped++;
+            }
+        }
+        Vision.Windows.MachineControl.Activity.Clear();
+        return stopped;
     }
 
     private static bool SamePath(string a, string b) =>
@@ -614,6 +656,8 @@ public sealed partial class AgentHost : ObservableObject
             stopped = cts.IsCancellationRequested;
             if (_runs.TryGetValue(sessionId, out var current) && ReferenceEquals(current, cts)) _runs.Remove(sessionId);
             cts.Dispose();
+            // The run is over, so is its use of the machine (the glow lingers a moment).
+            Vision.Windows.MachineControl.Activity.EndRun(sessionId);
         }
         // A background agent that finished while this run was still going had nobody to report to (its event was ignored
         // because the chat was busy): now that the chat is idle, hand it over. Not after a Stop (which never wakes the chat
@@ -956,7 +1000,12 @@ public sealed partial class AgentHost : ObservableObject
         RunResult result;
         try
         {
-            result = await Task.Run(() => engine.RunAsync(input, modelText, attachments, Sink, ct, progress), CancellationToken.None);
+            result = await Task.Run(() =>
+            {
+                // Everything this run starts (shell commands, processes, subagents) belongs to this chat.
+                ChatProcesses.Current = sessionId;
+                return engine.RunAsync(input, modelText, attachments, Sink, ct, progress);
+            }, CancellationToken.None);
         }
         catch (Exception)
         {

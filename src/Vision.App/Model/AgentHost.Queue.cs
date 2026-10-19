@@ -396,6 +396,7 @@ public sealed partial class AgentHost
         vm.ClearReasoning();
         vm.EndStreaming();
         _queueSessions.Remove(vm.Id);
+        Vision.Windows.MachineControl.Activity.EndRun(vm.Id);
         // The task is over: nothing it started in the background keeps going.
         if (_backgroundPools.TryGetValue(vm.Id, out var pool)) pool.StopAll();
         if (run.ActiveTaskId == taskId) run.ActiveTaskId = null;
@@ -935,6 +936,6 @@ internal static class ExtraTools
     /// <summary>process_start/read/write/stop/list.</summary>
     public static IEnumerable<IToolExecutor> Processes() => ProcessTools.All();
 
-    /// <summary>Screenshots, windows, UI trees, clicks and keystrokes.</summary>
-    public static IEnumerable<IToolExecutor> Machine() => Vision.Windows.MachineTools.All();
+    /// <summary>Screenshots, windows, UI trees, clicks and keystrokes, for one chat.</summary>
+    public static IEnumerable<IToolExecutor> Machine(Vision.Windows.MachineChat chat) => Vision.Windows.MachineTools.All(chat);
 }
