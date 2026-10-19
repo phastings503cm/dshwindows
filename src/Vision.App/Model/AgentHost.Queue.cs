@@ -27,6 +27,8 @@ public sealed partial class AgentHost
         public Task? Loop { get; set; }
         /// <summary>The task being worked right now (null while waiting for the chat to be free).</summary>
         public string? ActiveTaskId { get; set; }
+        /// <summary>Started by itself for a task added with "Add to tasks" (not with Start): it says nothing when it runs dry.</summary>
+        public bool Auto { get; init; }
     }
 
     /// <summary>Chat id → its list's run, while it runs or winds down.</summary>
@@ -98,6 +100,7 @@ public sealed partial class AgentHost
         Queue.Changed += () => _dispatcher.BeginInvoke(() => QueueChanged?.Invoke());
         if (Queue.LoadProblem is { } problem) Banner = problem;
         AdoptOrphanTasks();
+        PausePromptTasksAtLaunch();
     }
 
     /// <summary>Tasks that belong to no chat — queued before task lists were per chat, or whose chat is
@@ -160,9 +163,10 @@ public sealed partial class AgentHost
     {
         // A chat working this task stops it first. The store marks a running task skipped (keeping its
         // record), so the list moves on to the next task rather than pausing.
-        var sessionId = _queueSessions.FirstOrDefault(p => p.Value == id).Key;
+        var sessionId = _queueSessions.FirstOrDefault(p => p.Value == id).Key
+                        ?? _chatQueues.FirstOrDefault(p => p.Value.ActiveTaskId == id).Key;
         Queue.Remove(id);
-        if (sessionId is not null) StopSession(sessionId);
+        if (sessionId is not null) StopSession(sessionId, pauseTasks: false);
     }
 
     /// <summary>Put a blocked, failed or skipped task back in line — at the front of its chat's list —
@@ -182,16 +186,21 @@ public sealed partial class AgentHost
     /// <summary>Work <paramref name="chatId"/>'s task list: its waiting tasks one at a time, top to bottom,
     /// in that chat, until none are left, one is blocked, or the user stops it. A list that is already
     /// running is left alone; one still winding down from a Stop picks back up once that task has stopped.</summary>
-    public void StartQueue(string chatId)
+    /// <param name="resumeOnLaunch">False when the list starts by itself for a task added with "Add to tasks": such a list
+    /// never picks back up when Vision opens (its tasks wait for Resume).</param>
+    public void StartQueue(string chatId, bool resumeOnLaunch = true)
     {
         if (Session(chatId) is not { } vm) return;
+        // Start is also Resume for a paused list.
+        _chatTasksPaused.Remove(chatId);
         if (!Config.IsConfigured)
         {
             ChatNote(vm, "No model is configured — run the setup wizard, then start the task list.", error: true);
             return;
         }
-        // A plan whose terms allow only interactive use never works a task list (nor picks one up at the next launch).
-        if (InteractiveOnlyRoute(vm) is { } interactive)
+        // A plan whose terms allow only interactive use never works a task list (nor picks one up at the next launch) — except
+        // the prompts the person queued with "Add to tasks", which run as their own next prompts.
+        if (InteractiveOnlyRoute(vm) is { } interactive && Queue.NextTaskFor(chatId) is not { AsPrompt: true })
         {
             ChatNote(vm, QueueRefusal(interactive), error: true);
             Config.SetQueueResume(chatId, false);
@@ -205,9 +214,9 @@ public sealed partial class AgentHost
             ChatNote(vm, "This chat's task list has nothing waiting — add a task first.");
             return;
         }
-        var run = new ChatQueueRun();
+        var run = new ChatQueueRun { Auto = !resumeOnLaunch };
         _chatQueues[chatId] = run;
-        Config.SetQueueResume(chatId, true);
+        Config.SetQueueResume(chatId, resumeOnLaunch);
         QueueStateChanged();
         run.Loop = RunAfterAsync(previous?.Loop);
 
@@ -257,7 +266,7 @@ public sealed partial class AgentHost
         Queue.Requeue(taskId, toFront: true);
         Hydrate(vm);
         if (IsQueueRunning(chatId)) ChatNote(vm, $"“{task.Title}” is next on this chat's task list.");
-        else StartQueue(chatId);
+        else StartQueue(chatId, resumeOnLaunch: !task.AsPrompt);
     }
 
     /// <summary>True while <paramref name="run"/> is still in charge of <paramref name="chatId"/>'s list.</summary>
@@ -265,6 +274,13 @@ public sealed partial class AgentHost
         run.Running && _chatQueues.TryGetValue(chatId, out var current) && ReferenceEquals(current, run);
 
     private enum WorkOutcome { Finished, Errored, Blocked, Stopped }
+
+    /// <summary>The prompt task that paused the list last, and why (shown by the list; the next Start clears it).</summary>
+    private void PausePromptList(string chatId, string reason)
+    {
+        _chatTasksPaused[chatId] = reason;
+        QueueStateChanged();
+    }
 
     private async Task QueueRunLoopAsync(string chatId, ChatQueueRun run)
     {
@@ -276,6 +292,21 @@ public sealed partial class AgentHost
             while (QueueActive(chatId, run))
             {
                 if (Queue.NextTaskFor(chatId) is not { } task) break;
+                // A prompt added with "Add to tasks" runs as the chat's next prompt, as if the person sent it now; its ending
+                // decides whether the list moves on.
+                if (task.AsPrompt)
+                {
+                    // Held (a Stop, a failure, "Pause"): nothing new starts until Resume.
+                    if (_chatTasksPaused.ContainsKey(chatId)) return;
+                    var (promptOutcome, pause) = await WorkPromptTaskAsync(chatId, task.Id, run);
+                    if (promptOutcome == WorkOutcome.Finished)
+                    {
+                        erroredInARow = 0;
+                        continue;
+                    }
+                    if (pause is not null && QueueActive(chatId, run) && !_shuttingDown) PausePromptList(chatId, pause);
+                    return;
+                }
                 // The chat's model was changed to an interactive-only plan while the list ran: stop before the next task (the
                 // finally below forgets the list's resume-on-launch).
                 if (InteractiveOnlyRoute(chatId) is { } interactive)
@@ -308,7 +339,7 @@ public sealed partial class AgentHost
                         break;
                 }
             }
-            if (QueueActive(chatId, run) && Queue.Stats(chatId) is { Finished: true } s)
+            if (QueueActive(chatId, run) && !run.Auto && Queue.Stats(chatId) is { Finished: true } s)
                 ChatNote(chatId, $"Task list done: {s.Completed} complete, {s.Failed} failed, {s.Blocked} blocked.");
         }
         catch (Exception error)
@@ -332,6 +363,22 @@ public sealed partial class AgentHost
     /// <summary>Something else is using this chat (a turn the user started, a command): the list waits
     /// rather than run two things in one chat.</summary>
     private bool IsBusy(SessionVM vm) => vm.Running || _runs.ContainsKey(vm.Id);
+
+    /// <summary>Wait for the chat to be free, then run one prompt task (see <see cref="WorkPromptAsync"/>).</summary>
+    private async Task<(WorkOutcome, string?)> WorkPromptTaskAsync(string chatId, string taskId, ChatQueueRun run)
+    {
+        if (Session(chatId) is not { } vm) return (WorkOutcome.Stopped, null);
+        // Free means: no turn, no permission question waiting, no background agent still working, no model switch under way.
+        while (IsBusy(vm) || vm.PendingGates.Count > 0 || vm.RunningBackgroundJobs.Count > 0 || IsServerSwitching?.Invoke() == true)
+        {
+            if (!QueueActive(chatId, run) || !Sessions.Contains(vm) || _chatTasksPaused.ContainsKey(chatId)) return (WorkOutcome.Stopped, null);
+            await Task.Delay(QueueBusyPoll);
+        }
+        if (!QueueActive(chatId, run) || !Sessions.Contains(vm) || _chatTasksPaused.ContainsKey(chatId)) return (WorkOutcome.Stopped, null);
+        if (Queue.Find(taskId) is not { Status: QueueTaskStatus.Queued } task) return (WorkOutcome.Finished, null);
+        Hydrate(vm);
+        return await WorkPromptAsync(vm, task, run);
+    }
 
     /// <summary>Run one task's unattended goal loop in its chat, to a conclusion.</summary>
     private async Task<WorkOutcome> WorkAsync(string chatId, string taskId, ChatQueueRun run)
@@ -373,6 +420,16 @@ public sealed partial class AgentHost
         }
 
         var status = Queue.Find(taskId)?.Status;
+        // Its timeline row ends with the task.
+        var ended = status switch
+        {
+            QueueTaskStatus.Complete => vm.TurnPhase?.LastValidationFailure is not null ? PromptOutcome.Issues : PromptOutcome.Completed,
+            QueueTaskStatus.Blocked => PromptOutcome.NeedsYou,
+            QueueTaskStatus.Failed => PromptOutcome.Failed,
+            _ => PromptOutcome.Stopped,
+        };
+        if (ended == PromptOutcome.Stopped) PhasesAbandon(vm, "Stopped before finishing.", completed: false);
+        FinishPrompt(vm, ended, Queue.Find(taskId)?.Log.LastOrDefault()?.Text);
         FinishTaskSession(vm, taskId, run);
         return status switch
         {
@@ -410,6 +467,10 @@ public sealed partial class AgentHost
     private async Task RunTaskGoalAsync(SessionVM vm, string taskId, bool resuming, CancellationToken ct)
     {
         if (Queue.Find(taskId) is not { } task) return;
+        // Tasks run the same phases as an interactive turn: the task's text is the prompt. A resumed task whose turn is still
+        // on screen keeps it.
+        if (!resuming || vm.TurnPhase is not { IsOver: false }) PhasesBegin(vm, task.GoalText);
+        BeginPrompt(vm, task.GoalText, PromptSource.Task);
         try
         {
             var outcome = await GoalLoopAsync(vm, task.GoalText, auto: true, resuming, ct);
@@ -419,9 +480,11 @@ public sealed partial class AgentHost
             {
                 case GoalOutcome.Complete:
                     Queue.Finish(taskId, QueueTaskStatus.Complete, sessionId: vm.Id);
+                    PhasesAbandon(vm, "The task completed.", completed: true);
                     break;
                 case GoalOutcome.Blocked blocked:
                     Queue.Finish(taskId, QueueTaskStatus.Blocked, blocked.Reason, vm.Id);
+                    PhasesAbandon(vm, "Paused — the agent needs you: " + blocked.Reason, completed: false);
                     break;
                 default:
                     return; // cancelled; FinishTaskSession puts it back in line
@@ -437,6 +500,7 @@ public sealed partial class AgentHost
             if (ct.IsCancellationRequested || Queue.Find(taskId)?.Status != QueueTaskStatus.Running) return;
             var why = Describe(error);
             Queue.Finish(taskId, QueueTaskStatus.Failed, why, vm.Id);
+            PhasesAbandon(vm, why, completed: false);
             vm.EndStreaming();
             vm.Note(why, MessageRole.Error);
             Log.RecordItem(vm.Id, "error", why, isError: true);
@@ -488,8 +552,8 @@ public sealed partial class AgentHost
 
     /// <summary>/goal: run rounds until the model writes GOAL_COMPLETE (or GOAL_BLOCKED), re-stating
     /// the goal every round so it survives compaction.</summary>
-    private async Task RunGoalAsync(SessionVM vm, string goal, bool resuming, CancellationToken ct, string? reply = null,
-                                    IReadOnlyList<MessageAttachment>? attachments = null)
+    private async Task<GoalOutcome> RunGoalAsync(SessionVM vm, string goal, bool resuming, CancellationToken ct, string? reply = null,
+                                                 IReadOnlyList<MessageAttachment>? attachments = null)
     {
         vm.LastGoal = goal;
         vm.BlockedGoal = null;
@@ -499,6 +563,7 @@ public sealed partial class AgentHost
         if (outcome is GoalOutcome.Blocked) vm.BlockedGoal = goal;
         // Stopped between rounds: report it like a Stop mid-round.
         if (outcome is GoalOutcome.Stopped) throw new OperationCanceledException(ct);
+        return outcome;
     }
 
     /// <summary>The goal loop, interactive (/goal) or unattended (<paramref name="auto"/>, the task
@@ -527,6 +592,9 @@ public sealed partial class AgentHost
             var markerMisplaced = false;
             var stalled = false;
             var stalledInARow = 0;
+            // Validation sent the goal back: the next round is told why (see TurnValidation).
+            string? validationFailure = null;
+            (string? Failure, int Done, int Streak) lastValidation = (null, 0, 0);
             while (true)
             {
                 if (ct.IsCancellationRequested) return new GoalOutcome.Stopped();
@@ -558,6 +626,15 @@ public sealed partial class AgentHost
                         displayText = resuming ? $"🎯 /goal (resuming) {goal}" : $"🎯 /goal {goal}";
                     }
                 }
+                else if (validationFailure is not null)
+                {
+                    var attempt = (vm.TurnPhase?.Loopbacks ?? 1) + 1;
+                    modelText = TurnValidation.LoopBackMessage(validationFailure, attempt) + "\n\n" +
+                                (auto ? GoalProtocol.ContinuationAuto(goal, round, false, null, false, false)
+                                      : GoalProtocol.Continuation(goal, round, false, null, false, false));
+                    displayText = TurnValidation.LoopBackDisplay(attempt);
+                    validationFailure = null;
+                }
                 else
                 {
                     modelText = auto
@@ -588,8 +665,21 @@ public sealed partial class AgentHost
                         switch (status)
                         {
                             case GoalStatus.Complete done:
+                                // Validation first: an error the closing words report sends it back to work (unlimited by
+                                // default, cappable, and stopped by the no-progress check).
+                                var failed = PhasesValidateGoal(vm, done.Summary ?? result.LastReplyText, ref lastValidation, out var accept);
+                                if (failed is not null && !accept)
+                                {
+                                    validationFailure = failed;
+                                    Notice($"⚠️ Validation failed: {failed} — working on it again" +
+                                           (vm.TurnPhase?.LoopbackCap is { } cap ? $" (capped at {cap} retries)." : "."));
+                                    if (_queueSessions.TryGetValue(vm.Id, out var checkedTask)) Queue.Note(checkedTask, $"Validation failed ({failed}) — another round.");
+                                    break;
+                                }
                                 if (!auto)
-                                    Notice($"✅ Goal complete after {round} round{(round == 1 ? "" : "s")}." + (done.Summary is { } summary ? "\n" + summary : ""));
+                                    Notice($"✅ Goal complete after {round} round{(round == 1 ? "" : "s")}" +
+                                           (failed is null ? "." : $" — but validation still found a problem: {failed}.") +
+                                           (done.Summary is { } summary ? "\n" + summary : ""));
                                 return new GoalOutcome.Complete();
                             case GoalStatus.Blocked blocked:
                                 if (!auto)
@@ -661,6 +751,8 @@ public sealed partial class AgentHost
                 }
                 round++;
                 vm.Goal = new GoalState(goal, round, started);
+                PromptRound(vm, round);
+                PhasesStep(vm, $"Round {round} of the goal");
             }
         }
         finally
@@ -726,6 +818,9 @@ public sealed partial class AgentHost
         return null;
     }
 
+    /// <summary>How a prompt the model never received reads in the transcript.</summary>
+    public const string UndeliveredPrefix = "Not delivered to the model: ";
+
     /// <summary>Turn a user entry the model never received into a notice.</summary>
     private void MarkUndelivered(SessionVM vm, string entryId)
     {
@@ -737,7 +832,7 @@ public sealed partial class AgentHost
             break;
         }
         if (index < 0 || vm.Entries[index] is not MessageEntryVM { Role: MessageRole.User } message) return;
-        vm.Entries[index] = new MessageEntryVM(MessageRole.Notice, $"Not delivered to the model: {message.Text}", at: message.At);
+        vm.Entries[index] = new MessageEntryVM(MessageRole.Notice, UndeliveredPrefix + message.Text, at: message.At);
         Log.Resync(vm.Id, LogRows(vm.Entries, vm.Id));
         vm.NotifyContentChanged();
     }
@@ -815,7 +910,7 @@ public sealed partial class AgentHost
         // (The engine hands the reports over itself, at the start of the run: taken there they are put back if the run ends before
         // the model has replied, whatever ended it — a failure, a Stop.)
         const string modelText = "(Automatic — not from the user.) Your background agents finished. Their reports follow; continue the task with them.";
-        StartRun(vm, ct => RunTurnAsync(vm, "🤖 Background agents finished — continuing", [], goal: null, modelText: modelText, ct, recall: false));
+        StartRun(vm, ct => RunTurnAsync(vm, "🤖 Background agents finished — continuing", [], goal: null, modelText: modelText, ct, recall: false, automatic: true));
     }
 
     /// <summary>Whether a message's text is in the chat's model transcript (a turn that failed part-way may or may not have got it there).</summary>

@@ -239,6 +239,10 @@ public sealed partial class AgentHost : ObservableObject
         Config.SetQueueResume(id, false);
         Config.SetSkillsFor(id, null);
         Log.Delete(id);
+        // Its Prompts timeline goes with it.
+        PromptStore.Delete(id);
+        _chatTasksPaused.Remove(id);
+        _pendingPromptSource.Remove(id);
         _pendingShield.Remove(id);
         if (Session(id) is { } vm) Sessions.Remove(vm);
         // A chat without a project takes its scratch folder with it, to the Recycle Bin: its task list, which worked in the
@@ -325,6 +329,8 @@ public sealed partial class AgentHost : ObservableObject
         }
         // A goal that paused for an answer before the app closed is still waiting for it.
         if (vm.BlockedGoal is null && PausedGoalIn(vm.Entries) is { } paused) vm.BlockedGoal = paused;
+        // The Prompts timeline: read from its file, or backfilled from what was just replayed.
+        LoadPromptHistory(vm);
         // A hydrated session has no live engine; rebuild the model transcript so a follow-up turn
         // keeps the conversation rather than starting over.
         if (!_transcripts.ContainsKey(vm.Id)) _transcripts[vm.Id] = ReplayMessages(vm.Entries);
@@ -554,13 +560,20 @@ public sealed partial class AgentHost : ObservableObject
         if (Session(sessionId) is not { } vm) return;
         if (vm.Running || _runs.ContainsKey(sessionId))
         {
-            vm.Note("The agent is still working; send again when it is done.");
+            vm.Note("The agent is still working; send again when it is done — or press Add to tasks (Enter while it works) to queue it.");
             return;
         }
+        Dispatch(vm, text, attachments);
+    }
+
+    /// <summary>Run what was sent — or what a task added with "Add to tasks" sends when its turn comes: a command, a skill by
+    /// name, or a turn. The work it started (null when it was over at once, or refused).</summary>
+    private Task? Dispatch(SessionVM vm, string text, IReadOnlyList<MessageAttachment> attachments)
+    {
+        var sessionId = vm.Id;
         if (attachments.Count == 0 && SlashCommand.Parse(text) is { } command)
         {
-            RunCommand(command, vm);
-            return;
+            return RunCommand(command, vm);
         }
         // "/deploy staging": a skill or command invoked by name.
         if (attachments.Count == 0 && MatchSkillCommand(text, vm) is var (skill, args) && InvocationText(skill, args) is { } expanded)
@@ -568,27 +581,23 @@ public sealed partial class AgentHost : ObservableObject
             if (ChatServerSwitching(vm))
             {
                 vm.Note("The Spark is switching models right now — send again once it says it's ready.");
-                return;
+                return null;
             }
             var display = "/" + skill.Slug + (args.Length == 0 ? "" : " " + args);
             UserSpoke(sessionId);
-            StartRun(vm, ct => RunTurnAsync(vm, display, [], goal: null, modelText: expanded, ct));
-            return;
+            return StartRun(vm, ct => RunTurnAsync(vm, display, [], goal: null, modelText: expanded, ct));
         }
         if (ChatServerSwitching(vm))
         {
             vm.Note("The Spark is switching models right now — send again once it says it's ready (usually a few minutes).");
-            return;
+            return null;
         }
         // A goal that paused because the agent needed the user: this message is the answer, so the goal
         // carries on with it — no second /goal to type.
         UserSpoke(sessionId);
         if (vm.BlockedGoal is { } blocked)
-        {
-            StartRun(vm, ct => RunTurnAsync(vm, text, attachments, goal: blocked, modelText: null, ct, resumingGoal: true, reply: text));
-            return;
-        }
-        StartRun(vm, ct => RunTurnAsync(vm, text, attachments, goal: null, modelText: null, ct));
+            return StartRun(vm, ct => RunTurnAsync(vm, text, attachments, goal: blocked, modelText: null, ct, resumingGoal: true, reply: text));
+        return StartRun(vm, ct => RunTurnAsync(vm, text, attachments, goal: null, modelText: null, ct));
     }
 
     /// <summary>The user sent something the chat took up: the automatic continuations start counting again, and a Stop no
@@ -600,12 +609,12 @@ public sealed partial class AgentHost : ObservableObject
     }
 
     /// <summary>Start background work for a session, cancellable with Stop.</summary>
-    private void StartRun(SessionVM vm, Func<CancellationToken, Task> work)
+    private Task StartRun(SessionVM vm, Func<CancellationToken, Task> work)
     {
         if (_runs.Remove(vm.Id, out var previous)) previous.Cancel();
         var cts = new CancellationTokenSource();
         _runs[vm.Id] = cts;
-        _ = RunGuardedAsync(vm.Id, cts, work);
+        return RunGuardedAsync(vm.Id, cts, work);
     }
 
     private async Task RunGuardedAsync(string sessionId, CancellationTokenSource cts, Func<CancellationToken, Task> work)
@@ -637,8 +646,16 @@ public sealed partial class AgentHost : ObservableObject
 
     // MARK: - Slash commands
 
-    private void RunCommand(SlashCommand command, SessionVM vm)
+    /// <summary>A slash command: the work it started, if it started any.</summary>
+    private Task? RunCommand(SlashCommand command, SessionVM vm)
     {
+        RunCommandNow(command, vm, out var work);
+        return work;
+    }
+
+    private void RunCommandNow(SlashCommand command, SessionVM vm, out Task? work)
+    {
+        work = null;
         switch (command)
         {
             case SlashCommand.Help:
@@ -678,7 +695,7 @@ public sealed partial class AgentHost : ObservableObject
             }
 
             case SlashCommand.Context:
-                StartRun(vm, async _ =>
+                work = StartRun(vm, async _ =>
                 {
                     await ResolveRouteAsync(vm, force: true);
                     var limit = ContextLimit(vm);
@@ -699,11 +716,11 @@ public sealed partial class AgentHost : ObservableObject
                 break;
 
             case SlashCommand.Skill skill:
-                HandleSkillCommand(skill.Argument, vm);
+                work = HandleSkillCommand(skill.Argument, vm);
                 break;
 
             case SlashCommand.Compact compact:
-                StartRun(vm, ct => CompactNowAsync(vm, compact.Focus, ct));
+                work = StartRun(vm, ct => CompactNowAsync(vm, compact.Focus, ct));
                 break;
 
             case SlashCommand.Remember remember:
@@ -750,12 +767,12 @@ public sealed partial class AgentHost : ObservableObject
                         return;
                     }
                     UserSpoke(vm.Id);
-                    StartRun(vm, ct => RunTurnAsync(vm, previous, [], goal: previous, modelText: null, ct, resumingGoal: true));
+                    work = StartRun(vm, ct => RunTurnAsync(vm, previous, [], goal: previous, modelText: null, ct, resumingGoal: true));
                     return;
                 }
                 vm.BlockedGoal = null;
                 UserSpoke(vm.Id);
-                StartRun(vm, ct => RunTurnAsync(vm, goal.Text, [], goal: goal.Text, modelText: null, ct));
+                work = StartRun(vm, ct => RunTurnAsync(vm, goal.Text, [], goal: goal.Text, modelText: null, ct));
                 break;
 
             case SlashCommand.Queue:
@@ -846,20 +863,51 @@ public sealed partial class AgentHost : ObservableObject
 
     // MARK: - Turns
 
+    /// <param name="automatic">The harness's own turn (background agents finished): no prompt of the person's, so no
+    /// Prompts-timeline row and no phases of its own.</param>
     private async Task RunTurnAsync(SessionVM vm, string text, IReadOnlyList<MessageAttachment> attachments,
                                     string? goal, string? modelText, CancellationToken ct, bool resumingGoal = false,
-                                    string? reply = null, bool recall = true)
+                                    string? reply = null, bool recall = true, bool automatic = false)
     {
         var sessionId = vm.Id;
         vm.Running = true;
         vm.Stopping = false;
+        // A new prompt begins a new turn: fresh phases. A resumed goal continues the same turn when it is still on screen.
+        // Either way the prompt gets its row in the Prompts timeline.
+        if (!automatic && (!resumingGoal || vm.TurnPhase is not { IsOver: false })) PhasesBegin(vm, modelText ?? goal ?? text);
+        var source = goal is not null ? PromptSource.Goal : modelText is not null && text.StartsWith('/') ? PromptSource.Skill : PromptSource.Typed;
+        if (!automatic) BeginPrompt(vm, text, source);
+        // How it ended, for its timeline row and the chat's task list.
+        var outcome = PromptOutcome.Completed;
+        string? reason = null;
         try
         {
-            if (goal is not null) await RunGoalAsync(vm, goal, resumingGoal, ct, reply, attachments);
+            if (goal is not null)
+            {
+                if (await RunGoalAsync(vm, goal, resumingGoal, ct, reply, attachments) is GoalOutcome.Blocked blocked)
+                {
+                    outcome = PromptOutcome.NeedsYou;
+                    reason = blocked.Reason;
+                }
+            }
             else await TurnAsync(vm, modelText ?? text, text, attachments, ct, recall ? text : null);
+            // The engine run ended: validate what happened (a goal validated itself before it was accepted).
+            if (!automatic)
+            {
+                if (outcome == PromptOutcome.NeedsYou) PhasesAbandon(vm, "Paused — the agent needs you: " + reason, completed: false);
+                else PhasesValidate(vm);
+                if (outcome != PromptOutcome.NeedsYou && vm.TurnPhase is { Phase: TurnPhase.Results, LastValidationFailure: { } failure })
+                {
+                    outcome = PromptOutcome.Issues;
+                    reason = failure;
+                }
+            }
         }
         catch (OperationCanceledException)
         {
+            outcome = PromptOutcome.Stopped;
+            reason = "Stopped before it finished.";
+            if (!automatic) PhasesAbandon(vm, "Stopped before finishing.", completed: false);
             vm.EndStreaming();
             // A deliberate Stop is not a pause for an answer.
             vm.BlockedGoal = null;
@@ -878,10 +926,14 @@ public sealed partial class AgentHost : ObservableObject
             }
             ReportFailure(vm, Describe(error));
             if (error.InnerException is AwsSignInRequiredException expired) AwsSignInProfile = expired.Profile;
+            (outcome, reason) = (PromptOutcome.Failed, Describe(error));
+            if (!automatic) PhasesAbandon(vm, Describe(error), completed: false);
         }
         catch (Exception error)
         {
             ReportFailure(vm, Describe(error));
+            (outcome, reason) = (PromptOutcome.Failed, Describe(error));
+            if (!automatic) PhasesAbandon(vm, Describe(error), completed: false);
         }
         finally
         {
@@ -896,6 +948,8 @@ public sealed partial class AgentHost : ObservableObject
             Log.Touch(sessionId);
             vm.UpdatedAt = DateTimeOffset.Now;
             SortSessions();
+            if (!automatic) FinishPrompt(vm, outcome, reason);
+            AfterWork(vm, outcome);
         }
     }
 
@@ -924,6 +978,7 @@ public sealed partial class AgentHost : ObservableObject
         if (!_transcripts.ContainsKey(sessionId)) _transcripts[sessionId] = ReplayMessages(vm.Entries);
         var userEntryId = vm.AppendMessage(MessageRole.User, displayText);
         Log.RecordItem(sessionId, "user", displayText);
+        PromptEntryLanded(vm, userEntryId, displayText);
         // A plan proposed earlier in Plan only mode is old news once the chat works in another mode.
         if (vm.Preset != PermissionPreset.Plan) vm.ProposedPlan = null;
         // Notes that bear on this message ride along with it (a few, only when relevant — never a dump).
@@ -940,6 +995,9 @@ public sealed partial class AgentHost : ObservableObject
         PinRouteIfUnset(vm);
         var profile = await ResolveRouteAsync(vm) ?? throw LlmException.NoModel();
         ct.ThrowIfCancellationRequested();
+        // What this turn runs on, for its timeline row and the activity menu.
+        vm.TurnModel = profile.Model;
+        vm.TurnRoute = RouteLabel(profile);
         var window = ContextLimit(profile);
         var thinking = vm.Thinking;
         var skillState = BuildSkillState(vm);
@@ -993,6 +1051,11 @@ public sealed partial class AgentHost : ObservableObject
         vm.Retry = null;
         _transcripts[sessionId] = result.Messages.ToList();
         vm.LastUsage = result.Usage;
+        if (result.Usage is { } used)
+        {
+            vm.TurnPromptTokens += used.PromptTokens;
+            vm.TurnCompletionTokens += used.CompletionTokens;
+        }
         // How full the context is now: server-reported prompt tokens when available, otherwise a
         // character-based estimate of the whole request.
         vm.ContextUsed = result.LastPromptTokens ?? TokenEstimate.Request(engine.SystemPrompt, result.Messages);
@@ -1057,6 +1120,8 @@ public sealed partial class AgentHost : ObservableObject
                 vm.Retry = null;
                 vm.ClearReasoning();
                 vm.AppendDelta(d.Text);
+                // The planning draft streams live: the first text of a turn is the plan being written.
+                PhasesDraft(vm, d.Text);
                 break;
 
             case EngineEvent.ReasoningDelta r:
@@ -1139,6 +1204,9 @@ public sealed partial class AgentHost : ObservableObject
                 }
                 var preview = vm.Entries.LastOrDefault(e => e.Id == f.Id) is ToolEntryVM card ? card.Preview : null;
                 Log.RecordItem(sessionId, "tool", f.Summary, f.Name, preview, f.Output, !f.Ok);
+                // A tool call is a step of the turn — and means the plan is settled (the model has moved to work).
+                PhasesStep(vm, $"{Icons.ToolLabel(f.Name)} {TextUtil.Prefix((preview ?? f.Summary).Replace('\n', ' '), 120)}" + (f.Ok ? "" : " — failed"));
+                PhasesPlanSettled(vm);
                 break;
 
             case EngineEvent.ToolImages images:
@@ -1147,12 +1215,15 @@ public sealed partial class AgentHost : ObservableObject
 
             case EngineEvent.FilesChanged changes:
                 vm.RecordFileChanges(changes.Changes);
+                PhasesFilesChanged(vm, changes.Changes);
                 OnFilesChanged?.Invoke(changes.Changes);
                 break;
 
             case EngineEvent.Finished finished:
                 vm.LastUsage = finished.Usage;
                 vm.EndStreaming();
+                // A question-only turn settles its plan on the prose it wrote.
+                PhasesPlanFromProse(vm);
                 break;
 
             case EngineEvent.PermissionQuestion q:
@@ -1162,6 +1233,8 @@ public sealed partial class AgentHost : ObservableObject
             case EngineEvent.Todos todos:
                 vm.SetTodos(todos.Items);
                 AutoOpenPlan(vm);
+                // The todo list is the plan: it settles (or refines) the estimate.
+                PhasesTodos(vm);
                 break;
 
             case EngineEvent.PlanProposed proposed:
@@ -1267,12 +1340,12 @@ public sealed partial class AgentHost : ObservableObject
         return text;
     }
 
-    private void HandleSkillCommand(string? arg, SessionVM vm)
+    private Task? HandleSkillCommand(string? arg, SessionVM vm)
     {
         if (string.IsNullOrEmpty(arg))
         {
             vm.Note(SkillsSummary(vm));
-            return;
+            return null;
         }
         var lower = arg.ToLowerInvariant();
         foreach (var verb in new[] { "new ", "generate ", "create " })
@@ -1280,20 +1353,19 @@ public sealed partial class AgentHost : ObservableObject
             if (!lower.StartsWith(verb, StringComparison.Ordinal)) continue;
             var goal = arg[verb.Length..].Trim();
             if (goal.Length == 0) break;
-            StartRun(vm, ct => GenerateSkillFromChatAsync(vm, goal, ct));
-            return;
+            return StartRun(vm, ct => GenerateSkillFromChatAsync(vm, goal, ct));
         }
         if (lower is "off" or "clear" or "none")
         {
             ClearPinnedSkills(vm);
             vm.Note("Cleared the skills selected for this chat.");
-            return;
+            return null;
         }
         if (lower is "auto on" or "auto off")
         {
             SetAutoSkills(lower == "auto on", vm);
             vm.Note($"The model {(lower == "auto on" ? "can" : "can no longer")} choose skills on its own in this chat.");
-            return;
+            return null;
         }
         var live = SkillPrompt.Active(Skills(vm), Selection(vm.Id));
         var key = SkillNaming.Slug(arg);
@@ -1301,13 +1373,14 @@ public sealed partial class AgentHost : ObservableObject
         if (skill is null)
         {
             vm.Note($"No active skill matches “{arg}”. `/skills` lists them.", MessageRole.Error);
-            return;
+            return null;
         }
         var now = !IsPinned(skill, vm);
         SetPinned(skill, now, vm);
         vm.Note(now
             ? $"📌 **{skill.Name}** is selected for this chat — its instructions are included from the next message."
             : $"**{skill.Name}** is no longer selected for this chat.");
+        return null;
     }
 
     /// <summary>/name args: the skill or command being run, if the text names one.</summary>
@@ -1383,8 +1456,12 @@ public sealed partial class AgentHost : ObservableObject
 
     // MARK: - Stopping
 
-    public void StopSession(string id)
+    /// <param name="pauseTasks">Stop means stop: what the chat has queued with "Add to tasks" waits until Resume (false when a
+    /// task is taken off the list, which is not a Stop of the whole list).</param>
+    public void StopSession(string id, bool pauseTasks = true)
     {
+        if (pauseTasks && Queue.Tasks.Any(t => t.SessionId == id && t.AsPrompt && t.Status == QueueTaskStatus.Queued))
+            _chatTasksPaused.TryAdd(id, ChatTaskRules.PauseReason(PromptOutcome.Stopped));
         _stoppedChats.Add(id);
         if (Session(id) is { } vm && vm.Running) vm.Stopping = true;
         ResolveAllGates(id, false);

@@ -228,7 +228,7 @@ public sealed class PlanPanel : UserControl
         if (steps.Count > 0)
         {
             _body.Children.Add(Section(isOutline ? "Outline" : "Steps"));
-            for (var i = 0; i < steps.Count; i++) _body.Children.Add(StepRow(i + 1, steps[i], isOutline, vm.Running));
+            for (var i = 0; i < steps.Count; i++) _body.Children.Add(StepRow(i + 1, steps[i], isOutline, vm.Running, vm));
             anything = true;
         }
         if (vm.ProposedPlan is { Length: > 0 } proposed)
@@ -301,7 +301,7 @@ public sealed class PlanPanel : UserControl
         return Card(panel, accent: true);
     }
 
-    private UIElement StepRow(int number, Step step, bool outline, bool agentRunning)
+    private UIElement StepRow(int number, Step step, bool outline, bool agentRunning, SessionVM vm)
     {
         var inProgress = step.Status == TodoStatus.InProgress;
         var completed = step.Status == TodoStatus.Completed;
@@ -327,7 +327,25 @@ public sealed class PlanPanel : UserControl
         var text = Ui.Text(step.Text, 12.5, inProgress ? FontWeights.SemiBold : FontWeights.Normal,
             completed ? "TextFillColorTertiaryBrush" : outline ? "TextFillColorSecondaryBrush" : null);
         if (completed) text.TextDecorations = TextDecorations.Strikethrough;
-        dock.Children.Add(text);
+        // Who is working this step: the subagent's name and the model (and server) it really runs on.
+        var workers = vm.Agents.Where(a => a.IsRunning && a.Assignment == step.Text).ToList();
+        if (workers.Count == 0)
+        {
+            dock.Children.Add(text);
+        }
+        else
+        {
+            var lines = new StackPanel();
+            lines.Children.Add(text);
+            foreach (var agent in workers)
+            {
+                var who = Ui.Text($"↳ {agent.Description} · {agent.PlacementLabel ?? "waiting for a model server"}", 11, brushKey: "AccentTextFillColorPrimaryBrush", wrap: false);
+                who.TextTrimming = TextTrimming.CharacterEllipsis;
+                who.ToolTip = $"{agent.Description} ({agent.AgentType}) — {agent.Activity}" + (agent.Placement is { } note ? "\n" + note : "");
+                lines.Children.Add(who);
+            }
+            dock.Children.Add(lines);
+        }
         dock.ToolTip = step.Text;
         return dock;
     }
@@ -431,10 +449,26 @@ public sealed class PlanPanel : UserControl
         head.Children.Add(Ui.Text(run.Description, 12.5, FontWeights.SemiBold, wrap: false));
         panel.Children.Add(head);
 
-        var where = string.Join(" · ", new[] { run.AgentType, run.Server, run.Background ? "background" : null }.Where(t => !string.IsNullOrEmpty(t)));
+        var where = string.Join(" · ", new[] { run.AgentType, run.PlacementLabel ?? run.Server, run.Background ? "background" : null,
+            run.TotalTokens > 0 ? $"{run.TotalTokens:N0} tokens" : null }.Where(t => !string.IsNullOrEmpty(t)));
         var sub = Ui.Text(where, 11, brushKey: "TextFillColorTertiaryBrush", wrap: false);
         sub.Margin = new Thickness(23, 1, 0, 0);
         panel.Children.Add(sub);
+        if (run.Assignment is { } step)
+        {
+            var assigned = Ui.Text("Plan step: " + step, 11, brushKey: "AccentTextFillColorPrimaryBrush", wrap: false);
+            assigned.TextTrimming = TextTrimming.CharacterEllipsis;
+            assigned.Margin = new Thickness(23, 1, 0, 0);
+            panel.Children.Add(assigned);
+        }
+        if (run.Placement is { } placement)
+        {
+            var why = Ui.Text(placement, 11, brushKey: "SystemFillColorCautionBrush", wrap: false);
+            why.TextTrimming = TextTrimming.CharacterEllipsis;
+            why.ToolTip = placement;
+            why.Margin = new Thickness(23, 1, 0, 0);
+            panel.Children.Add(why);
+        }
         var activity = Ui.Text(run.IsRunning ? run.Activity + (run.Steps > 0 ? $"  ·  {run.Steps} step{(run.Steps == 1 ? "" : "s")}" : "") : ActivitySummary(run),
             11.5, brushKey: "TextFillColorSecondaryBrush", wrap: false);
         activity.Margin = new Thickness(23, 1, 0, 0);

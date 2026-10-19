@@ -123,7 +123,7 @@ public sealed class AgentTool : IToolExecutor
                                                              bool sensitive = false)
     {
         var roster = context.Roster;
-        var runId = roster?.Begin(description, definition.Name, background);
+        var runId = roster?.Begin(description, definition.Name, background, prompt);
         var clock = Stopwatch.StartNew();
         var failovers = 0;
         string? firstServer = null;
@@ -153,10 +153,12 @@ public sealed class AgentTool : IToolExecutor
                     target = lease.Target;
                     firstServer ??= lease.Label;
                     if (runId is not null && choice) roster!.SetServer(runId, lease.Label);
+                    if (runId is not null) roster!.SetPlacement(runId, lease.Label, target.Model, PlacementNote(definition, lease, fleet));
                 }
                 else
                 {
                     target = new FleetTarget(context.Client, context.Model, context.ContextWindow);
+                    if (runId is not null) roster!.SetPlacement(runId, ThisChatsModel, context.Model);
                 }
 
                 try
@@ -201,6 +203,32 @@ public sealed class AgentTool : IToolExecutor
         }
     }
 
+    /// <summary>Where a subagent runs when there is no fleet: the chat's own client.</summary>
+    public const string ThisChatsModel = "this chat's model";
+
+    /// <summary>Why a subagent runs where it does when that isn't the obvious place: its agent file asked for a server it didn't
+    /// get, or servers tried first couldn't take it. Null when it runs where it was meant to.</summary>
+    internal static string? PlacementNote(AgentDefinition definition, FleetLease lease, AgentFleet fleet)
+    {
+        var notes = new List<string>();
+        if (definition.Server is { Length: > 0 } wanted && !AgentFleet.Matches(lease.Server, wanted))
+        {
+            notes.Add(fleet.Servers.Any(s => AgentFleet.Matches(s, wanted))
+                ? $"its agent file asks for “{wanted}”, which was busy or not answering"
+                : $"its agent file asks for “{wanted}”, but no model server by that name is set up (Settings › AI Models: tick “Subagent” for that route)");
+        }
+        if (lease.Skipped.Count > 0) notes.Add("tried first: " + string.Join("; ", lease.Skipped));
+        return notes.Count == 0 ? null : string.Join(" · ", notes);
+    }
+
+    /// <summary>The model settings a subagent sends: a target on another route uses that route's own (null = its provider's
+    /// default) — never the parent chat's temperature, output limit or thinking level; the primary (or no fleet) shares the
+    /// parent's.</summary>
+    internal static (double? Temperature, int? MaxOutputTokens, ThinkingLevel? Thinking) Settings(FleetTarget target, ToolContext context) =>
+        target.OwnSettings
+            ? (target.Temperature, target.MaxOutputTokens, target.Thinking)
+            : (target.Temperature ?? context.Temperature, target.MaxOutputTokens ?? context.MaxOutputTokens, context.Thinking);
+
     private const string InterruptedNote =
         "[Note: an earlier attempt at this task was cut short when its model server failed, after it had already changed things. " +
         "Look at the current state of the workspace first and do not repeat steps that are already done.]\n\n";
@@ -224,18 +252,20 @@ public sealed class AgentTool : IToolExecutor
         if (definition.DisallowedTools is { Count: > 0 } denied) registry = registry.Removing([.. denied]);
 
         var window = target.ContextWindow ?? context.ContextWindow;
+        var settings = Settings(target, context);
         var config = new EngineConfig(target.Model)
         {
             MaxIterations = definition.MaxSteps ?? DefaultMaxSteps,
             ToolTimeout = TimeSpan.FromSeconds(300),
             ContextWindow = window,
-            Thinking = context.Thinking,
+            Thinking = settings.Thinking,
             Shell = context.Shell,
             Depth = context.Depth + 1,
-            // The leased server's own settings when it has them (a worker without vision must not be sent screenshots).
+            // The leased server's own settings when it has them (a worker without vision must not be sent screenshots, a Kimi
+            // worker not the main route's temperature).
             VisionEnabled = target.Vision ?? context.VisionEnabled,
-            Temperature = target.Temperature ?? context.Temperature,
-            MaxOutputTokens = target.MaxOutputTokens ?? context.MaxOutputTokens,
+            Temperature = settings.Temperature,
+            MaxOutputTokens = settings.MaxOutputTokens,
             // Out of steps, a subagent still owes its caller a report.
             WrapUpAtLimit = true,
             // On a fleet, a server that keeps failing should hand the task on, not be waited on for ever:
@@ -286,6 +316,7 @@ public sealed class AgentTool : IToolExecutor
         }
 
         var result = await engine.RunAsync([], prompt, sink: Sink, cancellationToken: cancellationToken).ConfigureAwait(false);
+        if (runId is not null && result.Usage is { } usage) context.Roster?.AddTokens(runId, usage.PromptTokens, usage.CompletionTokens);
         if (result.Stalled)
             return (false, result.LastReplyText);
         var text = result.FinalText.Trim().Length > 0 ? result.FinalText : result.LastReplyText;

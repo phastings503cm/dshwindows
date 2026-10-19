@@ -162,6 +162,41 @@ public sealed partial class SessionVM : ObservableObject
     public IReadOnlyList<BackgroundAgentJob> RunningBackgroundJobs =>
         BackgroundJobs.Where(j => j.Status == BackgroundAgentStatus.Running).ToList();
 
+    // MARK: Turn phases and the Prompts timeline (driven by AgentHost.Runs)
+
+    /// <summary>The current (or last) turn's phases: Planning → Execution → Validation → Results, with the live draft, the
+    /// ETA and the evidence. A new turn replaces it; the last one's card stays until then. Mutated in place by the host,
+    /// which then calls <see cref="NotifyPhaseChanged"/>.</summary>
+    [ObservableProperty] private TurnPhaseState? _turnPhase;
+    /// <summary>Whether the phases run for this chat at all.</summary>
+    public bool PhasesEnabled { get; set; } = true;
+    /// <summary>Raised when the turn's phase moves (a step, the estimate, a loop-back, the results).</summary>
+    public event Action? PhaseChanged;
+    public void NotifyPhaseChanged()
+    {
+        OnPropertyChanged(nameof(TurnPhase));
+        PhaseChanged?.Invoke();
+    }
+
+    /// <summary>Every prompt this chat has sent and how it went, oldest first (the Prompts timeline). Records are mutable;
+    /// <see cref="PromptsChanged"/> says when one did.</summary>
+    public List<PromptRecord> PromptHistory { get; } = [];
+    public bool PromptHistoryLoaded { get; set; }
+    /// <summary>The record of the prompt running now.</summary>
+    public string? CurrentPromptId { get; set; }
+    public PromptRecord? CurrentPrompt => CurrentPromptId is { } id ? PromptHistory.LastOrDefault(r => r.Id == id) : null;
+    public event Action? PromptsChanged;
+    public void NotifyPromptsChanged() => PromptsChanged?.Invoke();
+
+    /// <summary>Tokens the current prompt's model calls used so far.</summary>
+    public long TurnPromptTokens { get; set; }
+    public long TurnCompletionTokens { get; set; }
+    /// <summary>What the current (or last) turn ran on: the model id and the route's name.</summary>
+    public string? TurnModel { get; set; }
+    public string? TurnRoute { get; set; }
+    /// <summary>Files this turn's tools touched (the evidence counts them per turn, not per chat).</summary>
+    public HashSet<string> TurnFiles { get; } = new(StringComparer.OrdinalIgnoreCase);
+
     /// <summary>Id of the assistant entry currently receiving streamed deltas.</summary>
     public string? StreamingId { get; private set; }
 

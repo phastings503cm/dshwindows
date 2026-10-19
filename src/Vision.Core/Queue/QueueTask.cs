@@ -157,6 +157,14 @@ public sealed record QueueTask
 
     public IReadOnlyList<QueueLogLine> Log { get; init; } = [];
 
+    /// <summary>Queued with "Add to tasks": it runs in its chat as the chat's next prompt, exactly as written (a /goal, a
+    /// skill or a plain prompt, kept in <see cref="Details"/>), not as an unattended goal — and it starts by itself once the
+    /// work before it is done. Stored as <c>"asPrompt": true</c>; an older build reads it as an ordinary task.</summary>
+    public bool AsPrompt { get; init; }
+
+    /// <summary>What a prompt task sends when its turn comes: the prompt as it was written.</summary>
+    public string PromptText => AsPrompt && Details.Length > 0 ? Details : GoalText;
+
     public long TotalTokens => PromptTokens + CompletionTokens;
 
     /// <summary>The text a goal loop runs for this task.</summary>
@@ -188,7 +196,7 @@ public sealed record QueueTask
         && Id == other.Id && Title == other.Title && Details == other.Details && Status == other.Status
         && EnteredAt == other.EnteredAt && StartedAt == other.StartedAt && FinishedAt == other.FinishedAt
         && Rounds == other.Rounds && PromptTokens == other.PromptTokens && CompletionTokens == other.CompletionTokens
-        && SessionId == other.SessionId && Cwd == other.Cwd
+        && SessionId == other.SessionId && Cwd == other.Cwd && AsPrompt == other.AsPrompt
         && Log.SequenceEqual(other.Log);
 
     public override int GetHashCode() => HashCode.Combine(Id, Title, Status, Rounds, TotalTokens, Log.Count);

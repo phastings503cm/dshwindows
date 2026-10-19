@@ -271,6 +271,11 @@
             </DataTemplate.Triggers>
         </DataTemplate>
 
+        <!-- The turn's phases: Planning → Execution → Validation → Results, and the results card when it is done. -->
+        <DataTemplate DataType="{x:Type chat:PhaseFooter}">
+            <chat:PhaseCardView Visibility="{Binding IsVisible, Converter={StaticResource BoolToVisibility}}" />
+        </DataTemplate>
+
         <!-- While the agent works: what it is doing, and a live tail of its reasoning. -->
         <DataTemplate DataType="{x:Type chat:ThinkingFooter}">
             <Grid Margin="0,0,0,14" Visibility="{Binding IsVisible, Converter={StaticResource BoolToVisibility}}">
@@ -509,15 +514,27 @@
                                  PreviewKeyDown="Composer_PreviewKeyDown" TextChanged="Composer_TextChanged"
                                  GotKeyboardFocus="Composer_FocusChanged" LostKeyboardFocus="Composer_FocusChanged" />
                     </Border>
-                    <Button x:Name="SendButton" Grid.Column="2" Margin="8,0,0,3" VerticalAlignment="Bottom" MinWidth="38" MinHeight="34"
-                            Padding="8,6" Style="{DynamicResource AccentButtonStyle}" Click="Send_Click" ToolTip="Send (Enter)">
-                        <TextBlock Style="{StaticResource Glyph}" Text="{x:Static infra:Icons.Send}" FontSize="14" />
-                    </Button>
-                    <Button x:Name="StopButton" Grid.Column="2" Margin="8,0,0,3" VerticalAlignment="Bottom" MinWidth="38" MinHeight="34"
-                            Padding="8,6" Click="Stop_Click" ToolTip="Stop the agent (Ctrl+.)" Visibility="Collapsed">
-                        <TextBlock x:Name="StopGlyph" Style="{StaticResource Glyph}" Text="{x:Static infra:Icons.Stop}" FontSize="14"
-                                   Foreground="{DynamicResource SystemFillColorCriticalBrush}" />
-                    </Button>
+                    <StackPanel Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Bottom">
+                        <!-- While the agent works, what you type next goes on this chat's tasks and starts by itself after. -->
+                        <Button x:Name="AddTaskButton" Margin="8,0,0,3" MinHeight="34" Padding="10,6" Click="AddTask_Click" Visibility="Collapsed"
+                                Style="{DynamicResource AccentButtonStyle}"
+                                ToolTip="Add to tasks (Enter while it works, Ctrl+Enter any time) — it starts by itself when the work before it finishes"
+                                AutomationProperties.Name="Add to tasks">
+                            <StackPanel Orientation="Horizontal">
+                                <TextBlock Style="{StaticResource Glyph}" Text="{x:Static infra:Icons.Add}" FontSize="12" Margin="0,0,6,0" VerticalAlignment="Center" />
+                                <TextBlock Text="Add to tasks" VerticalAlignment="Center" />
+                            </StackPanel>
+                        </Button>
+                        <Button x:Name="SendButton" Margin="8,0,0,3" MinWidth="38" MinHeight="34"
+                                Padding="8,6" Style="{DynamicResource AccentButtonStyle}" Click="Send_Click" ToolTip="Send (Enter) — Ctrl+Enter adds it to this chat's tasks instead">
+                            <TextBlock Style="{StaticResource Glyph}" Text="{x:Static infra:Icons.Send}" FontSize="14" />
+                        </Button>
+                        <Button x:Name="StopButton" Margin="8,0,0,3" MinWidth="38" MinHeight="34"
+                                Padding="8,6" Click="Stop_Click" ToolTip="Stop the agent (Ctrl+.)" Visibility="Collapsed">
+                            <TextBlock x:Name="StopGlyph" Style="{StaticResource Glyph}" Text="{x:Static infra:Icons.Stop}" FontSize="14"
+                                       Foreground="{DynamicResource SystemFillColorCriticalBrush}" />
+                        </Button>
+                    </StackPanel>
                 </Grid>
 
                 <!-- Slash command hints -->

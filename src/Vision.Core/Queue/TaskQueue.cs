@@ -220,7 +220,8 @@ public sealed class TaskQueue
     /// <summary>Add a task to the back of <paramref name="chatId"/>'s list, or in front of its waiting
     /// tasks. Title and details are trimmed; an empty <paramref name="cwd"/> means none. Returns the
     /// task as stored.</summary>
-    public QueueTask Add(string title, string details = "", bool atFront = false, string? cwd = null, string? chatId = null) => Mutate(() =>
+    /// <param name="asPrompt">"Add to tasks": the task runs as the chat's next prompt (see <see cref="QueueTask.AsPrompt"/>).</param>
+    public QueueTask Add(string title, string details = "", bool atFront = false, string? cwd = null, string? chatId = null, bool asPrompt = false) => Mutate(() =>
     {
         var now = Now;
         var task = new QueueTask
@@ -230,6 +231,7 @@ public sealed class TaskQueue
             EnteredAt = now,
             Cwd = string.IsNullOrEmpty(cwd) ? null : cwd,
             SessionId = string.IsNullOrEmpty(chatId) ? null : chatId,
+            AsPrompt = asPrompt,
         };
         task = task.AppendingLog(QueueLogKind.Entered,
             $"Entered the queue at #{(atFront ? 1 : CountQueued(_tasks.Count, task.SessionId) + 1)}", now);

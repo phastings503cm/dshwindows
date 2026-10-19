@@ -63,6 +63,19 @@ public sealed class QueuePanel : UserControl
     /// <summary>Raised when the user closes the panel.</summary>
     public event Action? CloseRequested;
 
+    private readonly Button _close;
+    private SessionVM? _watched;
+    private bool _refreshQueued;
+    private readonly DispatcherTimer _tick = new() { Interval = TimeSpan.FromSeconds(1) };
+    /// <summary>The live clocks on the "Now" card, so a tick changes their text instead of rebuilding the list.</summary>
+    private readonly List<(TextBlock Label, Func<string> Text)> _clocks = [];
+
+    /// <summary>The panel's own close button (hidden when the column's tabs carry one).</summary>
+    public bool ShowsCloseButton
+    {
+        set => _close.Visibility = value ? Visibility.Visible : Visibility.Collapsed;
+    }
+
     public QueuePanel(AppModel model)
     {
         _model = model;
@@ -71,6 +84,7 @@ public sealed class QueuePanel : UserControl
         // Header
         var header = new DockPanel { Margin = new Thickness(12, 10, 8, 8) };
         var close = IconButton(Icons.Close, "Hide the task list (Ctrl+Shift+Q)", () => CloseRequested?.Invoke());
+        _close = close;
         DockPanel.SetDock(close, Dock.Right);
         header.Children.Add(close);
         DockPanel.SetDock(_startStop, Dock.Right);
@@ -134,27 +148,77 @@ public sealed class QueuePanel : UserControl
         Content = edge;
 
         Host.QueueChanged += Refresh;
+        Host.RunsChanged += QueueRefresh;
         Host.PropertyChanged += OnHostChanged;
         _clock.Tick += (_, _) => Refresh();
+        _tick.Tick += (_, _) =>
+        {
+            foreach (var (label, text) in _clocks) label.Text = text();
+        };
         IsVisibleChanged += (_, _) =>
         {
             if (IsVisible)
             {
+                Watch(Host.Selected);
                 Refresh();
                 _clock.Start();
+                _tick.Start();
             }
             else
             {
                 _clock.Stop();
+                _tick.Stop();
             }
         };
+        Watch(Host.Selected);
         Refresh();
     }
 
     private void OnHostChanged(object? sender, PropertyChangedEventArgs e)
     {
+        if (e.PropertyName is nameof(AgentHost.SelectedId) or nameof(AgentHost.Selected)) Watch(Host.Selected);
         if (e.PropertyName is nameof(AgentHost.SelectedId) or nameof(AgentHost.Selected) or nameof(AgentHost.QueueRunning))
             Refresh();
+    }
+
+    /// <summary>The "Now" card follows the open chat's plan, phase and subagents as they move.</summary>
+    private void Watch(SessionVM? session)
+    {
+        if (ReferenceEquals(_watched, session)) return;
+        if (_watched is not null)
+        {
+            _watched.PropertyChanged -= OnSessionChanged;
+            _watched.PhaseChanged -= QueueRefresh;
+            _watched.Agents.CollectionChanged -= OnAgentsChanged;
+        }
+        _watched = session;
+        if (_watched is not null)
+        {
+            _watched.PropertyChanged += OnSessionChanged;
+            _watched.PhaseChanged += QueueRefresh;
+            _watched.Agents.CollectionChanged += OnAgentsChanged;
+        }
+    }
+
+    private void OnSessionChanged(object? sender, PropertyChangedEventArgs e)
+    {
+        if (e.PropertyName is nameof(SessionVM.Running) or nameof(SessionVM.Todos) or nameof(SessionVM.Goal) or nameof(SessionVM.Title))
+            QueueRefresh();
+    }
+
+    private void OnAgentsChanged(object? sender, System.Collections.Specialized.NotifyCollectionChangedEventArgs e) => QueueRefresh();
+
+    private void QueueRefresh()
+    {
+        if (_refreshQueued) return;
+        _refreshQueued = true;
+        Dispatcher.BeginInvoke(DispatcherPriority.Background, () =>
+        {
+            _refreshQueued = false;
+            // A click in progress (button down) must not lose its button to a redraw.
+            if (IsVisible && IsMouseOver && Mouse.LeftButton == MouseButtonState.Pressed) return;
+            Refresh();
+        });
     }
 
     // MARK: - Rendering
@@ -202,11 +266,31 @@ public sealed class QueuePanel : UserControl
         _logButton.IsEnabled = chat is not null;
 
         _list.Children.Clear();
+        _clocks.Clear();
+        // What the chat is doing now comes first: the running prompt's or /goal's plan, its steps and who works them.
+        var work = chat is null ? null : Host.CurrentWorkFor(chat);
+        if (chat is not null && work is not null) _list.Children.Add(NowCard(chat, work));
+        // Idle: how the last prompt ended, and the plan it left, stay in view.
+        else if (chat is { TurnPhase: { IsOver: true } last } && chat.PromptHistory.LastOrDefault() is { } previous)
+            _list.Children.Add(LastCard(chat, last, previous));
+        if (chat is not null && Host.ChatTasksPaused(chatId!) is { } paused && Queue.QueuedCountFor(chatId) > 0)
+            _list.Children.Add(PausedBanner(chatId!, paused));
         if (chat is null) _list.Children.Add(NoChat());
-        else if (tasks.Count == 0 && !_adding) _list.Children.Add(EmptyState());
+        else if (tasks.Count == 0 && !_adding && work is null && chat.TurnPhase is not { IsOver: true }) _list.Children.Add(EmptyState());
         else
-            foreach (var task in tasks)
+        {
+            var upNext = tasks.Where(t => t.Status == QueueTaskStatus.Queued || (t.Status == QueueTaskStatus.Running && t.Id != work?.TaskId)).ToList();
+            var finished = tasks.Where(t => t.Status is not (QueueTaskStatus.Queued or QueueTaskStatus.Running)).ToList();
+            if (work is not null && upNext.Count > 0) _list.Children.Add(SectionLabel("Up next"));
+            foreach (var task in tasks.Where(t => t.Id != work?.TaskId))
+            {
+                // Waiting and running tasks first, in order; the finished ones after them.
+                if (finished.Contains(task)) continue;
                 _list.Children.Add(Row(task));
+            }
+            if (finished.Count > 0 && (work is not null || upNext.Count > 0)) _list.Children.Add(SectionLabel("Done"));
+            foreach (var task in finished) _list.Children.Add(Row(task));
+        }
         _addCard.Visibility = _adding && chat is not null ? Visibility.Visible : Visibility.Collapsed;
         RenderDetail(tasks.Count);
     }
@@ -277,9 +361,162 @@ public sealed class QueuePanel : UserControl
         return panel;
     }
 
+    private static UIElement SectionLabel(string text)
+    {
+        var label = Ui.Text(text, 11.5, FontWeights.SemiBold, "TextFillColorSecondaryBrush", wrap: false);
+        label.Margin = new Thickness(4, 10, 0, 4);
+        return label;
+    }
+
+    /// <summary>The prompt tasks are holding: why, and Resume.</summary>
+    private UIElement PausedBanner(string chatId, string reason)
+    {
+        var dock = new DockPanel();
+        var resume = Small("Resume", () => Host.ResumeChatTasks(chatId), accent: true, tooltip: "Carry on with this chat's tasks");
+        resume.Margin = new Thickness(8, 0, 0, 0);
+        DockPanel.SetDock(resume, Dock.Right);
+        dock.Children.Add(resume);
+        var glyph = Ui.Glyph(Icons.Pause, 12, "SystemFillColorCautionBrush");
+        glyph.Margin = new Thickness(0, 0, 8, 0);
+        DockPanel.SetDock(glyph, Dock.Left);
+        dock.Children.Add(glyph);
+        dock.Children.Add(Ui.Text(reason, 12, brushKey: "TextFillColorSecondaryBrush"));
+        var card = new Border { Child = dock, Padding = new Thickness(10, 7, 10, 7), Margin = new Thickness(0, 0, 0, 6), CornerRadius = new CornerRadius(6) };
+        card.SetResourceReference(Border.BackgroundProperty, "SystemFillColorCautionBackgroundBrush");
+        return card;
+    }
+
+    /// <summary>The chat's first task: what it is doing now — its kind and words, the phase and runtime against the estimate,
+    /// the round of a goal, and the plan's steps with the subagent (name and model) working each.</summary>
+    private UIElement NowCard(SessionVM chat, CurrentWork work)
+    {
+        var panel = new StackPanel();
+        var head = new DockPanel();
+        var stop = IconButton(Icons.Stop, "Stop it (Ctrl+.)", () => Host.StopSession(chat.Id), "SystemFillColorCriticalBrush");
+        DockPanel.SetDock(stop, Dock.Right);
+        head.Children.Add(stop);
+        var spinner = new Spinner { Width = 13, Height = 13, Margin = new Thickness(0, 2, 9, 0), VerticalAlignment = VerticalAlignment.Top };
+        spinner.Foreground = ThemeService.Brush("SystemFillColorSuccessBrush", Colors.SeaGreen);
+        DockPanel.SetDock(spinner, Dock.Left);
+        head.Children.Add(spinner);
+        var titles = new StackPanel();
+        titles.Children.Add(Ui.Text($"Now · {work.Kind}", 11, FontWeights.SemiBold, "SystemFillColorSuccessBrush", wrap: false));
+        var title = Ui.Text(work.Title.Trim(), 12.5, FontWeights.SemiBold);
+        title.MaxHeight = 36;
+        title.TextTrimming = TextTrimming.CharacterEllipsis;
+        title.ToolTip = TextUtil.Prefix(work.Title, 1_000);
+        titles.Children.Add(title);
+        head.Children.Add(titles);
+        panel.Children.Add(head);
+
+        // "<phase> · round n · <elapsed> · est. <phrase>", as on the Mac.
+        string PhaseLine()
+        {
+            var state = chat.TurnPhase;
+            var parts = new List<string> { state is null ? "Working" : state.IsOver ? state.Headline : state.Phase.Label() };
+            if (chat.Goal?.Round is { } round) parts.Add($"round {round}");
+            parts.Add((state is { StartedAt: not null } ? state.Runtime(DateTimeOffset.Now) : DateTimeOffset.Now - work.StartedAt).FormattedDuration());
+            if (state?.EtaSeconds is { } eta) parts.Add("est. " + TurnEstimator.Phrase(eta));
+            return string.Join(" · ", parts);
+        }
+        var phase = Ui.Text(PhaseLine(), 11, brushKey: "TextFillColorSecondaryBrush", wrap: false);
+        phase.Margin = new Thickness(22, 3, 0, 0);
+        _clocks.Add((phase, PhaseLine));
+        panel.Children.Add(phase);
+
+        if (work.Steps.Count > 0)
+        {
+            var steps = new StackPanel { Margin = new Thickness(22, 6, 0, 0) };
+            foreach (var step in work.Steps)
+            {
+                var (glyph, brush) = step.Status switch
+                {
+                    TodoStatus.Completed => (Icons.Completed, "SystemFillColorSuccessBrush"),
+                    TodoStatus.InProgress => (Icons.CircleFill, "AccentTextFillColorPrimaryBrush"),
+                    _ => (Icons.CircleRing, "TextFillColorTertiaryBrush"),
+                };
+                var row = new DockPanel { Margin = new Thickness(0, 1, 0, 1) };
+                var mark = Ui.Glyph(glyph, 11, brush);
+                mark.Margin = new Thickness(0, 2, 7, 0);
+                mark.VerticalAlignment = VerticalAlignment.Top;
+                DockPanel.SetDock(mark, Dock.Left);
+                row.Children.Add(mark);
+                var text = Ui.Text(step.Content, 11.5, step.Status == TodoStatus.InProgress ? FontWeights.SemiBold : FontWeights.Normal,
+                    step.Status == TodoStatus.Completed ? "TextFillColorTertiaryBrush" : null);
+                var lines = new StackPanel();
+                lines.Children.Add(text);
+                foreach (var agent in chat.Agents.Where(a => a.IsRunning && a.Assignment == step.Content))
+                    lines.Children.Add(Ui.Text($"↳ {agent.Description} · {agent.PlacementLabel ?? "waiting for a model server"}", 10.5,
+                        brushKey: "AccentTextFillColorPrimaryBrush", wrap: false));
+                row.Children.Add(lines);
+                steps.Children.Add(row);
+            }
+            panel.Children.Add(steps);
+        }
+        // Subagents that aren't on a step still show here: nothing working is hidden.
+        foreach (var agent in chat.Agents.Where(a => a.IsRunning && (a.Assignment is null || work.Steps.All(s => s.Content != a.Assignment))))
+        {
+            var line = Ui.Text($"↳ {agent.Description} ({agent.AgentType}) · {agent.PlacementLabel ?? "waiting for a model server"}", 10.5,
+                brushKey: "AccentTextFillColorPrimaryBrush", wrap: false);
+            line.Margin = new Thickness(22, 2, 0, 0);
+            panel.Children.Add(line);
+        }
+
+        var card = new Border { Child = panel, Padding = new Thickness(10, 8, 8, 9), Margin = new Thickness(0, 0, 0, 6), CornerRadius = new CornerRadius(8), BorderThickness = new Thickness(1) };
+        card.SetResourceReference(Border.BackgroundProperty, "SubtleFillColorSecondaryBrush");
+        card.SetResourceReference(Border.BorderBrushProperty, "SystemFillColorSuccessBrush");
+        return card;
+    }
+
+    /// <summary>The chat is idle: its last prompt, how it ended, and the steps of the plan it worked.</summary>
+    private UIElement LastCard(SessionVM chat, TurnPhaseState state, PromptRecord record)
+    {
+        var panel = new StackPanel();
+        var (glyph, brush) = record.Outcome switch
+        {
+            PromptOutcome.Completed => (Icons.Completed, "SystemFillColorSuccessBrush"),
+            PromptOutcome.Issues or PromptOutcome.NeedsYou => (Icons.Warning, "SystemFillColorCautionBrush"),
+            PromptOutcome.Failed => (Icons.Error, "SystemFillColorCriticalBrush"),
+            _ => (Icons.Stop, "TextFillColorTertiaryBrush"),
+        };
+        var head = new DockPanel();
+        var icon = Ui.Glyph(glyph, 12, brush);
+        icon.Margin = new Thickness(0, 2, 9, 0);
+        icon.VerticalAlignment = VerticalAlignment.Top;
+        DockPanel.SetDock(icon, Dock.Left);
+        head.Children.Add(icon);
+        var titles = new StackPanel();
+        titles.Children.Add(Ui.Text($"Last · {record.Headline}" + (record.DurationSeconds is { } took ? $" · took {took.FormattedDuration()}" : ""), 11, FontWeights.SemiBold, brush, wrap: false));
+        var title = Ui.Text(record.FirstLine, 12.5);
+        title.MaxHeight = 36;
+        title.TextTrimming = TextTrimming.CharacterEllipsis;
+        title.ToolTip = TextUtil.Prefix(record.Text, 1_000);
+        titles.Children.Add(title);
+        head.Children.Add(titles);
+        panel.Children.Add(head);
+        if (chat.Todos.Count > 0)
+        {
+            var steps = new StackPanel { Margin = new Thickness(21, 5, 0, 0) };
+            foreach (var step in chat.Todos)
+            {
+                var done = step.Status == TodoStatus.Completed;
+                var line = Ui.Text((done ? "✓ " : "○ ") + step.Content, 11, brushKey: done ? "TextFillColorTertiaryBrush" : "TextFillColorSecondaryBrush", wrap: false);
+                line.TextTrimming = TextTrimming.CharacterEllipsis;
+                steps.Children.Add(line);
+            }
+            panel.Children.Add(steps);
+        }
+        var card = new Border { Child = panel, Padding = new Thickness(10, 8, 8, 9), Margin = new Thickness(0, 0, 0, 6), CornerRadius = new CornerRadius(8), BorderThickness = new Thickness(1) };
+        card.SetResourceReference(Border.BackgroundProperty, "LayerFillColorAltBrush");
+        card.SetResourceReference(Border.BorderBrushProperty, "CardStrokeColorDefaultBrush");
+        card.ToolTip = state.Steps.LastOrDefault()?.Text;
+        return card;
+    }
+
     private UIElement EmptyState() => Centered(Icons.Tray, "No tasks in this chat yet",
         "Line up work for this chat, one task per item. Press Start and the chat works through them by itself, " +
-        "one after another, each until it's done — all week if it has to.",
+        "one after another, each until it's done — all week if it has to. While the agent works, what you type and send " +
+        "(or Ctrl+Enter any time) goes here too, and starts by itself when the work before it finishes.",
         Ui.Button("Add the first task", BeginAdd));
 
     private UIElement NoChat() => Centered(Icons.Chat, "Open a chat to see its task list",
@@ -380,7 +617,8 @@ public sealed class QueuePanel : UserControl
 
     private string SubLine(QueueTask task) => task.Status switch
     {
-        QueueTaskStatus.Queued => (Queue.Position(task.Id) is { } p ? $"#{p} · " : "") + $"added {QueueLog.When(task.EnteredAt)}",
+        QueueTaskStatus.Queued => (Queue.Position(task.Id) is { } p ? $"#{p} · " : "") + (task.AsPrompt ? "prompt · " : "")
+                                  + $"added {QueueLog.When(task.EnteredAt)}",
         QueueTaskStatus.Running => "running" + (task.Rounds > 0 ? $" · {task.Rounds} round{(task.Rounds == 1 ? "" : "s")}" : "")
                                    + (task.TotalTokens > 0 ? $" · {task.TotalTokens:N0} tok" : ""),
         QueueTaskStatus.Complete => $"done · {task.Rounds} round{(task.Rounds == 1 ? "" : "s")}"

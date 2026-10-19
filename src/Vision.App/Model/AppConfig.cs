@@ -118,6 +118,9 @@ public sealed partial class AppConfig : ObservableObject
     [ObservableProperty] private double _planPanelWidth = 340;
     /// <summary>Open the Plan panel by itself when the agent makes a plan.</summary>
     [ObservableProperty] private bool _planPanelAutoOpen = true;
+    /// <summary>How many times validation may send a /goal or a task back to work; null or 0 = unlimited (the default — the
+    /// no-progress check still stops one that keeps failing the same way). Stored as "validationRetryCap".</summary>
+    [ObservableProperty] private int? _validationRetryCap;
     /// <summary>Remember things between chats: notes ride along with messages when relevant, and the agent
     /// can save and look them up. Off switches all of it off.</summary>
     [ObservableProperty] private bool _memoryEnabled = true;
@@ -537,6 +540,7 @@ public sealed partial class AppConfig : ObservableObject
         public bool? PlanPanelOpen { get; set; }
         public double? PlanPanelWidth { get; set; }
         public bool? PlanPanelAutoOpen { get; set; }
+        public int? ValidationRetryCap { get; set; }
         public bool? MemoryEnabled { get; set; }
         public bool? SubagentsUsePrimary { get; set; }
         public List<SwapperConnection>? SwapperConnections { get; set; }
@@ -596,6 +600,7 @@ public sealed partial class AppConfig : ObservableObject
             PlanPanelOpen = stored?.PlanPanelOpen ?? false;
             PlanPanelWidth = stored?.PlanPanelWidth ?? 340;
             PlanPanelAutoOpen = stored?.PlanPanelAutoOpen ?? true;
+            ValidationRetryCap = stored?.ValidationRetryCap is > 0 and var cap ? cap : null;
             MemoryEnabled = stored?.MemoryEnabled ?? true;
             SubagentsUsePrimary = stored?.SubagentsUsePrimary ?? true;
             Privacy = ReadPrivacy(stored?.Privacy, out migratePrivacy);
@@ -755,6 +760,7 @@ public sealed partial class AppConfig : ObservableObject
             PlanPanelOpen = PlanPanelOpen,
             PlanPanelWidth = PlanPanelWidth,
             PlanPanelAutoOpen = PlanPanelAutoOpen,
+            ValidationRetryCap = ValidationRetryCap,
             MemoryEnabled = MemoryEnabled,
             SubagentsUsePrimary = SubagentsUsePrimary,
             SwapperConnections = SwapperConnections.Select(c => c.DeepCopy()).ToList(),
