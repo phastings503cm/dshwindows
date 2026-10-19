@@ -261,15 +261,20 @@ public sealed class AttachmentWireTests : IDisposable
         var inner = new FakeProviderClient(kimi, (_, _) => FakeProviderClient.Text("ok"));
         ShieldReport? report = null;
         var shielded = new ShieldedClient(inner, new ShieldOptions { Report = r => report = r });
-        var docx = Prepared(32_768, File("contacts.md", "# Contacts\nWrite to jane.doe@example.com about the order.\n"u8.ToArray()))[0];
+        var notes = Prepared(32_768, File("contacts.md", "# Contacts\nWrite to jane.doe@example.com about the order.\n"u8.ToArray()))[0];
+        // A PDF's text is only in what Vision read out of it: its bytes are no help to the shield.
+        var pdf = Prepared(32_768, File("invoice.pdf", TestDocuments.Pdf(["Invoice 4711", "Bill to bob.smith@example.org"])))[0];
         var image = Prepared(32_768, new MessageAttachment(AttachmentKind.Image, "shot.png", TestImages.Png(2, 2)))[0];
-        await foreach (var _ in shielded.StreamAsync(new LlmRequest("sys", [LlmMessage.User("see", [docx, image])], [], "k"))) { }
+        await foreach (var _ in shielded.StreamAsync(new LlmRequest("sys", [LlmMessage.User("see", [notes, pdf, image])], [], "k"))) { }
         var sent = Assert.Single(inner.Requests).Messages.Single(m => m.Role == MessageRole.User).Attachments!;
         Assert.DoesNotContain("jane.doe@example.com", sent[0].Text);
-        Assert.Contains("⟦EMAIL_1⟧", sent[0].Text);
-        // The file went as text (checked); only the picture's bytes go unchecked.
+        Assert.StartsWith("[Attached file: contacts.md — Markdown · 2 lines]\n# Contacts\nWrite to ⟦EMAIL_1⟧ about the order.", sent[0].Text);
+        Assert.DoesNotContain("bob.smith", sent[1].Text);
+        Assert.Contains("Bill to ⟦EMAIL_2⟧", sent[1].Text);
+        // The files went as text (checked); only the picture's bytes go unchecked.
         Assert.Equal(1, report!.Unchecked);
         var body = new OpenAiClient(kimi).MakeBody(inner.Requests[0]);
         Assert.DoesNotContain("jane.doe", body);
+        Assert.DoesNotContain("bob.smith", body);
     }
 }
