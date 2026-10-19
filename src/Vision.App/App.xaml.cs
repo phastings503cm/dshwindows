@@ -120,43 +120,73 @@ public partial class App : Application
     /// stopped half-way and the data must not be split across two folders).</summary>
     private bool BringLegacyDataOver(bool firstInstance)
     {
-        // Nothing to bring: VISION_HOME (or DSH_HOME) names the folder, or it was brought over already.
-        if (LegacyUpgrade.Pending() is not { } migration) return true;
+        if (LegacyUpgrade.Pending() is not { } migration)
+        {
+            // Nothing to bring (VISION_HOME or DSH_HOME names the folder, or it was brought over already) — but the
+            // folder may still be one DSH works in (DSH_HOME, a portable copy unpacked into DSH's folder), and DSH runs
+            // under its own single-instance name: both open at once would overwrite each other's chats and settings.
+            if (!AppPaths.MayShareWithLegacyApp()) return true;
+            return WhileLegacyAppRuns(() => Dialog.Ask("Close DSH first",
+                $"DSH is still open, and it works in the same data folder as Vision ({AppPaths.Root}). Close it (check the " +
+                "taskbar and the notification area), then choose Try again, so the two don't overwrite each other's chats and settings.",
+                new Dialog.Choice("Quit", IsCancel: true), new Dialog.Choice("Try again", IsDefault: true)) == 1);
+        }
         // Another Vision is starting up and is bringing it over right now; the user will see that one.
         if (!firstInstance) return false;
 
+        // An old DSH still open keeps writing to the folder being brought over.
+        if (!WhileLegacyAppRuns(() => Dialog.Ask("Close DSH first",
+                "DSH is now Vision. DSH is still open, though — close it (check the taskbar and the notification area), " +
+                "then choose Try again, so Vision can bring your chats, settings and keys over.",
+                new Dialog.Choice("Quit", IsCancel: true), new Dialog.Choice("Try again", IsDefault: true)) == 1))
+            return false;
+
+        var outcome = LegacyUpgrade.Run(migration);
+        if (outcome.Result != DataMigrationResult.Failed) return true;
+        if (outcome.DataFolder is null)
+        {
+            WithDialogBeforeTheWindow(() => Dialog.Info("Vision couldn't finish moving your data", outcome.Problem ?? ""));
+            return false;
+        }
+        // Nothing moved: run on DSH's folder this time, and try again at the next start.
+        AppPaths.SessionRoot = outcome.DataFolder;
+        _dataFolderProblem = outcome;
+        return true;
+    }
+
+    /// <summary>While an old DSH is running, ask <paramref name="tryAgain"/> (a dialog: true for Try again). False when
+    /// the user chose to quit instead.</summary>
+    private bool WhileLegacyAppRuns(Func<bool> tryAgain) => WithDialogBeforeTheWindow(() =>
+    {
+        while (SingleInstance.IsRunning(SingleInstance.LegacyAppId))
+        {
+            if (!tryAgain()) return false;
+        }
+        return true;
+    });
+
+    /// <summary>Show a dialog before the main window exists: closing it mustn't end the app, and it mustn't stay the
+    /// main window.</summary>
+    private T WithDialogBeforeTheWindow<T>(Func<T> show)
+    {
         var previousMode = ShutdownMode;
-        ShutdownMode = ShutdownMode.OnExplicitShutdown; // a dialog closing before the main window opens mustn't end the app
+        ShutdownMode = ShutdownMode.OnExplicitShutdown;
         try
         {
-            // An old DSH still open keeps writing to the folder being brought over.
-            while (SingleInstance.IsRunning(SingleInstance.LegacyAppId))
-            {
-                var choice = Dialog.Ask("Close DSH first",
-                    "DSH is now Vision. DSH is still open, though — close it (check the taskbar and the notification area), " +
-                    "then choose Try again, so Vision can bring your chats, settings and keys over.",
-                    new Dialog.Choice("Quit", IsCancel: true), new Dialog.Choice("Try again", IsDefault: true));
-                if (choice != 1) return false;
-            }
-
-            var outcome = LegacyUpgrade.Run(migration);
-            if (outcome.Result != DataMigrationResult.Failed) return true;
-            if (outcome.DataFolder is null)
-            {
-                Dialog.Info("Vision couldn't finish moving your data", outcome.Problem ?? "");
-                return false;
-            }
-            // Nothing moved: run on DSH's folder this time, and try again at the next start.
-            AppPaths.SessionRoot = outcome.DataFolder;
-            _dataFolderProblem = outcome;
-            return true;
+            return show();
         }
         finally
         {
             ShutdownMode = previousMode;
-            MainWindow = null; // a dialog shown above became the main window; the real one is set next
+            MainWindow = null; // the real one is set next
         }
     }
+
+    private void WithDialogBeforeTheWindow(Action show) => WithDialogBeforeTheWindow(() =>
+    {
+        show();
+        return true;
+    });
 
     /// <summary>The one-time notice after DSH's data was brought over — or why it wasn't, this time.</summary>
     private void ShowDataFolderNotice()
@@ -177,6 +207,9 @@ public partial class App : Application
                            "checked everything is here, you can delete it.";
             if (done.SkippedLinks is { Count: > 0 } links)
                 message += $"\n\nThese links in it weren't recreated (they are still in the old folder): {string.Join(", ", links)}.";
+            if (done.SetAside is { Length: > 0 } setAside)
+                message += $"\n\nA Vision data folder was already at {AppPaths.Root}. It was kept as {setAside} — nothing in it was " +
+                           "deleted, but its chats and settings aren't the ones Vision shows now.";
             Dialog.Info("DSH is now Vision", message);
             DataFolderMigration.MarkNoticeShown(AppPaths.Root);
         }

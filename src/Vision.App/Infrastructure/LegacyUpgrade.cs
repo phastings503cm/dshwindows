@@ -13,24 +13,28 @@ public static class LegacyUpgrade
 {
     public const string MigrateOnlyFlag = "--migrate-only";
 
-    /// <summary>The move still to make, or null when there is none: the user chose the folder (VISION_HOME, or the
-    /// legacy DSH_HOME), a portable copy has no portable DSH beside it, or it was brought over already.</summary>
-    public static DataFolderMigration? Pending()
+    /// <summary>What brings DSH's data folder over to this copy's, or null when the user chose the folder (VISION_HOME,
+    /// or the legacy DSH_HOME). A portable copy copies the data of a portable DSH unpacked beside it (that copy keeps its
+    /// own); without one beside it, there is nothing to bring, but the folder is still settled.</summary>
+    public static DataFolderMigration? ForThisCopy()
     {
         if (AppPaths.Overridden is not null) return null;
         var program = AppContext.BaseDirectory;
-        DataFolderMigration migration;
         if (AppPaths.PortableRootFor(program) is { } portable)
-        {
-            // A portable copy unpacked beside a portable DSH copies DSH's data (that copy keeps its own).
-            if (AppPaths.LegacyPortableRootFor(program) is not { } legacyPortable) return null;
-            migration = new DataFolderMigration(legacyPortable, portable, allowMove: false);
-        }
-        else
-        {
-            migration = new DataFolderMigration(AppPaths.LegacyDefaultRoot, AppPaths.DefaultRoot);
-        }
-        return migration.IsPending ? migration : null;
+            return new DataFolderMigration(AppPaths.LegacyPortableRootFor(program) ?? portable, portable, allowMove: false);
+        return new DataFolderMigration(AppPaths.LegacyDefaultRoot, AppPaths.DefaultRoot);
+    }
+
+    /// <summary>The move still to make, or null when there is none: the user chose the folder, there is no DSH data
+    /// to bring, or it was brought over already. When there is none, the folder is settled first (see
+    /// <see cref="DataFolderMigration.Settle"/>): marked as Vision's own, so DSH data that turns up later never
+    /// displaces it.</summary>
+    public static DataFolderMigration? Pending()
+    {
+        if (ForThisCopy() is not { } migration) return null;
+        if (migration.IsPending) return migration;
+        migration.Settle();
+        return null;
     }
 
     /// <summary>Bring the data over, and point a portable DSH's "Open with DSH" at Vision once it is.</summary>
@@ -82,7 +86,8 @@ public static class LegacyUpgrade
                 return Finish(report, ExitCodes.LegacyAppRunning, "DSH is still open. Close it, then run this again.", reportPath);
 
             var exitCode = ExitCodes.Done;
-            if (Pending() is { } migration)
+            var migration = ForThisCopy();
+            if (migration is { IsPending: true })
             {
                 var outcome = Run(migration);
                 report.Result = outcome.Result.ToString();
@@ -101,12 +106,20 @@ public static class LegacyUpgrade
                     AppPaths.SessionRoot = outcome.DataFolder;
                 }
             }
+            else if (migration is null)
+            {
+                report.Result = "FolderChosen";
+            }
             else
             {
-                report.Result = AppPaths.Overridden is not null ? "FolderChosen"
-                    : File.Exists(Path.Combine(AppPaths.Root, DataFolderMigration.MarkerFileName))
-                        ? nameof(DataMigrationResult.AlreadyDone)
-                        : nameof(DataMigrationResult.NothingToDo);
+                // Nothing to bring: settled the way the first start settles it (marked as Vision's own folder; the paths
+                // of data moved over by hand rewritten).
+                var settled = migration.Settle();
+                report.Result = settled.Result.ToString();
+                report.From = settled.From;
+                report.To = settled.To;
+                report.Problem = settled.Problem;
+                report.RewrittenFiles = settled.RewrittenFiles;
             }
             report.DataFolder = AppPaths.Root;
 
