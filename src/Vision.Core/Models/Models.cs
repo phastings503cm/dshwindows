@@ -54,6 +54,16 @@ public enum AttachmentKind { Image, File }
 /// <summary>A file or image the user attaches to a message.</summary>
 public sealed record MessageAttachment(AttachmentKind Kind, string Name, byte[] Data)
 {
+    /// <summary>What Vision read out of the file when it was attached (<see cref="AttachmentReader"/>); null for one
+    /// nobody read.</summary>
+    public AttachmentDigest? Digest { get; init; }
+    /// <summary>The text sent in its place on a route that doesn't take the file itself: a header and the file's text,
+    /// or — for a long one — its contents list and first parts (<see cref="AttachmentPrep"/>). For an image, what a model
+    /// that can't take images gets (the OCR text). Null until the message is prepared.</summary>
+    public string? Text { get; init; }
+    /// <summary>How many parts the file's text was split into (1 = sent whole); null until the message is prepared.</summary>
+    public int? Parts { get; init; }
+
     /// <summary>Best-effort MIME type from the filename extension.</summary>
     public string Mime => System.IO.Path.GetExtension(Name).TrimStart('.').ToLowerInvariant() switch
     {

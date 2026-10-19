@@ -114,6 +114,8 @@ public static class AppPaths
 
     public static string Settings => Path.Combine(Root, "settings.json");
     public static string Conversations => Path.Combine(Root, "conversations");
+    /// <summary>The full text of attached files, one folder per chat (read back with read_attachment).</summary>
+    public static string Attachments => Path.Combine(Root, "attachments");
     public static string Plugins => Path.Combine(Root, "plugins");
     public static string Logs => Path.Combine(Root, "logs");
 

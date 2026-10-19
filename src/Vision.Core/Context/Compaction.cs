@@ -26,7 +26,12 @@ public static class TokenEstimate
             }
             else
             {
-                chars += attachment.Data.Length * 4 / 3; // base64 payload
+                // What goes in the file's place (see AttachmentWire): its prepared text, the text read out of it, a scan's
+                // page images — or, for a file nobody read, its base64 payload.
+                if (attachment.Text is { } text) chars += text.Length;
+                else if (attachment.Digest is { } digest) chars += digest.TextLength;
+                else chars += attachment.Data.Length * 4 / 3;
+                foreach (var page in attachment.Digest?.PageImages ?? []) tokens += ImageSize.Tokens(page.Data);
             }
         }
         return Math.Max(0, chars / 4) + tokens;

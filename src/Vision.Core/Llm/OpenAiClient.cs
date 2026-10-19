@@ -349,6 +349,15 @@ public sealed class OpenAiClient : IProviderClient
                     return await RunTurnAsync(request, onText, onReasoning, isRetry: true, cancellationToken)
                         .ConfigureAwait(false);
                 }
+                // A model that takes no images, answering one ("image input is not supported", "requires a multimodal
+                // processor"): remember it for this route and send the picture's OCR text instead.
+                if (!isRetry && code is 400 or 422 or 500 && VisionRejections.SaysNoImages(body)
+                    && AttachmentWire.CarriesImages(request.Messages, AttachmentRouteFor(request)))
+                {
+                    VisionRejections.Shared.Learn(VisionRejections.Key(Profile, request.Model));
+                    return await RunTurnAsync(request, onText, onReasoning, isRetry: true, cancellationToken)
+                        .ConfigureAwait(false);
+                }
                 // SGLang / vLLM report a context overflow as "This model's maximum context length
                 // is N tokens; however, you requested M ...".
                 if (OverflowLimit(body) is { } limit) throw LlmException.Overflow(limit, body);
@@ -656,6 +665,7 @@ public sealed class OpenAiClient : IProviderClient
         // message. Collect every system-role message and merge them into one leading message.
         var systemParts = new List<string>();
         if (!string.IsNullOrEmpty(request.SystemPrompt)) systemParts.Add(request.SystemPrompt);
+        var attachmentRoute = AttachmentRouteFor(request);
         foreach (var m in request.Messages)
         {
             switch (m.Role)
@@ -664,7 +674,7 @@ public sealed class OpenAiClient : IProviderClient
                     if (!string.IsNullOrEmpty(m.Content)) systemParts.Add(m.Content);
                     break;
                 case MessageRole.User:
-                    messages.Add(new JsonObject { ["role"] = "user", ["content"] = UserContent(m) });
+                    messages.Add(new JsonObject { ["role"] = "user", ["content"] = UserContent(m, attachmentRoute) });
                     break;
                 case MessageRole.Assistant:
                     var msg = new JsonObject { ["role"] = "assistant", ["content"] = m.Content ?? "" };
@@ -839,35 +849,50 @@ public sealed class OpenAiClient : IProviderClient
             .First();
     }
 
-    /// <summary>The OpenAI "content" value for a user message: plain text without attachments,
-    /// otherwise a multi-part array mixing text with image / file entries (inline base64 data URIs).</summary>
-    private static JsonNode UserContent(LlmMessage m)
+    /// <summary>The OpenAI "content" value for a user message: plain text when it carries no attachments, or only ones
+    /// that go as text; otherwise a multi-part array of <c>text</c> and <c>image_url</c> parts (images inline as base64
+    /// data URLs). Never a <c>file</c> part: no self-hosted server takes one (vLLM: "Unknown part type: file"; llama.cpp:
+    /// "unsupported content[].type"; SGLang's schema has no such part) — a file goes as the text Vision read out of it
+    /// (see <see cref="AttachmentWire"/>).</summary>
+    private static JsonNode UserContent(LlmMessage m, AttachmentRoute route)
     {
         if (m.Attachments is not { Count: > 0 } attachments) return JsonValue.Create(m.Content ?? "")!;
-        var parts = new JsonArray();
-        if (!string.IsNullOrEmpty(m.Content)) parts.Add(new JsonObject { ["type"] = "text", ["text"] = m.Content });
-        foreach (var a in attachments)
+        var wire = AttachmentWire.Parts(attachments, route);
+        var texts = new List<string>();
+        if (!string.IsNullOrEmpty(m.Content)) texts.Add(m.Content);
+        if (!wire.Any(p => p is AttachmentWirePart.Image))
         {
-            var b64 = Convert.ToBase64String(a.Data);
-            if (a.Kind == AttachmentKind.Image)
+            // All text: one string, which every server and chat template takes.
+            texts.AddRange(wire.OfType<AttachmentWirePart.Text>().Select(t => t.Value));
+            return JsonValue.Create(string.Join("\n\n", texts))!;
+        }
+        var parts = new JsonArray();
+        foreach (var text in texts) parts.Add(new JsonObject { ["type"] = "text", ["text"] = text });
+        foreach (var part in wire)
+        {
+            switch (part)
             {
-                parts.Add(new JsonObject
-                {
-                    ["type"] = "image_url",
-                    ["image_url"] = new JsonObject { ["url"] = $"data:{a.Mime};base64,{b64}" },
-                });
-            }
-            else
-            {
-                parts.Add(new JsonObject
-                {
-                    ["type"] = "file",
-                    ["file"] = new JsonObject { ["filename"] = a.Name, ["file_data"] = $"data:{a.Mime};base64,{b64}" },
-                });
+                case AttachmentWirePart.Text text:
+                    parts.Add(new JsonObject { ["type"] = "text", ["text"] = text.Value });
+                    break;
+                case AttachmentWirePart.Image image:
+                    parts.Add(new JsonObject
+                    {
+                        ["type"] = "image_url",
+                        ["image_url"] = new JsonObject { ["url"] = $"data:{image.Mime};base64,{Convert.ToBase64String(image.Data)}" },
+                    });
+                    break;
+                case AttachmentWirePart.Document document:
+                    // No OpenAI-compatible route takes documents (AttachmentRoute.OpenAi); never reached.
+                    parts.Add(new JsonObject { ["type"] = "text", ["text"] = $"[document of {document.Data.Length} bytes]" });
+                    break;
             }
         }
         return parts;
     }
+
+    /// <summary>What this route takes besides text, for this request's model.</summary>
+    internal AttachmentRoute AttachmentRouteFor(LlmRequest request) => AttachmentRoute.OpenAi(Profile, request.Model);
 
     /// <summary>"Vision/0.9.12 (Windows)" — who is calling, honestly. (Some plans check the calling app; Vision never claims
     /// to be another one.)</summary>

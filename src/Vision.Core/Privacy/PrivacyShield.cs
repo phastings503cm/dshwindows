@@ -381,7 +381,7 @@ public sealed class ShieldedClient(IProviderClient inner, ShieldOptions options)
         [EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
         var map = new ShieldMap();
-        var (masked, notChecked) = Mask(request, map, options.Detector);
+        var (masked, notChecked) = Mask(request, map, options.Detector, AttachmentRoute.Of(inner.Profile));
         var text = new PlaceholderRestorer(map);
         var reasoning = new PlaceholderRestorer(map);
         await foreach (var ev in inner.StreamAsync(masked, cancellationToken).ConfigureAwait(false))
@@ -414,9 +414,12 @@ public sealed class ShieldedClient(IProviderClient inner, ShieldOptions options)
     /// <summary>The request as the model may see it. Pass 1 goes through everything the model would see, in transcript
     /// order — the system prompt, then each message's text, its tool calls (their raw JSON, so a key is seen beside its
     /// value, and each string in it) and the text of its text attachments — collecting the sensitive values; pass 2
-    /// replaces every occurrence of each. Also counts the attachments that couldn't be checked (pictures, PDFs, Office
-    /// documents, other binary files), which go as they are.</summary>
-    public static (LlmRequest Request, int Unchecked) Mask(LlmRequest request, ShieldMap map, SensitiveDetector detector)
+    /// replaces every occurrence of each. Also counts the attachments that couldn't be checked, which go as they are.
+    /// <paramref name="route"/> is what the request's route takes besides text: an attachment that goes as text there (a
+    /// PDF or Word file Vision read, a picture's OCR text) is checked like any text; one whose bytes go (a picture to a
+    /// vision model, a PDF document to Bedrock) can't be. Null = assume the bytes of every picture and PDF go.</summary>
+    public static (LlmRequest Request, int Unchecked) Mask(LlmRequest request, ShieldMap map, SensitiveDetector detector,
+                                                           AttachmentRoute? route = null)
     {
         // Pass 1: collect.
         var attachmentText = new Dictionary<MessageAttachment, string?>(ReferenceEqualityComparer.Instance);
@@ -440,10 +443,10 @@ public sealed class ShieldedClient(IProviderClient inner, ShieldOptions options)
             foreach (var attachment in message.Attachments ?? [])
             {
                 if (attachmentText.ContainsKey(attachment)) continue;
-                var text = AttachmentText.Read(attachment);
+                var text = AttachmentText.Sent(attachment);
                 attachmentText[attachment] = text;
-                if (text is null) notChecked++;
-                else map.Collect(text, detector);
+                if (text is not null) map.Collect(text, detector);
+                if (text is null || AttachmentText.BytesGo(attachment, route)) notChecked++;
             }
         }
 
@@ -501,7 +504,12 @@ public sealed class ShieldedClient(IProviderClient inner, ShieldOptions options)
     {
         if (text is null) return attachment;
         var replaced = map.Replace(text);
-        return replaced == text ? attachment : attachment with { Data = Encoding.UTF8.GetBytes(replaced) };
+        if (replaced == text) return attachment;
+        // Where the text came from is where the masked text goes: what Vision prepared for it, what it read out of it, or
+        // (a file nobody read) its own bytes.
+        if (attachment.Text is not null) return attachment with { Text = replaced };
+        if (attachment.Digest is { Text.Length: > 0 } digest) return attachment with { Digest = digest with { Text = replaced } };
+        return attachment with { Data = Encoding.UTF8.GetBytes(replaced) };
     }
 
     /// <summary>Whether a provider's stored state holds any collected value — in its JSON strings (decoded), or anywhere
@@ -540,6 +548,23 @@ public static class AttachmentText
         ".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp", ".ico", ".tif", ".tiff", ".heic", ".exe", ".dll", ".bin", ".so", ".dylib",
         ".class", ".jar", ".pyc", ".mp3", ".mp4", ".mov", ".wav", ".sqlite", ".db",
     };
+
+    /// <summary>The text an attachment goes to the model as: what Vision prepared for it (<see cref="MessageAttachment.Text"/>),
+    /// else what it read out of it (<see cref="AttachmentDigest.Text"/>), else — a file nobody read — its own bytes when
+    /// they are plain text. Null for anything else, which can't be checked.</summary>
+    public static string? Sent(MessageAttachment attachment)
+    {
+        if (attachment.Text is { } prepared) return prepared;
+        if (attachment.Digest is { Text.Length: > 0 } digest) return digest.Text;
+        return Read(attachment);
+    }
+
+    /// <summary>Whether the attachment's own bytes go to the model (which the shield can't look into).</summary>
+    public static bool BytesGo(MessageAttachment attachment, AttachmentRoute? route)
+    {
+        if (route is null) return attachment.Kind == AttachmentKind.Image || attachment.Mime == "application/pdf";
+        return AttachmentWire.Delivery(attachment, route) is AttachmentDelivery.Image or AttachmentDelivery.Document or AttachmentDelivery.PageImages;
+    }
 
     public static string? Read(MessageAttachment attachment)
     {

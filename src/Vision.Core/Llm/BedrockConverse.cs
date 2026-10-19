@@ -83,7 +83,7 @@ public static class BedrockConverse
         }
         if (system.Count > 0 && traits.CachePoints) system.Add(CachePoint());
 
-        var turns = Turns(request.Messages, traits, replay);
+        var turns = Turns(request.Messages, traits, replay, AttachmentRoute.Bedrock(profile, traits));
         if (traits.CachePoints) turns[^1].Content.Add(CachePoint());
         var messages = new JsonArray();
         foreach (var (role, content) in turns) messages.Add(new JsonObject { ["role"] = role, ["content"] = content });
@@ -156,7 +156,7 @@ public static class BedrockConverse
 
     private const string InterruptedCall = "Not run — the turn was interrupted before this call executed.";
 
-    private static List<Turn> Turns(IReadOnlyList<LlmMessage> messages, BedrockModelTraits traits, bool replay)
+    private static List<Turn> Turns(IReadOnlyList<LlmMessage> messages, BedrockModelTraits traits, bool replay, AttachmentRoute route)
     {
         var turns = new List<Turn>();
         // toolUse ids of the latest assistant turn still waiting for their results.
@@ -195,7 +195,7 @@ public static class BedrockConverse
             {
                 case MessageRole.User:
                     CloseOpenCalls();
-                    Add("user", UserBlocks(m, traits));
+                    Add("user", UserBlocks(m, route));
                     break;
                 case MessageRole.Tool:
                 {
@@ -238,38 +238,44 @@ public static class BedrockConverse
         return turns;
     }
 
-    private static JsonArray UserBlocks(LlmMessage m, BedrockModelTraits traits)
+    /// <summary>The user's text, then each attachment as <see cref="AttachmentWire"/> sends it on this route: images in
+    /// Converse's four formats, PDFs as documents where the model reads them, everything else as the text Vision read out
+    /// of it.</summary>
+    private static JsonArray UserBlocks(LlmMessage m, AttachmentRoute route)
     {
         var blocks = new JsonArray();
         if (!string.IsNullOrWhiteSpace(m.Content)) blocks.Add(Text(m.Content));
-        foreach (var a in m.Attachments ?? [])
+        foreach (var part in AttachmentWire.Parts(m.Attachments ?? [], route))
         {
-            if (a.Kind == AttachmentKind.Image && ImageFormat(a.Mime) is { } format)
+            switch (part)
             {
-                blocks.Add(new JsonObject
-                {
-                    ["image"] = new JsonObject
+                case AttachmentWirePart.Text text:
+                    blocks.Add(Text(text.Value));
+                    break;
+                case AttachmentWirePart.Image image when ImageFormat(image.Mime) is { } format:
+                    blocks.Add(new JsonObject
                     {
-                        ["format"] = format,
-                        ["source"] = new JsonObject { ["bytes"] = Convert.ToBase64String(a.Data) },
-                    },
-                });
-            }
-            else if (a.Mime == "application/pdf" && traits.Documents)
-            {
-                blocks.Add(new JsonObject
-                {
-                    ["document"] = new JsonObject
+                        ["image"] = new JsonObject
+                        {
+                            ["format"] = format,
+                            ["source"] = new JsonObject { ["bytes"] = Convert.ToBase64String(image.Data) },
+                        },
+                    });
+                    break;
+                case AttachmentWirePart.Image image:
+                    blocks.Add(Text($"[image of {image.Data.Length.ToString(CultureInfo.InvariantCulture)} bytes, not shown]"));
+                    break;
+                case AttachmentWirePart.Document document:
+                    blocks.Add(new JsonObject
                     {
-                        ["format"] = "pdf",
-                        ["name"] = DocumentName(a.Name),
-                        ["source"] = new JsonObject { ["bytes"] = Convert.ToBase64String(a.Data) },
-                    },
-                });
-            }
-            else
-            {
-                blocks.Add(Text(FileText(a)));
+                        ["document"] = new JsonObject
+                        {
+                            ["format"] = "pdf",
+                            ["name"] = DocumentName(document.Name),
+                            ["source"] = new JsonObject { ["bytes"] = Convert.ToBase64String(document.Data) },
+                        },
+                    });
+                    break;
             }
         }
         return blocks;
@@ -447,18 +453,6 @@ public static class BedrockConverse
         var chars = stem.Select(c => char.IsAsciiLetterOrDigit(c) || c is ' ' or '-' or '(' or ')' or '[' or ']' ? c : '-');
         var name = string.Join(' ', new string(chars.ToArray()).Split(' ', StringSplitOptions.RemoveEmptyEntries));
         return name.Length == 0 ? "document" : name;
-    }
-
-    /// <summary>A non-image file as text: its content when it is UTF-8 text, else a note.</summary>
-    private static string FileText(MessageAttachment a)
-    {
-        try
-        {
-            var text = new UTF8Encoding(false, throwOnInvalidBytes: true).GetString(a.Data).TrimStart('﻿');
-            if (!text.Contains('\0')) return $"[Attached file: {a.Name}]\n{text}";
-        }
-        catch (DecoderFallbackException) { }
-        return $"[Attached file: {a.Name} ({a.Data.Length.ToString(CultureInfo.InvariantCulture)} bytes of binary data, not shown)]";
     }
 }
 

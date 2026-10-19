@@ -8,6 +8,8 @@ public sealed record LogItemRow(string SessionId, int Seq, string Kind, string? 
                                 string? ArgSummary, string? Output, bool IsError, DateTimeOffset At)
 {
     public string Id => $"{SessionId}:{Seq}";
+    /// <summary>A user row's attachments (names and summaries, not content); null for none.</summary>
+    public IReadOnlyList<AttachmentBadge>? Attachments { get; init; }
 }
 
 /// <summary>Stored session metadata.</summary>
@@ -51,7 +53,7 @@ public sealed class ConversationLog
                     _rows[stored.Session.Id] = stored.Session;
                     _items[stored.Session.Id] = (stored.Items ?? [])
                         .Select(i => new LogItemRow(stored.Session.Id, i.Seq, i.Kind, i.Text, i.ToolName, i.ArgSummary,
-                            i.Output, i.IsError, i.At))
+                            i.Output, i.IsError, i.At) { Attachments = i.Attachments is { Count: > 0 } badges ? badges : null })
                         .ToList();
                 }
                 catch (Exception ex) when (ex is JsonException or IOException or UnauthorizedAccessException)
@@ -89,10 +91,23 @@ public sealed class ConversationLog
     public IReadOnlyList<LogItemRow> LoadItems(string id) => _items.TryGetValue(id, out var list) ? list : [];
 
     public void RecordItem(string id, string kind, string? text, string? toolName = null, string? argSummary = null,
-                           string? output = null, bool isError = false)
+                           string? output = null, bool isError = false, IReadOnlyList<AttachmentBadge>? attachments = null)
     {
         if (!_items.TryGetValue(id, out var list)) _items[id] = list = [];
-        list.Add(new LogItemRow(id, list.Count, kind, text, toolName, argSummary, output, isError, DateTimeOffset.Now));
+        list.Add(new LogItemRow(id, list.Count, kind, text, toolName, argSummary, output, isError, DateTimeOffset.Now)
+        {
+            Attachments = attachments is { Count: > 0 } ? attachments : null,
+        });
+        Persist(id);
+    }
+
+    /// <summary>Set the attachments of a session's last user row (they are known for sure once the message is prepared).</summary>
+    public void SetAttachments(string id, IReadOnlyList<AttachmentBadge> badges)
+    {
+        if (!_items.TryGetValue(id, out var list)) return;
+        var index = list.FindLastIndex(i => i.Kind == "user");
+        if (index < 0) return;
+        list[index] = list[index] with { Attachments = badges.Count > 0 ? badges : null };
         Persist(id);
     }
 
@@ -135,6 +150,7 @@ public sealed class ConversationLog
                 Output = i.Output,
                 IsError = i.IsError,
                 At = i.At,
+                Attachments = i.Attachments is { Count: > 0 } badges ? badges.ToList() : null,
             }).ToList(),
         };
         try
@@ -166,5 +182,7 @@ public sealed class ConversationLog
         public string? Output { get; set; }
         public bool IsError { get; set; }
         public DateTimeOffset At { get; set; }
+        /// <summary>A user row's attachments: <c>[{"name", "label", "image", "stored"}]</c>, as Vision for macOS writes them.</summary>
+        public List<AttachmentBadge>? Attachments { get; set; }
     }
 }
