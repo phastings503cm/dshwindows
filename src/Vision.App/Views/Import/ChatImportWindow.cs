@@ -95,9 +95,7 @@ public sealed class ChatImportWindow : Window
         var tools = new DockPanel { Margin = new Thickness(24, 4, 24, 6) };
         DockPanel.SetDock(links, Dock.Right);
         tools.Children.Add(links);
-        _counts.VerticalAlignment = VerticalAlignment.Center;
-        _counts.Margin = new Thickness(14, 0, 0, 0);
-        tools.Children.Add(Ui.Stack(Orientation.Horizontal, _filter, _automated, _counts));
+        tools.Children.Add(Ui.Stack(Orientation.Horizontal, _filter, _automated));
         _filter.TextChanged += (_, _) => Render();
         _automated.Click += (_, _) => Render();
         DockPanel.SetDock(tools, Dock.Top);
@@ -129,7 +127,10 @@ public sealed class ChatImportWindow : Window
         _doneButtons = Ui.Buttons(Ui.Button("Search them…", SearchImported), Ui.Button("Open the newest", OpenNewest), Ui.Button("Done", Close, accent: true));
         _doneButtons.Visibility = Visibility.Collapsed;
         var footer = new DockPanel { Margin = new Thickness(24, 10, 24, 16) };
-        var right = Ui.Stack(Orientation.Horizontal, _chooseButtons, _doneButtons);
+        // "12 shown · 5 ticked" beside the buttons it counts for (the toolbar has no room for it at the window's width).
+        _counts.VerticalAlignment = VerticalAlignment.Center;
+        _counts.Margin = new Thickness(0, 0, 14, 0);
+        var right = Ui.Stack(Orientation.Horizontal, _counts, _chooseButtons, _doneButtons);
         DockPanel.SetDock(right, Dock.Right);
         footer.Children.Add(right);
         footer.Children.Add(Ui.Stack(Orientation.Horizontal, _spinner, _status));
@@ -511,6 +512,7 @@ public sealed class ChatImportWindow : Window
         _done.Content = panel;
         _choose.Visibility = Visibility.Collapsed;
         _chipsRow.Visibility = Visibility.Collapsed;
+        _counts.Visibility = Visibility.Collapsed;
         _done.Visibility = Visibility.Visible;
         _chooseButtons.Visibility = Visibility.Collapsed;
         _doneButtons.Visibility = Visibility.Visible;
