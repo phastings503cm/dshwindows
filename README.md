@@ -403,6 +403,16 @@ a scoped task). On top of those:
   built. Each chat asks before the first look and the first click (full-access chats don't). Typing
   into terminals, the Run box, Explorer or Task Manager is always refused. Switch them off in
   **Settings › General › Computer use**.
+  - **Your mouse stays yours.** Clicks and typing go to the app in the background where they can —
+    UI Automation on the button, check box, list item or field, or messages to a standard Win32
+    control — so the cursor doesn't move, the app doesn't have to be in front, and several chats can
+    work at once. Only what needs the real mouse or keyboard (games, drags, right-clicks, shortcuts)
+    uses them: one chat at a time (the others say "Waiting for the mouse"), never while you are using
+    them, and the cursor goes back where you left it. **Keep each chat to the apps it started**
+    (same page) limits a chat's input to programs it launched.
+  - **The glow.** While a chat uses the computer, the edges of every monitor glow and a label says
+    *Machine in use by Vision AI*, which chat has the mouse or works in the background, and that
+    **Ctrl+Alt+.** stops — from any app. The glow is left out of the agent's screenshots.
 - **`queue_task`** adds follow-up work to the chat's own task list; **`vault_search`** finds credentials by
   name (never their values).
 - **Kinds of subagent, and fan-out** — `agent` takes an `agent_type`: `general` (the default),
