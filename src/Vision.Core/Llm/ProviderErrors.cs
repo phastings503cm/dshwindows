@@ -1,5 +1,6 @@
 using System.Text.Json;
 using System.Text.Json.Nodes;
+using System.Text.RegularExpressions;
 
 namespace Vision.Core;
 
@@ -217,6 +218,96 @@ public static class KimiErrors
                 return new("Moonshot didn't accept the key. A key works only in the region it was made in (platform.moonshot.ai or platform.moonshot.cn), and a Kimi Code key doesn't work here.", true);
             case (KnownProvider.Moonshot, 404) when lower.Contains("model", StringComparison.Ordinal):
                 return new($"Moonshot doesn't serve `{model}` — older Kimi models were retired. kimi-k3 or kimi-k2.7-code are the current ones.", true);
+            default:
+                return null;
+        }
+    }
+}
+
+public static class DeepSeekErrors
+{
+    /// <summary>Said in the chat when a turn went without thinking because DeepSeek wanted reasoning this chat no longer has.</summary>
+    public const string ReasoningRetryNotice =
+        "DeepSeek wanted the reasoning from an earlier turn that this chat no longer has, so this turn ran without thinking.";
+
+    /// <summary>DeepSeek's 400 when an earlier assistant turn came back without its reasoning (thinking mode, with tools):
+    /// {"error":{"message":"The `reasoning_content` in the thinking mode must be passed back to the API.",
+    /// "type":"invalid_request_error","param":null,"code":"invalid_request_error"}}.</summary>
+    public static bool WantsReasoningBack(string body)
+    {
+        var lower = ParameterRejection.Text(body).ToLowerInvariant();
+        return lower.Contains("reasoning_content", StringComparison.Ordinal) && lower.Contains("passed back", StringComparison.Ordinal);
+    }
+
+    /// <summary>A DeepSeek error in plain words (null = leave it to the generic handling: 422 is learned from, 429/500/503 are
+    /// waited out). Codes from api-docs.deepseek.com/quick_start/error_codes; bodies as DeepSeek sends them (its 402 says
+    /// "type":"unknown_error" with "code":"invalid_request_error").</summary>
+    public static ProviderErrorExplanation? Explain(int status, string body, string model)
+    {
+        var lower = ParameterRejection.Text(body).ToLowerInvariant();
+        switch (status)
+        {
+            case 401:
+                return new("DeepSeek didn't accept the key. Check you copied the whole key from platform.deepseek.com/api_keys (it starts with sk-), or make a new one there.", true);
+            case 402:
+                return new("Your DeepSeek balance has run out. Top up at platform.deepseek.com/top_up, then try again.", true);
+            case 400 when WantsReasoningBack(body):
+                return new("DeepSeek wants the reasoning from earlier turns sent back, and this chat no longer has it. Switch thinking off for this chat, or carry on in a new chat.", true);
+            case 400 or 404 when lower.Contains("model not exist", StringComparison.Ordinal) || lower.Contains("model_not_found", StringComparison.Ordinal):
+                return new($"DeepSeek doesn't serve `{model}`. Use deepseek-v4-pro or deepseek-flash.", true);
+            default:
+                return null;
+        }
+    }
+}
+
+public static partial class AnthropicErrors
+{
+    /// <summary>The error's type and message from Anthropic's body: {"type":"error","error":{"type":"authentication_error",
+    /// "message":"invalid x-api-key"},"request_id":"req_…"}.</summary>
+    public static (string? Type, string Message) Parse(string body)
+    {
+        try
+        {
+            if (JsonNode.Parse(body) is JsonObject obj && obj["error"] is JsonObject error)
+                return (JsonArgs.String(error, "type"), JsonArgs.String(error, "message") ?? "");
+        }
+        catch (JsonException) { }
+        return (null, body.Trim());
+    }
+
+    /// <summary>"prompt is too long: 1012345 tokens > 1000000 maximum" → 1000000.</summary>
+    public static int? OverflowLimit(string body)
+    {
+        var m = PromptTooLong().Match(body);
+        return m.Success && int.TryParse(m.Groups[1].Value, out var limit) && limit > 0 ? limit : null;
+    }
+
+    [GeneratedRegex(@"prompt is too long:\s*\d+\s*tokens\s*>\s*(\d+)\s*maximum", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
+    private static partial Regex PromptTooLong();
+
+    /// <summary>An Anthropic error in plain words. Types from the API's error reference: invalid_request_error (400),
+    /// authentication_error (401), billing_error (402), permission_error (403), not_found_error (404), request_too_large (413),
+    /// rate_limit_error (429), api_error (500), overloaded_error (529). Rate limits and overload are waited out (not
+    /// permanent); the rest can't be.</summary>
+    public static ProviderErrorExplanation? Explain(int status, string body, string model)
+    {
+        var (type, message) = Parse(body);
+        var said = message.Length == 0 ? "" : $" Anthropic said: {TextUtil.Prefix(message, 200)}";
+        switch (type, status)
+        {
+            case ("authentication_error", _) or (_, 401):
+                return new("Anthropic didn't accept the key. Use an API key from console.anthropic.com (it starts with sk-ant-api) — a Claude Pro or Max sign-in isn't an API key.", true);
+            case ("billing_error", _) or (_, 402):
+                return new($"Your Anthropic account needs credit or a payment method: console.anthropic.com → Billing.{said}", true);
+            case ("permission_error", _) or (_, 403):
+                return new($"Anthropic doesn't allow this request with this key.{said}", true);
+            case ("not_found_error", _) or (_, 404):
+                return new($"Anthropic doesn't offer `{model}` to this key. Pick another model, such as claude-opus-5-5, claude-sonnet-5-5 or claude-haiku-5-5.", true);
+            case ("rate_limit_error", _) or (_, 429):
+                return new($"Anthropic's rate limit for this key was reached; Vision waits and tries again.{said}", false);
+            case ("overloaded_error", _) or (_, 529):
+                return new("Anthropic is overloaded right now; Vision waits and tries again.", false);
             default:
                 return null;
         }

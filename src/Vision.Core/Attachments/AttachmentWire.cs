@@ -42,9 +42,26 @@ public sealed record AttachmentRoute
         MaxDocumentBytes = 4_500_000,
     };
 
+    /// <summary>Anthropic's Messages API: base64 images in its four formats, and PDFs as document blocks. Limits kept under
+    /// the API's (5 MB an image, 32 MB a request once base64 has grown it by a third).</summary>
+    public static AttachmentRoute Anthropic(ProviderProfile profile) => new()
+    {
+        Vision = profile.Vision ?? true,
+        Documents = BedrockModels.Traits(profile.Model).Documents,
+        ImageTypes = new HashSet<string>(StringComparer.Ordinal) { "image/png", "image/jpeg", "image/gif", "image/webp" },
+        MaxImages = 20,
+        MaxImageBytes = 3_750_000,
+        MaxDocuments = 5,
+        MaxDocumentBytes = 10_000_000,
+    };
+
     /// <summary>The route a profile is served on.</summary>
-    public static AttachmentRoute Of(ProviderProfile profile) =>
-        profile.Kind == ProviderKind.Bedrock ? Bedrock(profile, BedrockModels.Traits(profile.Model)) : OpenAi(profile);
+    public static AttachmentRoute Of(ProviderProfile profile) => profile.Kind switch
+    {
+        ProviderKind.Bedrock => Bedrock(profile, BedrockModels.Traits(profile.Model)),
+        ProviderKind.Anthropic => Anthropic(profile),
+        _ => OpenAi(profile),
+    };
 }
 
 /// <summary>How one attachment goes to the model — what the composer chip says after the file's summary.</summary>

@@ -7,10 +7,11 @@ public sealed class SubscriptionPlansTests
     [Fact]
     public void TheCatalogHoldsThePlansInOrder()
     {
-        Assert.Equal(["zai", "kimi-code", "moonshot-api", "openai", "qwen-coding", "qwen-api"],
+        Assert.Equal(["zai", "kimi-code", "moonshot-api", "openai", "qwen-coding", "qwen-api", "deepseek", "anthropic"],
             SubscriptionPlans.All.Select(p => p.Id));
         Assert.Equal(["Z.ai (GLM)", "Kimi Code (subscription)", "Moonshot (Kimi) — pay-as-you-go API",
-                      "OpenAI API", "Qwen — Alibaba Cloud Coding Plan", "Qwen — Model Studio pay-as-you-go"],
+                      "OpenAI API", "Qwen — Alibaba Cloud Coding Plan", "Qwen — Model Studio pay-as-you-go",
+                      "DeepSeek API", "Anthropic API (key)"],
             SubscriptionPlans.All.Select(p => p.Name));
         Assert.All(SubscriptionPlans.All, p =>
         {

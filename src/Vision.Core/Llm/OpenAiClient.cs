@@ -357,6 +357,15 @@ public sealed partial class OpenAiClient : IProviderClient
                 // Guardian's proxy says no in its own words (401 sign-in, 402 budget, 403 role, 429 slow down).
                 if (GuardianProxyRefusals.From(Profile, code, body, response.Headers) is { } refusal)
                     throw GuardianProxyRefusals.ToLlmException(refusal, body);
+                // DeepSeek (thinking, with tools) wants every earlier turn's reasoning back. When a turn's stand-in isn't taken,
+                // this one turn goes without thinking — where nothing has to come back — rather than failing the chat.
+                if (!isRetry && code == 400 && KnownProviders.Of(Profile) == KnownProvider.DeepSeek && DeepSeekErrors.WantsReasoningBack(body)
+                    && !RulesFor(request).TurnsThinkingOff(ThinkingLevelFor(request) ?? ThinkingLevel.High))
+                {
+                    _onNotice?.Invoke(DeepSeekErrors.ReasoningRetryNotice);
+                    return await RunTurnAsync(request with { Thinking = ThinkingLevel.Off }, onText, onReasoning, isRetry: true, cancellationToken)
+                        .ConfigureAwait(false);
+                }
                 // A chat template that rejects our effort word ("Unexpected reasoning effort high.
                 // Supported types are xhigh (default), medium, and low.") — learn the nearest
                 // accepted word and retry once.
@@ -517,6 +526,7 @@ public sealed partial class OpenAiClient : IProviderClient
             KnownProvider.Zai => ZaiErrors.Explain(status, body, ZaiEndpoints.Of(Profile.BaseUrl), model),
             KnownProvider.Moonshot => KimiErrors.Explain(status, body, KnownProvider.Moonshot, model),
             KnownProvider.KimiCode => KimiErrors.Explain(status, body, KnownProvider.KimiCode, model),
+            KnownProvider.DeepSeek => DeepSeekErrors.Explain(status, body, model),
             _ => null,
         };
 
@@ -743,8 +753,8 @@ public sealed partial class OpenAiClient : IProviderClient
         var rules = RulesFor(request);
         var learned = _adaptations.Adaptation(AdaptationKey(request));
         var echo = rules.EchoReasoning || learned?.EchoReasoning == true;
-        // A stand-in is only needed while the model thinks (K2.6 with thinking switched off wants none).
-        var thinkingOff = rules.Thinking.Kind == ThinkingControlKind.Toggle && ThinkingLevelFor(request) == ThinkingLevel.Off;
+        // A stand-in is only needed while the model thinks (K2.6 or DeepSeek with thinking switched off wants none).
+        var thinkingOff = rules.TurnsThinkingOff(ThinkingLevelFor(request));
         var messages = new JsonArray();
         // Some OpenAI-compatible servers (SGLang on the DGX Spark, notably) reject any request with
         // more than one system message, or with one anywhere but index 0 — e.g. after compaction
@@ -781,12 +791,13 @@ public sealed partial class OpenAiClient : IProviderClient
                         }
                         msg["tool_calls"] = arr;
                     }
-                    // Kimi (thinking): an assistant message that called tools must carry its reasoning. One rebuilt from text
-                    // (a relaunch, compaction) no longer has it: a short stand-in keeps the request valid.
+                    // Kimi (thinking): an assistant message that called tools must carry its reasoning; DeepSeek wants every
+                    // assistant message's. One rebuilt from text (a relaunch, compaction, another model's turn) no longer has
+                    // it: a short stand-in keeps the request valid (DeepSeek refuses an empty one).
                     if (echo)
                     {
                         if (ReasoningEcho.Reasoning(m.ProviderState) is { } reasoning) msg["reasoning_content"] = reasoning;
-                        else if (m.ToolCalls is { Count: > 0 } && !thinkingOff) msg["reasoning_content"] = ReasoningEcho.Placeholder;
+                        else if ((m.ToolCalls is { Count: > 0 } || rules.EchoReasoningEveryTurn) && !thinkingOff) msg["reasoning_content"] = ReasoningEcho.Placeholder;
                     }
                     messages.Add(msg);
                     break;
@@ -931,6 +942,9 @@ public sealed partial class OpenAiClient : IProviderClient
                 if (effort is not null) body["reasoning_effort"] = effort;
                 break;
             case ThinkingControlKind.Effort:
+                // DeepSeek: thinking on or off beside the effort word (Off sends "disabled" and no word).
+                if (rules.Thinking.WithToggle)
+                    body["thinking"] = new JsonObject { ["type"] = rules.TurnsThinkingOff(level) ? "disabled" : "enabled" };
                 // A model that always thinks is never told not to (that fails the request): only how hard.
                 if (effort is not null)
                 {
@@ -1081,6 +1095,8 @@ public static class FallbackContextWindow
         ["glm-5.3"] = 1_000_000, ["kimi-for-coding"] = 1_000_000, ["k3-256k"] = 262_144, ["k3"] = 1_000_000,
         // Moonshot's platform (platform.kimi.ai/docs/models, 2026-10-18).
         ["kimi-k3"] = 1_000_000, ["kimi-k2.7-code"] = 262_144, ["kimi-k2.7-code-highspeed"] = 262_144, ["kimi-k2.6"] = 262_144,
+        // DeepSeek's API (api-docs.deepseek.com, 2026-10-19): both 1M.
+        ["deepseek-v4-pro"] = 1_000_000, ["deepseek-flash"] = 1_000_000, ["deepseek-v4-flash"] = 1_000_000,
     };
 
     /// <summary>Prefix rules on the base name, checked after the exact table.</summary>
@@ -1093,7 +1109,7 @@ public static class FallbackContextWindow
         ("qwen3.5", 262_144), ("qwen3.6", 262_144), ("qwen3.7", 262_144), ("qwen3.8", 262_144),
         ("qwen3.9", 262_144), ("qwen3-next", 262_144), ("qwen3-coder", 262_144),
         ("qwen3", 32_768), ("qwen2.5", 32_768), ("qwen2-72b", 131_072),
-        ("deepseek-r1", 65_536), ("deepseek-v3", 131_072), ("deepseek", 65_536),
+        ("deepseek-r1", 65_536), ("deepseek-v3", 131_072), ("deepseek-v4", 1_000_000), ("deepseek-flash", 1_000_000), ("deepseek", 65_536),
         ("gpt-4o", 128_000), ("gpt-4.1", 1_048_576), ("gpt-4", 128_000),
         ("claude-3.5", 200_000), ("claude-3", 100_000), ("claude-", 200_000),
         ("mistral-large", 131_072), ("mistral-small", 131_072),
@@ -1109,6 +1125,8 @@ public static class FallbackContextWindow
         // vendor and Region prefixes the tables below don't expect.
         if (BedrockModels.ContextWindow(modelId) is { } bedrock) return bedrock;
         var baseName = modelId.Split('/')[^1].ToLowerInvariant();
+        // Anthropic's own ids ("claude-opus-5-5", "claude-haiku-4-5"): the same table as Bedrock's (1M from Claude 4.6 on).
+        if (baseName.StartsWith("claude-", StringComparison.Ordinal) && BedrockModels.Traits(baseName).ContextWindow is { } claude) return claude;
         if (Exact.TryGetValue(baseName, out var hit)) return hit;
         var noTag = baseName.Split(':')[0];
         foreach (var (prefix, limit) in Prefixes)

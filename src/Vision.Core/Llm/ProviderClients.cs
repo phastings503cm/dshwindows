@@ -2,8 +2,9 @@ namespace Vision.Core;
 
 // MARK: - Provider clients
 //
-// Every configured route is served by one of two clients: Bedrock profiles by BedrockClient (the
-// Converse API, SigV4 or a Bedrock API key), everything else by OpenAiClient (chat completions). The
+// Every configured route is served by one of three clients: Bedrock profiles by BedrockClient (the
+// Converse API, SigV4 or a Bedrock API key), Anthropic API-key profiles by AnthropicClient (the Messages
+// API), everything else by OpenAiClient (chat completions — DeepSeek and Guardian's proxy included). The
 // app asks for a client here instead of choosing one itself — and gets it wrapped in the privacy shield
 // (see ShieldedClient) when the route isn't private and the shield is on.
 
@@ -37,6 +38,7 @@ public static class ProviderClients
 
     private static IProviderClient Raw(ProviderProfile profile, HttpMessageHandler? handler, Action<string>? notice)
     {
+        if (profile.Kind == ProviderKind.Anthropic) return new AnthropicClient(profile, handler, notice);
         if (profile.Kind != ProviderKind.Bedrock) return new OpenAiClient(profile, handler, onNotice: notice);
         var usesApiKey = profile.AwsProfile is null && !string.IsNullOrEmpty(profile.ApiKey);
         return new BedrockClient(profile, usesApiKey ? null : AwsCredentials?.Invoke(profile), handler);

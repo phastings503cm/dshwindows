@@ -185,9 +185,11 @@ public static partial class ParameterRejection
         if (status is not (400 or 422)) return null;
         var lower = Text(body).ToLowerInvariant();
 
-        // Kimi: "thinking is enabled but reasoning_content is missing" (an assistant tool-call message without it).
+        // Kimi: "thinking is enabled but reasoning_content is missing" (an assistant tool-call message without it); DeepSeek
+        // served elsewhere: "The `reasoning_content` in the thinking mode must be passed back to the API."
         if (lower.Contains("reasoning_content", StringComparison.Ordinal)
-            && (lower.Contains("missing", StringComparison.Ordinal) || lower.Contains("required", StringComparison.Ordinal)))
+            && (lower.Contains("missing", StringComparison.Ordinal) || lower.Contains("required", StringComparison.Ordinal)
+                || lower.Contains("passed back", StringComparison.Ordinal)))
             return new RequestChange.EchoReasoning();
         // Structured errors name the parameter: OpenAI's {"error":{"param":"max_tokens"}}, FastAPI/vLLM's
         // {"detail":[{"loc":["body","chat_template_kwargs"]}]}.

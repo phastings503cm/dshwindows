@@ -154,7 +154,7 @@ public static class BedrockConverse
 
     private sealed record Turn(string Role, JsonArray Content);
 
-    private const string InterruptedCall = "Not run — the turn was interrupted before this call executed.";
+    internal const string InterruptedCall = "Not run — the turn was interrupted before this call executed.";
 
     private static List<Turn> Turns(IReadOnlyList<LlmMessage> messages, BedrockModelTraits traits, bool replay, AttachmentRoute route)
     {
@@ -408,7 +408,7 @@ public static class BedrockConverse
     }
 
     /// <summary>Tool input as a JSON object: a non-object value is wrapped, unparseable text becomes {}.</summary>
-    private static JsonObject InputObject(string arguments)
+    internal static JsonObject InputObject(string arguments)
     {
         try
         {
@@ -426,7 +426,7 @@ public static class BedrockConverse
     }
 
     /// <summary>A tool's parameter schema, or an empty object schema when it isn't one.</summary>
-    private static JsonObject Schema(string parameters)
+    internal static JsonObject Schema(string parameters)
     {
         try
         {
@@ -436,7 +436,7 @@ public static class BedrockConverse
         return new JsonObject { ["type"] = "object", ["properties"] = new JsonObject() };
     }
 
-    private static string? ImageFormat(string mime) => mime switch
+    internal static string? ImageFormat(string mime) => mime switch
     {
         "image/png" => "png",
         "image/jpeg" => "jpeg",

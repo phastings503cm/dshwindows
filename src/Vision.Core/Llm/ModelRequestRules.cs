@@ -18,6 +18,11 @@ namespace Vision.Core;
 //   - Z.ai: docs.z.ai/api-reference/llm/chat-completion (GLM-5.3: thinking only enabled, reasoning_effort low/high/max;
 //     GLM-5.2: none/minimal skip thinking, low/medium → high, xhigh → max; reasoning_effort is GLM-5.2 and later only;
 //     temperature [0, 1]; max_tokens ≤ 131072; tool_choice "auto" only; text models take string content), /api-code
+//   - DeepSeek (2026-10-19): api-docs.deepseek.com, /quick_start/pricing, /guides/thinking_mode (deepseek-v4-pro and
+//     deepseek-flash, 1M context, at most 384K output; thinking on by default, switched with thinking.type enabled|disabled,
+//     reasoning_effort low/high/max (medium → high, xhigh → high); temperature has no effect while thinking; with tools,
+//     every earlier assistant turn's reasoning_content must come back or the API answers 400; Flash reads images, V4 Pro
+//     doesn't; deepseek-v4-flash is the retired name of deepseek-flash)
 // Vision for macOS carries the same table (same ids, same rules): ModelRequestRules.swift.
 
 /// <summary>The services whose rules Vision knows, recognised by address.</summary>
@@ -30,6 +35,10 @@ public enum KnownProvider
     /// <summary>Z.ai / BigModel (api.z.ai, open.bigmodel.cn): GLM models, general and Coding Plan endpoints.</summary>
     Zai,
     OpenAI,
+    /// <summary>DeepSeek's API (api.deepseek.com): deepseek-v4-pro, deepseek-flash.</summary>
+    DeepSeek,
+    /// <summary>Anthropic's API (api.anthropic.com), reached through the Messages API client.</summary>
+    Anthropic,
     Other,
 }
 
@@ -42,6 +51,8 @@ public static class KnownProviders
         KnownProvider.KimiCode => "Kimi Code",
         KnownProvider.Zai => "Z.ai",
         KnownProvider.OpenAI => "OpenAI",
+        KnownProvider.DeepSeek => "DeepSeek",
+        KnownProvider.Anthropic => "Anthropic",
         _ => "The model server",
     };
 
@@ -57,6 +68,8 @@ public static class KnownProviders
             return url.AbsolutePath.Contains("/coding", StringComparison.OrdinalIgnoreCase) ? KnownProvider.KimiCode : KnownProvider.Moonshot;
         if (Under("z.ai") || Under("bigmodel.cn")) return KnownProvider.Zai;
         if (Under("openai.com")) return KnownProvider.OpenAI;
+        if (Under("deepseek.com")) return KnownProvider.DeepSeek;
+        if (Under("anthropic.com")) return KnownProvider.Anthropic;
         return KnownProvider.Other;
     }
 }
@@ -81,8 +94,10 @@ public enum ThinkingControlKind
 }
 
 /// <summary>A thinking control: its kind, and for <see cref="ThinkingControlKind.Effort"/> the words per offered level
-/// (<see cref="InTemplate"/> also puts the word in <c>chat_template_kwargs</c> — a GLM-5 on vLLM).</summary>
-public sealed record ThinkingControl(ThinkingControlKind Kind, IReadOnlyDictionary<ThinkingLevel, string>? Words = null, bool InTemplate = false)
+/// (<see cref="InTemplate"/> also puts the word in <c>chat_template_kwargs</c> — a GLM-5 on vLLM; <see cref="WithToggle"/> also
+/// sends <c>thinking: {"type": "enabled" | "disabled"}</c>, Off being "disabled" with no word — DeepSeek).</summary>
+public sealed record ThinkingControl(ThinkingControlKind Kind, IReadOnlyDictionary<ThinkingLevel, string>? Words = null, bool InTemplate = false,
+                                     bool WithToggle = false)
 {
     public static ThinkingControl Template { get; } = new(ThinkingControlKind.Template);
     public static ThinkingControl EffortField { get; } = new(ThinkingControlKind.EffortField);
@@ -90,8 +105,8 @@ public sealed record ThinkingControl(ThinkingControlKind Kind, IReadOnlyDictiona
     public static ThinkingControl AlwaysOn { get; } = new(ThinkingControlKind.AlwaysOn);
     public static ThinkingControl None { get; } = new(ThinkingControlKind.None);
 
-    public static ThinkingControl Effort(IReadOnlyDictionary<ThinkingLevel, string> words, bool inTemplate = false) =>
-        new(ThinkingControlKind.Effort, words, inTemplate);
+    public static ThinkingControl Effort(IReadOnlyDictionary<ThinkingLevel, string> words, bool inTemplate = false, bool withToggle = false) =>
+        new(ThinkingControlKind.Effort, words, inTemplate, withToggle);
 }
 
 /// <summary>What one model accepts. <see cref="For"/> looks it up.</summary>
@@ -120,6 +135,14 @@ public sealed partial record ModelRequestRules
     /// <summary>The model's reasoning must go back on the assistant messages that made tool calls (<c>reasoning_content</c>) —
     /// Kimi answers 400 "thinking is enabled but reasoning_content is missing" otherwise.</summary>
     public bool EchoReasoning { get; init; }
+    /// <summary>With <see cref="EchoReasoning"/>: every assistant message carries its reasoning, not only the ones that called
+    /// tools — DeepSeek answers 400 "The `reasoning_content` in the thinking mode must be passed back to the API" otherwise.</summary>
+    public bool EchoReasoningEveryTurn { get; init; }
+
+    /// <summary>Thinking is switched off for <paramref name="level"/> by <c>thinking.type: "disabled"</c> (a toggle, or an effort
+    /// vocabulary with a toggle beside it).</summary>
+    public bool TurnsThinkingOff(ThinkingLevel? level) =>
+        level is { } chosen && (Thinking.Kind == ThinkingControlKind.Toggle || Thinking.WithToggle) && NearestLevel(chosen) == ThinkingLevel.Off;
 
     // MARK: Thinking levels
 
@@ -165,7 +188,8 @@ public sealed partial record ModelRequestRules
     public string? EffortWord(ThinkingLevel level)
     {
         if (Thinking.Kind != ThinkingControlKind.Effort || Thinking.Words is not { } words || NearestLevel(level) is not { } nearest) return null;
-        return words.GetValueOrDefault(nearest);
+        // An empty word: the level is said by the toggle alone (DeepSeek's Off), with no reasoning_effort.
+        return words.GetValueOrDefault(nearest) is { Length: > 0 } word ? word : null;
     }
 
     /// <summary>For /think and the picker: what this model makes of a level it doesn't offer ("" when it offers it).</summary>
@@ -183,12 +207,15 @@ public sealed partial record ModelRequestRules
     public static ModelRequestRules For(ProviderProfile profile, string? model = null)
     {
         var id = Normalized(string.IsNullOrEmpty(model) ? profile.Model : model);
+        // An Anthropic route talks the Messages API wherever it points (a proxy too): its own client shapes thinking.
+        if (profile.Kind == ProviderKind.Anthropic) return AnthropicRules(id);
         return KnownProviders.Of(profile) switch
         {
             KnownProvider.Moonshot => MoonshotRules(id),
             KnownProvider.KimiCode => KimiCodeRules(id),
             KnownProvider.Zai => ZaiRules(id),
             KnownProvider.OpenAI => OpenAiRules(id),
+            KnownProvider.DeepSeek => DeepSeekRules(id),
             _ => OtherRules(profile, id),
         };
     }
@@ -284,6 +311,36 @@ public sealed partial record ModelRequestRules
         return reasoning
             ? new() { Provider = KnownProvider.OpenAI, Thinking = ThinkingControl.EffortField, SendsTemperature = false, SendsTopP = false, MaxTokensField = "max_completion_tokens" }
             : new() { Provider = KnownProvider.OpenAI, Thinking = ThinkingControl.EffortField };
+    }
+
+    /// <summary>DeepSeek's API: thinking on (the default) or off with <c>thinking.type</c>, and how hard with
+    /// <c>reasoning_effort</c> low/high/max (DeepSeek maps medium to high itself; Vision offers what it really does). With
+    /// tools — every Vision turn — each earlier assistant message must carry its <c>reasoning_content</c>. At most 384K output
+    /// tokens; Flash reads images, V4 Pro doesn't.</summary>
+    private static ModelRequestRules DeepSeekRules(string id)
+    {
+        var words = new Dictionary<ThinkingLevel, string>(LowHighMax) { [ThinkingLevel.Off] = "" };
+        return new()
+        {
+            Provider = KnownProvider.DeepSeek, Thinking = ThinkingControl.Effort(words, withToggle: true), MaxOutputTokens = 384_000,
+            AcceptsImages = id.Contains("flash", StringComparison.Ordinal) || id.Contains("vision", StringComparison.Ordinal),
+            EchoReasoning = true, EchoReasoningEveryTurn = true,
+        };
+    }
+
+    /// <summary>Anthropic's Messages API (<see cref="AnthropicClient"/>): every level is offered and the client says each the
+    /// way the model takes it (adaptive effort, a thinking budget on older models, the lowest setting where thinking can't
+    /// be switched off). Claude 4.7 and later take no temperature; the 5.5 models refuse a forced tool choice.</summary>
+    private static ModelRequestRules AnthropicRules(string id)
+    {
+        var traits = BedrockModels.Traits(id);
+        return new()
+        {
+            Provider = KnownProvider.Anthropic,
+            Thinking = traits.Thinking == ClaudeThinking.None ? ThinkingControl.None : ThinkingControl.EffortField,
+            SendsTemperature = traits.Sampling, SendsTopP = traits.Sampling, MaxOutputTokens = traits.MaxTokensCeiling,
+            ForcedToolChoice = traits.Off is not (ThinkingOff.LowEffort or ThinkingOff.BetweenTools), AcceptsImages = true,
+        };
     }
 
     /// <summary>Anything else: a server you run gets the chat-template controls, a hosted one the top-level effort. A GLM-5

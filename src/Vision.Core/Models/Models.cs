@@ -102,6 +102,10 @@ public enum ProviderKind
     /// <summary>Amazon Bedrock through its Converse API, signed with AWS credentials from the AWS CLI
     /// (<see cref="ProviderProfile.AwsProfile"/>) or a Bedrock API key.</summary>
     [JsonStringEnumMemberName("bedrock")] Bedrock,
+    /// <summary>Anthropic's Messages API with an API key (https://api.anthropic.com/v1/messages, x-api-key): Claude
+    /// directly, billed to the key's Console account. Not a Claude subscription — Pro/Max is used through the official
+    /// Claude Code app, never by sending its sign-in here.</summary>
+    [JsonStringEnumMemberName("anthropic")] Anthropic,
 }
 
 /// <summary>One configured model route: where the server is, which model, and how to talk to it.

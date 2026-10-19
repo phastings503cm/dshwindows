@@ -6,8 +6,9 @@ namespace Vision.Core;
 // MARK: - Subscription and API plans
 //
 // The hosted plans the "Connect a subscription plan" guide knows how to set up: GLM (Z.ai), Kimi (Kimi Code and
-// Moonshot), OpenAI, and Qwen (Alibaba Cloud). Each says where its API is (per region), where to get a key and
-// how, what the key looks like, which models to offer, and what its terms say. Researched October 2026.
+// Moonshot), OpenAI, Qwen (Alibaba Cloud), DeepSeek, and Anthropic's API with a key. Each says where its API is (per
+// region), where to get a key and how, what the key looks like, which models to offer, and what its terms say.
+// Researched October 2026 (DeepSeek and Anthropic on 2026-10-19: api-docs.deepseek.com; Anthropic's models overview).
 
 /// <summary>Where a plan is served: its API address and the page that hands out keys. For Z.ai the "regions" are its four
 /// endpoints: <paramref name="RouteName"/> names the saved route, <paramref name="Detail"/> is the line under the picker, and
@@ -80,6 +81,8 @@ public sealed record SubscriptionPlan
         var trimmed = key.Trim();
         if (trimmed.Length == 0) return null;
         if (trimmed.Any(char.IsWhiteSpace)) return "The key has a space or a line break in it — copy it again, just the key.";
+        if (Id == SubscriptionPlans.Anthropic && !trimmed.StartsWith("sk-ant-", StringComparison.Ordinal) && trimmed.StartsWith("sk-", StringComparison.Ordinal))
+            return "That looks like another service's key (OpenAI and DeepSeek keys start with sk-). Anthropic keys start with sk-ant-api.";
         if (KeyPrefix is { } prefix && !trimmed.StartsWith(prefix, StringComparison.Ordinal))
         {
             if (Id == SubscriptionPlans.QwenCoding && trimmed.StartsWith("sk-", StringComparison.Ordinal))
@@ -90,6 +93,12 @@ public sealed record SubscriptionPlan
             return "That's a Coding Plan key (it starts with sk-sp-). Choose \"Qwen — Alibaba Cloud Coding Plan\" for it, or use a pay-as-you-go key here.";
         if (Id == SubscriptionPlans.Zai && trimmed.StartsWith("sk-", StringComparison.Ordinal))
             return "That looks like another service's key. Z.ai keys come from z.ai (or open.bigmodel.cn) and don't start with sk-.";
+        if (Id == SubscriptionPlans.Anthropic && trimmed.StartsWith("sk-ant-oat", StringComparison.Ordinal))
+            return "That's a Claude subscription sign-in (sk-ant-oat…), not an API key. A Pro or Max subscription works through Claude Code; the API needs a key from console.anthropic.com (sk-ant-api…).";
+        if (Id == SubscriptionPlans.Anthropic && trimmed.StartsWith("sk-ant-admin", StringComparison.Ordinal))
+            return "That's an Admin key (sk-ant-admin…), which can't send messages. Make a regular API key (sk-ant-api…) on the same page.";
+        if (Id == SubscriptionPlans.DeepSeek && trimmed.StartsWith("sk-ant-", StringComparison.Ordinal))
+            return "That's an Anthropic key. DeepSeek keys come from platform.deepseek.com.";
         return null;
     }
 }
@@ -106,6 +115,8 @@ public static partial class SubscriptionPlans
     public const string OpenAi = "openai";
     public const string QwenCoding = "qwen-coding";
     public const string QwenApi = "qwen-api";
+    public const string DeepSeek = "deepseek";
+    public const string Anthropic = "anthropic";
 
     public const string International = "intl";
     public const string China = "china";
@@ -265,6 +276,57 @@ public static partial class SubscriptionPlans
             ListsModels = true,
             Note = "Billed per token.",
         },
+        // DeepSeek (api-docs.deepseek.com, 2026-10-19): deepseek-v4-pro and deepseek-flash (DeepSeek-V4.1-Flash), both 1M
+        // context and up to 384K output, thinking on by default; Flash reads images. OpenAI-compatible at the bare host.
+        new()
+        {
+            Id = DeepSeek, Provider = "DeepSeek", Name = "DeepSeek API",
+            Summary = "DeepSeek V4 Pro and V4.1 Flash with 1M context, billed per token from prepaid balance.",
+            Regions = [new(International, "International", "https://api.deepseek.com", "https://platform.deepseek.com/api_keys")],
+            KeySteps =
+            [
+                "Sign in at platform.deepseek.com and top up your balance (Top up).",
+                "Open the API keys page — the button below does it.",
+                "Create a new API key.",
+                "Copy it. It's shown only once, so paste it into Vision straight away.",
+            ],
+            KeyHint = "Starts with sk-.",
+            KeyPrefix = "sk-",
+            Models =
+            [
+                new("deepseek-v4-pro", "1M context · thinks", 1_000_000),
+                new("deepseek-flash", "1M context · faster, cheaper, reads images", 1_000_000),
+            ],
+            ListsModels = true,
+            Note = "Prepaid balance; prices are lower off-peak. Thinking is on by default — Off in the chat's thinking menu answers fastest.",
+        },
+        // Anthropic's API with a key (the Messages API). A Claude Pro/Max subscription is not an API key: it is used through the
+        // official Claude Code app, never by lifting its sign-in.
+        new()
+        {
+            Id = Anthropic, Provider = "Anthropic", Name = "Anthropic API (key)",
+            Summary = "Claude Opus 5.5, Sonnet 5.5, Haiku 5.5 and Fable 5.1 directly from Anthropic, billed per token.",
+            Regions = [new(International, "International", "https://api.anthropic.com", "https://console.anthropic.com/settings/keys")],
+            KeySteps =
+            [
+                "Sign in at console.anthropic.com and add credit or a payment method (Billing).",
+                "Open the API keys page — the button below does it.",
+                "Create a key.",
+                "Copy it. It's shown only once, so paste it into Vision straight away.",
+            ],
+            KeyHint = "Starts with sk-ant-api.",
+            KeyPrefix = "sk-ant-",
+            Models =
+            [
+                new("claude-opus-5-5", "1M context · the default Opus", 1_000_000),
+                new("claude-sonnet-5-5", "1M context · fast everyday coding", 1_000_000),
+                new("claude-haiku-5-5", "1M context · quickest, cheapest", 1_000_000),
+                new("claude-fable-5-1", "1M context · most capable, priciest", 1_000_000),
+            ],
+            ListsModels = true,
+            Kind = ProviderKind.Anthropic,
+            TermsNote = "A Claude Pro or Max subscription doesn't include API access: the API is billed separately at console.anthropic.com. To use your subscription, connect Claude Code instead.",
+        },
     ];
 
     public static SubscriptionPlan? Find(string? id)
@@ -333,6 +395,8 @@ public static partial class SubscriptionPlans
         if (plan.Id is KimiCode or MoonshotApi
             && KimiErrors.Explain(status, body, plan.Id == KimiCode ? KnownProvider.KimiCode : KnownProvider.Moonshot, model) is { } kimi)
             return kimi.Message;
+        if (plan.Id == DeepSeek && DeepSeekErrors.Explain(status, body, model) is { } deepSeek) return deepSeek.Message;
+        if (plan.Id == Anthropic && AnthropicErrors.Explain(status, body, model) is { } anthropic) return anthropic.Message;
         var lower = body.ToLowerInvariant();
         switch (status)
         {
