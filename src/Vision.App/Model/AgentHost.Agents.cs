@@ -97,7 +97,9 @@ public sealed partial class AgentHost
             var primary = Config.Providers.FirstOrDefault(p => p.RouteId == Config.ActiveRoute);
             var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             if (primary is not null) seen.Add(MachineOf(primary));
-            return Config.Providers.Where(p => p.IsEnabled && p.SubagentWorker && p.RouteId != Config.ActiveRoute && seen.Add(MachineOf(p))).ToList();
+            // Claude Code answers chats only: it is never a subagent server.
+            return Config.Providers.Where(p => p.IsEnabled && p.SubagentWorker && !ClaudeCodeRoutes.IsClaudeCode(p) && p.RouteId != Config.ActiveRoute
+                                               && seen.Add(MachineOf(p))).ToList();
         }
     }
 

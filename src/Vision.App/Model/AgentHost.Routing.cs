@@ -55,6 +55,8 @@ public sealed partial class AgentHost
     {
         var primary = MakeClient(profile, sessionId);
         var backups = BackupRoutes(profile.RouteId).Where(b => !b.IsInteractiveOnly || !IsUnattended(sessionId)).ToList();
+        // A Sensitive chat falls over only to models it may use.
+        if (Session(sessionId) is { Sensitive: true }) backups = SensitivityPolicy.AdmittedBackups(backups, ShieldOn).ToList();
         if (backups.Count == 0) return primary;
         return new FailoverClient(primary, backups.Select(b => MakeClient(b, sessionId)).ToList(),
             notice => _dispatcher.BeginInvoke(DispatcherPriority.Normal, () => OnFailover(sessionId, notice)));
@@ -63,7 +65,7 @@ public sealed partial class AgentHost
     /// <summary>The enabled backups for a chat on <paramref name="routeId"/> (that route itself left out), in list order, with
     /// their keys.</summary>
     private IReadOnlyList<ProviderProfile> BackupRoutes(string? routeId) =>
-        RouteRoster.Backups(Config.Providers, routeId).Select(route =>
+        RouteRoster.Backups(Config.Providers, routeId).Where(route => !ClaudeCodeRoutes.IsClaudeCode(route)).Select(route =>
         {
             var copy = route.DeepCopy();
             var key = Config.ApiKey(route);

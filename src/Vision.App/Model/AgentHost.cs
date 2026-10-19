@@ -102,6 +102,8 @@ public sealed partial class AgentHost : ObservableObject
             OnPropertyChanged(nameof(RunningCount));
         };
         InitChatRoutes();
+        // Claude Code chats run the claude program Settings › Claude Code names (or the one found on PATH).
+        ClaudeCodeClient.ConfiguredPath = config.ClaudeCodePath;
         Reload();
         // Skills that ship with the app (godot-debugging) are kept current on every launch.
         try
@@ -284,6 +286,7 @@ public sealed partial class AgentHost : ObservableObject
                 // The chat's own model and thinking level (null in a chat from before they were stored).
                 RouteId = row.Route,
                 Thinking = ThinkingLevels.FromRaw(row.Thinking),
+                Sensitive = row.Sensitive == true,
             };
             Sessions.Add(vm);
         }
@@ -798,6 +801,10 @@ public sealed partial class AgentHost : ObservableObject
                 AgentsCommand(vm);
                 break;
 
+            case SlashCommand.Sensitive sensitive:
+                SensitiveCommand(sensitive.Argument, vm);
+                break;
+
             case SlashCommand.Goal goal:
                 if (goal.Text.Trim().ToLowerInvariant() is "stop" or "cancel" or "off" or "clear" or "drop" or "forget")
                 {
@@ -893,6 +900,12 @@ public sealed partial class AgentHost : ObservableObject
             if (await ResolveRouteAsync(vm) is not { } profile)
             {
                 vm.Note(LlmException.NoModel().Message, MessageRole.Error);
+                return;
+            }
+            // Claude Code keeps its own session: it compacts that.
+            if (ClaudeCodeRoutes.IsClaudeCode(profile))
+            {
+                await ClaudeCodeCompactAsync(vm, profile, focus, ct);
                 return;
             }
             var prompt = _systemPrompts.GetValueOrDefault(sessionId) ?? _basePrompt;
@@ -1060,9 +1073,24 @@ public sealed partial class AgentHost : ObservableObject
         RequireGuardianSignIn(vm);
         var profile = await ResolveRouteAsync(vm) ?? throw LlmException.NoModel();
         ct.ThrowIfCancellationRequested();
+        // A Sensitive chat never sends to a model it may not use (Claude Code reads files itself; an online model with the
+        // shield off would see everything): the message stays in the chat, marked as not delivered.
+        if (SensitivityRefusal(vm, profile) is { } refusal)
+        {
+            MarkUndelivered(vm, userEntryId);
+            throw new SensitivityRefusalException(refusal);
+        }
         // What this turn runs on, for its timeline row and the activity menu.
         vm.TurnModel = profile.Model;
         vm.TurnRoute = RouteLabel(profile);
+        // Claude Code runs the turn itself, with its own agent loop and tools (AgentHost.ClaudeCode.cs).
+        if (ClaudeCodeRoutes.IsClaudeCode(profile)) return await ClaudeCodeTurnAsync(vm, modelText, attachments, profile, userEntryId, ct);
+        if (_claudeChats.Remove(sessionId) && !_engineKeys.ContainsKey(sessionId))
+        {
+            var moved = $"This chat now uses {RouteLabel(profile)} — `{profile.Model}`.";
+            vm.Note(moved);
+            Log.RecordItem(sessionId, "notice", moved);
+        }
         var window = ContextLimit(profile);
         var thinking = vm.Thinking;
         var skillState = BuildSkillState(vm);
@@ -1164,6 +1192,7 @@ public sealed partial class AgentHost : ObservableObject
     {
         profile ??= Config.ActiveProvider;
         if (profile is null) return Core.AttachmentRoute.TextOnly;
+        if (ClaudeCodeRoutes.IsClaudeCode(profile)) return ClaudeCodeAttachments;
         var route = Core.AttachmentRoute.Of(profile);
         return VisionOn(profile) ? route : route with { Vision = false };
     }

@@ -179,6 +179,9 @@ public sealed partial class SessionVM : ObservableObject
     /// two chats in two projects never share a model by accident. Null = not chosen yet (it takes the primary when it next
     /// sends, and keeps it). Set through <see cref="AgentHost.SetChatRoute"/>.</summary>
     [ObservableProperty] private string? _routeId;
+    /// <summary>The chat is Sensitive: only private models, or others through the shield (see <see cref="SensitivityPolicy"/>);
+    /// engines that read files themselves (Claude Code) are refused. Stored with the conversation; set with /sensitive.</summary>
+    [ObservableProperty] private bool _sensitive;
     /// <summary>The model's live reasoning for the current step (not persisted).</summary>
     [ObservableProperty] private string _reasoning = "";
     [ObservableProperty] private DateTimeOffset? _reasoningStarted;

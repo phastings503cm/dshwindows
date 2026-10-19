@@ -31,4 +31,10 @@
     <Using Include="Xunit" />
   </ItemGroup>
 
+  <ItemGroup>
+    <!-- Claude Code chats replay the real CLI's captures through the same scripted process the core tests use. -->
+    <None Include="..\Vision.Core.Tests\Fixtures\ClaudeCode\**" LinkBase="Fixtures\ClaudeCode" CopyToOutputDirectory="PreserveNewest" />
+    <Compile Include="..\Vision.Core.Tests\TestSupport\ScriptedClaudeProcess.cs" Link="TestSupport\ScriptedClaudeProcess.cs" />
+  </ItemGroup>
+
 </Project>

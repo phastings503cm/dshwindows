@@ -98,6 +98,8 @@ public sealed partial class AppConfig : ObservableObject
     /// <summary>The one-time notice about bringing in Claude Code and Cursor has been shown or used, so it
     /// doesn't come back.</summary>
     [ObservableProperty] private bool _externalImportOffered;
+    /// <summary>Settings › Claude Code: the claude program to run ("" = look on PATH and where its installers put it).</summary>
+    [ObservableProperty] private string _claudeCodePath = "";
 
     /// <summary>The one Swapper of versions before several boxes (Settings › DGX Spark). Read once to make the first
     /// <see cref="SwapperConnections"/> entry, and written back unchanged, so an older version still finds it.</summary>
@@ -539,6 +541,7 @@ public sealed partial class AppConfig : ObservableObject
         public bool? GuardianPromptSync { get; set; }
         public int? SkillSources { get; set; }
         public bool? ExternalImportOffered { get; set; }
+        public string? ClaudeCodePath { get; set; }
         public List<string>? DisabledSkills { get; set; }
         public Dictionary<string, SessionSkillSelection>? SessionSkills { get; set; }
         public Dictionary<string, CodeState>? CodeStates { get; set; }
@@ -601,6 +604,7 @@ public sealed partial class AppConfig : ObservableObject
             GuardianPromptSync = stored?.GuardianPromptSync ?? true;
             SkillSourcesRaw = stored?.SkillSources ?? (int)SkillSources.All;
             ExternalImportOffered = stored?.ExternalImportOffered ?? false;
+            ClaudeCodePath = stored?.ClaudeCodePath ?? "";
             foreach (var id in stored?.DisabledSkills ?? []) DisabledSkills.Add(id);
             foreach (var (k, v) in stored?.SessionSkills ?? []) SessionSkills[k] = v;
             foreach (var (k, v) in stored?.CodeStates ?? []) CodeStates[k] = v;
@@ -763,6 +767,7 @@ public sealed partial class AppConfig : ObservableObject
             GuardianPromptSync = GuardianPromptSync ? null : false,
             SkillSources = SkillSourcesRaw,
             ExternalImportOffered = ExternalImportOffered,
+            ClaudeCodePath = ClaudeCodePath.Length == 0 ? null : ClaudeCodePath,
             DisabledSkills = DisabledSkills.OrderBy(s => s, StringComparer.Ordinal).ToList(),
             SessionSkills = new Dictionary<string, SessionSkillSelection>(SessionSkills),
             CodeStates = new Dictionary<string, CodeState>(CodeStates),
