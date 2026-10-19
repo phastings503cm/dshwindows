@@ -329,13 +329,13 @@ public sealed partial class GuardianService : ObservableObject
         _ = _dispatcher.BeginInvoke(() => Report(error));
     }
 
-    /// <summary>Show a refusal as a dialog — the same one again within two minutes only once (a queue retrying, several
-    /// chats at once).</summary>
+    /// <summary>Show a refusal as a dialog — the same one again within 30 seconds only once (a queue retrying, several chats
+    /// at once). The Mac's rule: the same status, error, reason, need and message.</summary>
     public void Report(GuardianError error)
     {
         if (!error.IsRefusal) return;
-        var key = $"{error.Status}|{error.Code}|{error.Reason}|{error.Needed}";
-        if (key == _lastDialogKey && DateTimeOffset.Now - _lastDialog < TimeSpan.FromMinutes(2)) return;
+        var key = $"{error.Status}|{error.Code}|{error.Reason}|{error.Needed}|{error.Message}";
+        if (key == _lastDialogKey && DateTimeOffset.Now - _lastDialog < TimeSpan.FromSeconds(30)) return;
         _lastDialogKey = key;
         _lastDialog = DateTimeOffset.Now;
         Refused?.Invoke(error);
