@@ -66,6 +66,24 @@ public sealed class PlainChatTests : IDisposable
     }
 
     [Fact]
+    public void AScratchFolderRecordedUnderAPortableDshsDataFolderIsStillAChatWithoutAProject()
+    {
+        // Legacy: a portable DSH kept scratch folders in <its folder>\DSH\data\Chats. A user who moved that data folder
+        // into Vision's by hand still has chats recorded there: they work in the same folder under Vision's.
+        using var usb = new TempDirectory("vision-usb");
+        var legacy = Path.Combine(usb.Path, "DSH", "data", "Chats", "1234");
+        Assert.True(PlainChat.IsScratch(legacy));
+        Assert.True(PlainChat.IsScratch(Path.Combine(legacy, "notes")));
+        Assert.False(PlainChat.IsScratch(Path.Combine(usb.Path, "DSH", "data", "Chats"))); // the root itself is no chat's
+        Assert.False(PlainChat.IsScratch(Path.Combine(usb.Path, "DSH", "data", "skills", "Chats", "1234")));
+        Assert.False(PlainChat.IsScratch(Path.Combine(usb.Path, "DSH2", "data", "Chats", "1234")));
+        Assert.False(PlainChat.IsScratch(Path.Combine(usb.Path, "code", "data", "Chats", "1234")));
+
+        Assert.Equal(PlainChat.Folder("1234"), PlainChat.InCurrentRoot(legacy));
+        Assert.Equal(Path.Combine(PlainChat.Folder("1234"), "notes"), PlainChat.InCurrentRoot(Path.Combine(legacy, "notes")));
+    }
+
+    [Fact]
     public void AScratchFolderIsMadeOnFirstUseAndDeletedWithTheChat()
     {
         var folder = PlainChat.Folder("chat-1");

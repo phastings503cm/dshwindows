@@ -78,6 +78,40 @@ public static class AppPaths
         return PortableRootFor(legacyProgram) is { } data && Directory.Exists(data) ? data : null;
     }
 
+    /// <summary>Legacy: the program file of DSH (Vision's former name). A portable DSH kept its data folder beside it.</summary>
+    public const string LegacyExeName = "DSH.exe";
+
+    /// <summary>Legacy: whether the folder this copy runs on can also be the data folder of DSH (Vision's former
+    /// name), which runs under its own single-instance name, so the two could run at once and overwrite each other's
+    /// settings, chats and task list. See <see cref="MayShareWithLegacyApp(string, string, string?)"/>.</summary>
+    public static bool MayShareWithLegacyApp() =>
+        MayShareWithLegacyApp(Root, AppContext.BaseDirectory, Environment.GetEnvironmentVariable(LegacyHomeVariable));
+
+    /// <summary>Legacy: whether <paramref name="root"/> can be a folder DSH (Vision's former name) works in: its own
+    /// %APPDATA%\DSH (Vision runs there for a session when bringing it over failed, or VISION_HOME names it), the folder
+    /// <paramref name="legacyHome"/> (DSH_HOME, which DSH read too) names, the data folder of a portable DSH beside
+    /// this portable copy, or this portable copy's own data folder when it was unpacked into a portable DSH's folder
+    /// (DSH.exe beside Vision.exe, one data folder for both).</summary>
+    public static bool MayShareWithLegacyApp(string root, string programFolder, string? legacyHome)
+    {
+        var candidates = new List<string?> { LegacyDefaultRoot, legacyHome, LegacyPortableRootFor(programFolder) };
+        if (File.Exists(Path.Combine(programFolder, LegacyExeName))) candidates.Add(PortableRootFor(programFolder));
+        return candidates.Any(candidate => !string.IsNullOrWhiteSpace(candidate) && SameFolder(candidate, root));
+    }
+
+    private static bool SameFolder(string a, string b)
+    {
+        try
+        {
+            return string.Equals(Path.TrimEndingDirectorySeparator(Path.GetFullPath(a)), Path.TrimEndingDirectorySeparator(Path.GetFullPath(b)),
+                OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal);
+        }
+        catch (Exception ex) when (ex is ArgumentException or NotSupportedException or PathTooLongException)
+        {
+            return false;
+        }
+    }
+
     public static string Settings => Path.Combine(Root, "settings.json");
     public static string Conversations => Path.Combine(Root, "conversations");
     public static string Plugins => Path.Combine(Root, "plugins");

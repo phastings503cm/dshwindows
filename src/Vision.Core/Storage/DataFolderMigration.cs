@@ -20,6 +20,11 @@ namespace Vision.Core;
 //    folder, the folder of each chat without a project (its scratch folder), task lists' folders. Each file is
 //    rewritten whole (temp file, then rename) and only when a path changes, so running it again changes nothing.
 // 4. The marker's state becomes "done", last of all. Nothing is ever deleted that isn't a copy this class made.
+//
+// When there is nothing to bring over (a new user, or a launch after the move), Settle records that the folder is
+// Vision's own with a "done" marker, so an old DSH folder that turns up later (an old copy run once, a restore from a
+// backup) never displaces it. If the folder's paths still name an old folder because its data was moved over by hand,
+// Settle rewrites them first.
 
 /// <summary>How bringing the old data folder over went.</summary>
 public enum DataMigrationResult
@@ -34,6 +39,9 @@ public enum DataMigrationResult
     Copied,
     /// <summary>It couldn't be brought over; nothing was changed (see <see cref="DataMigrationOutcome.Problem"/>).</summary>
     Failed,
+    /// <summary>Nothing to bring over, but the folder's data had been moved here from the old folder by hand: the paths
+    /// it kept of its old place were rewritten (<see cref="DataFolderMigration.Settle"/>).</summary>
+    Adopted,
 }
 
 /// <summary>The result of <see cref="DataFolderMigration.Run"/>.</summary>
@@ -58,10 +66,17 @@ public sealed record DataMigrationMarker
     public const string Rewriting = "rewriting";
     public const string Done = "done";
 
+    public const string Moved = "moved";
+    public const string Copied = "copied";
+    /// <summary>Nothing was brought over: the folder was Vision's own from the start.</summary>
+    public const string None = "none";
+    /// <summary>Nothing was brought over, but the paths of data moved here by hand were rewritten.</summary>
+    public const string Adopted = "adopted";
+
     /// <summary><see cref="Rewriting"/> while paths are being rewritten, <see cref="Done"/> after.</summary>
     public string State { get; init; } = Rewriting;
-    /// <summary>"moved" or "copied".</summary>
-    public string Method { get; init; } = "moved";
+    /// <summary><see cref="Moved"/>, <see cref="Copied"/>, <see cref="None"/> or <see cref="Adopted"/>.</summary>
+    public string Method { get; init; } = Moved;
     /// <summary>The old folder.</summary>
     public string From { get; init; } = "";
     public DateTimeOffset StartedAt { get; init; }
@@ -71,6 +86,8 @@ public sealed record DataMigrationMarker
     /// <summary>The old folder is still there (a copy): the notice says it can be deleted.</summary>
     public bool LegacyLeft { get; init; }
     public IReadOnlyList<string>? SkippedLinks { get; init; }
+    /// <summary>A folder that was already at the new place, renamed out of the way and kept: the notice names it.</summary>
+    public string? SetAside { get; init; }
 }
 
 /// <summary>Brings an old data folder (DSH's) over to the new one (Vision's), once. See the notes at the top of
@@ -118,25 +135,28 @@ public sealed class DataFolderMigration
 
     /// <summary>Whether <see cref="Run"/> has anything to do: the old folder has something in it and the new
     /// folder's marker doesn't say done, or a step was interrupted. Cheap; the app asks before deciding whether an
-    /// old copy of the app that is still running must be closed first.</summary>
+    /// old copy of the app that is still running must be closed first. When it is false, <see cref="Settle"/>.</summary>
     public bool IsPending
     {
         get
         {
             if (ReadMarker(MarkerPath, out var unreadable) is { State: DataMigrationMarker.Done } && !unreadable) return false;
-            return Directory.Exists(MovingFolder) || File.Exists(MarkerPath) || HasEntries(LegacyRoot);
+            // An interrupted step is finished whatever is beside the folder now (a portable DSH deleted since, say).
+            if (Directory.Exists(MovingFolder) || File.Exists(MarkerPath)) return true;
+            return !SameFolder(LegacyRoot, Root) && StateOf(LegacyRoot) == FolderState.HasEntries;
         }
     }
 
-    /// <summary>Bring the old folder over (see the notes at the top of this file). Never throws for an I/O
-    /// problem: a failure comes back as <see cref="DataMigrationResult.Failed"/>, with the old folder untouched.</summary>
+    /// <summary>Bring the old folder over (see the notes at the top of this file). Never throws: a failure comes back
+    /// as <see cref="DataMigrationResult.Failed"/> with the old folder untouched (or, once the data is in place, as
+    /// Moved or Copied with <see cref="DataMigrationOutcome.Problem"/> set — the next launch finishes).</summary>
     public DataMigrationOutcome Run()
     {
         try
         {
             return RunSteps();
         }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException or InvalidDataException)
+        catch (Exception ex) when (!IsStepFault(ex))
         {
             if (Directory.Exists(MovingFolder))
                 return new DataMigrationOutcome(DataMigrationResult.Failed, LegacyRoot, Root, null,
@@ -148,8 +168,6 @@ public sealed class DataFolderMigration
 
     private DataMigrationOutcome RunSteps()
     {
-        if (string.Equals(LegacyRoot, Root, StringComparison.OrdinalIgnoreCase))
-            return new DataMigrationOutcome(DataMigrationResult.NothingToDo, LegacyRoot, Root, Root);
         var existing = ReadMarker(MarkerPath, out var unreadable);
         if (existing is { State: DataMigrationMarker.Done }) return new DataMigrationOutcome(DataMigrationResult.AlreadyDone, LegacyRoot, Root, Root);
         if (existing is not null || unreadable)
@@ -164,22 +182,23 @@ public sealed class DataFolderMigration
         {
             // A rename got as far as the staging name: that folder is the user's data, complete.
             setAside = ClearTheWay();
-            var marker = ReadMarker(Path.Combine(MovingFolder, MarkerFileName), out _) ?? NewMarker("moved", legacyLeft: false);
+            var marker = ReadMarker(Path.Combine(MovingFolder, MarkerFileName), out _) ?? NewMarker(DataMigrationMarker.Moved, legacyLeft: false, setAside);
             MoveDirectory(MovingFolder, Root);
             Step("moved-into-place");
             return Finish(marker, setAside);
         }
 
-        if (!HasEntries(LegacyRoot)) return new DataMigrationOutcome(DataMigrationResult.NothingToDo, LegacyRoot, Root, Root);
+        if (SameFolder(LegacyRoot, Root) || StateOf(LegacyRoot) != FolderState.HasEntries)
+            return new DataMigrationOutcome(DataMigrationResult.NothingToDo, LegacyRoot, Root, Root);
         setAside = ClearTheWay();
 
-        if (AllowMove && TryMove()) return Finish(NewMarker("moved", legacyLeft: false), setAside);
+        if (AllowMove && TryMove(setAside)) return Finish(NewMarker(DataMigrationMarker.Moved, legacyLeft: false, setAside), setAside);
         return Copy(setAside);
     }
 
     /// <summary>Rename the old folder to the staging name, mark it, rename it into place. False when the first
     /// rename fails (nothing changed then).</summary>
-    private bool TryMove()
+    private bool TryMove(string? setAside)
     {
         try
         {
@@ -190,7 +209,7 @@ public sealed class DataFolderMigration
             return false;
         }
         Step("moved-to-staging");
-        WriteMarker(Path.Combine(MovingFolder, MarkerFileName), NewMarker("moved", legacyLeft: false));
+        WriteMarker(Path.Combine(MovingFolder, MarkerFileName), NewMarker(DataMigrationMarker.Moved, legacyLeft: false, setAside));
         Step("marked-staging");
         MoveDirectory(MovingFolder, Root);
         Step("moved-into-place");
@@ -209,16 +228,16 @@ public sealed class DataFolderMigration
             Verify(LegacyRoot, CopyingFolder);
             Step("verified");
             WriteMarker(Path.Combine(CopyingFolder, MarkerFileName),
-                NewMarker("copied", legacyLeft: true) with { SkippedLinks = skipped.Count == 0 ? null : skipped });
+                NewMarker(DataMigrationMarker.Copied, legacyLeft: true, setAside) with { SkippedLinks = skipped.Count == 0 ? null : skipped });
             MoveDirectory(CopyingFolder, Root);
             Step("moved-into-place");
         }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidDataException)
+        catch (Exception ex) when (!IsStepFault(ex))
         {
             try { if (Directory.Exists(CopyingFolder)) Directory.Delete(CopyingFolder, recursive: true); } catch (Exception) { }
             return new DataMigrationOutcome(DataMigrationResult.Failed, LegacyRoot, Root, LegacyRoot, ex.Message, setAside);
         }
-        var marker = ReadMarker(MarkerPath, out _) ?? NewMarker("copied", legacyLeft: true);
+        var marker = ReadMarker(MarkerPath, out _) ?? NewMarker(DataMigrationMarker.Copied, legacyLeft: true, setAside);
         return Finish(marker, setAside);
     }
 
@@ -228,28 +247,31 @@ public sealed class DataFolderMigration
     private DataMigrationOutcome Finish(DataMigrationMarker marker, string? setAside)
     {
         var from = string.IsNullOrEmpty(marker.From) ? LegacyRoot : marker.From;
-        var result = marker.Method == "copied" ? DataMigrationResult.Copied : DataMigrationResult.Moved;
+        var result = marker.Method == DataMigrationMarker.Copied ? DataMigrationResult.Copied : DataMigrationResult.Moved;
+        setAside ??= marker.SetAside;
         int rewritten;
         try
         {
             rewritten = DataFolderPaths.RewriteAll(Root, from, Root);
             Step("rewritten");
-            WriteMarker(MarkerPath, marker with { State = DataMigrationMarker.Done, CompletedAt = Clock.GetUtcNow() });
+            WriteMarker(MarkerPath, marker with { State = DataMigrationMarker.Done, CompletedAt = Clock.GetUtcNow(), SetAside = setAside });
             Step("done");
         }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        catch (Exception ex) when (!IsStepFault(ex))
         {
+            // Whatever it was (a file in use, or something no one foresaw), the data is in place and the app can start.
             return new DataMigrationOutcome(result, from, Root, Root, ex.Message, setAside, 0, marker.SkippedLinks);
         }
         return new DataMigrationOutcome(result, from, Root, Root, null, setAside, rewritten, marker.SkippedLinks);
     }
 
     /// <summary>A folder already at the new place (a build of Vision that ran before this one could bring the old
-    /// folder over): an empty one is removed, anything else is renamed out of the way and kept.</summary>
+    /// folder over, or one whose marker was deleted): an empty one is removed, anything else is renamed out of the way
+    /// and kept — and named in the notice.</summary>
     private string? ClearTheWay()
     {
         if (!Directory.Exists(Root)) return null;
-        if (!HasEntries(Root))
+        if (StateOf(Root) != FolderState.HasEntries)
         {
             Directory.Delete(Root);
             return null;
@@ -262,10 +284,100 @@ public sealed class DataFolderMigration
         return target;
     }
 
-    private DataMigrationMarker NewMarker(string method, bool legacyLeft) =>
-        new() { State = DataMigrationMarker.Rewriting, Method = method, From = LegacyRoot, StartedAt = Clock.GetUtcNow(), LegacyLeft = legacyLeft };
+    private DataMigrationMarker NewMarker(string method, bool legacyLeft, string? setAside) =>
+        new() { State = DataMigrationMarker.Rewriting, Method = method, From = LegacyRoot, StartedAt = Clock.GetUtcNow(), LegacyLeft = legacyLeft, SetAside = setAside };
 
-    private void Step(string name) => AfterStep?.Invoke(name);
+    /// <summary>What <see cref="AfterStep"/> threw: it stands for the app dying at that step, so it is never caught.</summary>
+    private Exception? _stepFault;
+
+    private void Step(string name)
+    {
+        try
+        {
+            AfterStep?.Invoke(name);
+        }
+        catch (Exception ex)
+        {
+            _stepFault = ex;
+            throw;
+        }
+    }
+
+    private bool IsStepFault(Exception ex) => ReferenceEquals(ex, _stepFault);
+
+    // MARK: - Nothing to bring over
+
+    /// <summary>When <see cref="IsPending"/> is false: record, with a "done" marker, that this folder is Vision's own,
+    /// so an old folder that turns up later (an old copy of DSH run once, a restore from a backup) never displaces
+    /// it. When the folder has no marker yet but holds data whose paths still name the old folder — moved over by
+    /// hand rather than by <see cref="Run"/> — those paths are rewritten first. Never throws; when the old folder
+    /// can't be looked into, it records nothing and is asked again next launch.</summary>
+    public DataMigrationOutcome Settle()
+    {
+        try
+        {
+            var existing = ReadMarker(MarkerPath, out var unreadable);
+            if (existing is { State: DataMigrationMarker.Done }) return new DataMigrationOutcome(DataMigrationResult.AlreadyDone, LegacyRoot, Root, Root);
+            if (existing is not null || unreadable || File.Exists(MarkerPath) || Directory.Exists(MovingFolder))
+                return new DataMigrationOutcome(DataMigrationResult.NothingToDo, LegacyRoot, Root, Root, "Bringing the old folder over is still pending.");
+            if (!SameFolder(LegacyRoot, Root) && StateOf(LegacyRoot) is FolderState.HasEntries or FolderState.Unreadable)
+                return new DataMigrationOutcome(DataMigrationResult.NothingToDo, LegacyRoot, Root, Root, $"Couldn't tell whether {LegacyRoot} holds anything.");
+
+            var rewritten = 0;
+            string? from = null;
+            if (StateOf(Root) == FolderState.HasEntries)
+            {
+                foreach (var former in FormerRoots())
+                {
+                    var count = DataFolderPaths.RewriteAll(Root, former, Root);
+                    if (count == 0) continue;
+                    rewritten += count;
+                    from ??= former;
+                }
+            }
+            Directory.CreateDirectory(Root);
+            var now = Clock.GetUtcNow();
+            WriteMarker(MarkerPath, new DataMigrationMarker
+            {
+                State = DataMigrationMarker.Done,
+                Method = from is null ? DataMigrationMarker.None : DataMigrationMarker.Adopted,
+                From = from ?? "",
+                StartedAt = now,
+                CompletedAt = now,
+                NoticeShown = true, // nothing came over that the user has to be told about
+            });
+            return from is null
+                ? new DataMigrationOutcome(DataMigrationResult.NothingToDo, LegacyRoot, Root, Root)
+                : new DataMigrationOutcome(DataMigrationResult.Adopted, from, Root, Root, RewrittenFiles: rewritten);
+        }
+        catch (Exception ex)
+        {
+            // Nothing is recorded; the next launch asks again. The folder is as it was or has some paths rewritten,
+            // which rewriting again leaves as they are.
+            return new DataMigrationOutcome(DataMigrationResult.NothingToDo, LegacyRoot, Root, Root, ex.Message);
+        }
+    }
+
+    /// <summary>The old folders this folder's paths may still name: the old folder this was made with, and any
+    /// portable DSH's data folder (…\DSH\data) its files name.</summary>
+    private IEnumerable<string> FormerRoots()
+    {
+        var seen = new List<string>();
+        if (!SameFolder(LegacyRoot, Root))
+        {
+            seen.Add(LegacyRoot);
+            yield return LegacyRoot;
+        }
+        foreach (var found in DataFolderPaths.LegacyPortableRootsNamedIn(Root))
+        {
+            if (SameFolder(found, Root) || seen.Any(s => SameFolder(s, found))) continue;
+            seen.Add(found);
+            yield return found;
+        }
+    }
+
+    private static bool SameFolder(string a, string b) =>
+        DataFolderPaths.Rewrite(a, b, "") is { } rest && rest.Trim('\\', '/').Length == 0;
 
     // MARK: - The one-time notice
 
@@ -273,7 +385,7 @@ public sealed class DataFolderMigration
     public static DataMigrationMarker? PendingNotice(string root)
     {
         var marker = ReadMarker(Path.Combine(root, MarkerFileName), out _);
-        return marker is { State: DataMigrationMarker.Done, NoticeShown: false } ? marker : null;
+        return marker is { State: DataMigrationMarker.Done, NoticeShown: false, Method: DataMigrationMarker.Moved or DataMigrationMarker.Copied } ? marker : null;
     }
 
     /// <summary>Remember that the notice was shown, so it never comes back.</summary>
@@ -284,15 +396,23 @@ public sealed class DataFolderMigration
             WriteMarker(path, marker with { NoticeShown = true });
     }
 
+    /// <summary>The marker in <paramref name="root"/>, or null when there is none (or it can't be read).</summary>
+    public static DataMigrationMarker? MarkerIn(string root) => ReadMarker(Path.Combine(root, MarkerFileName), out _);
+
     // MARK: - Files
 
+    /// <summary>The marker at <paramref name="path"/>, or null: there is none, or (<paramref name="unreadable"/>) there
+    /// is one that can't be read — not JSON, or JSON of a shape no version writes (null, a list, a number where a
+    /// date belongs). An unreadable marker is never taken for "nothing here": the step it stood for is finished.</summary>
     internal static DataMigrationMarker? ReadMarker(string path, out bool unreadable)
     {
         unreadable = false;
         try
         {
             if (!File.Exists(path)) return null;
-            return JsonSerializer.Deserialize<DataMigrationMarker>(File.ReadAllText(path), MarkerJson);
+            var marker = JsonSerializer.Deserialize<DataMigrationMarker>(File.ReadAllText(path), MarkerJson);
+            unreadable = marker is null; // the file says "null"
+            return marker;
         }
         catch (Exception ex) when (ex is JsonException or IOException or UnauthorizedAccessException or NotSupportedException)
         {
@@ -304,15 +424,18 @@ public sealed class DataFolderMigration
     internal static void WriteMarker(string path, DataMigrationMarker marker) =>
         DataFolderPaths.WriteAtomically(path, JsonSerializer.Serialize(marker, MarkerJson));
 
-    private static bool HasEntries(string folder)
+    private enum FolderState { Missing, Empty, HasEntries, Unreadable }
+
+    private static FolderState StateOf(string folder)
     {
         try
         {
-            return Directory.Exists(folder) && Directory.EnumerateFileSystemEntries(folder).Any();
+            if (!Directory.Exists(folder)) return FolderState.Missing;
+            return Directory.EnumerateFileSystemEntries(folder).Any() ? FolderState.HasEntries : FolderState.Empty;
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
-            return false;
+            return FolderState.Unreadable;
         }
     }
 
@@ -410,60 +533,173 @@ public static class DataFolderPaths
 
     /// <summary>Rewrite every file of <paramref name="root"/> that keeps paths into the folder: settings.json (any
     /// value or key — skill switches, pinned skills, code-mode files, recent folders), each chat's folder in
-    /// conversations\*.json, and each task's folder in task-queue.json. A file that can't be read as JSON is left
-    /// as it is. Returns how many files changed.</summary>
-    public static int RewriteAll(string root, string from, string to)
+    /// conversations\*.json, each task's folder in task-queue.json, and the project of each note in
+    /// memory\memories.jsonl (a chat without a project files its notes under its scratch folder). A file that can't
+    /// be read as JSON, or whose JSON isn't shaped the way the app writes it, is left as it is. Returns how many files
+    /// changed.</summary>
+    public static int RewriteAll(string root, string from, string to) => RewritePaths(root, value => Rewrite(value, from, to));
+
+    /// <summary>The data folders of a portable DSH (…\DSH\data) that the files of <paramref name="root"/> name, as
+    /// their own folder: a folder moved over by hand from a portable copy of DSH still names its old place.</summary>
+    public static IReadOnlyList<string> LegacyPortableRootsNamedIn(string root)
+    {
+        var found = new List<string>();
+        RewritePaths(root, value =>
+        {
+            if (LegacyPortableRootOf(value) is { } legacy && !found.Contains(legacy, StringComparer.OrdinalIgnoreCase)) found.Add(legacy);
+            return null;
+        });
+        return found;
+    }
+
+    /// <summary>Legacy: a portable copy of DSH (Vision's former name) kept its data in a folder named data beside
+    /// DSH.exe, in a folder named DSH. When <paramref name="path"/> is inside such a data folder's Chats, skills,
+    /// plugins or agents, that data folder (<c>E:\DSH\data</c>); otherwise null.</summary>
+    public static string? LegacyPortableRootOf(string? path)
+    {
+        if (string.IsNullOrEmpty(path) || path.IndexOf("DSH", StringComparison.OrdinalIgnoreCase) < 0) return null;
+        var match = LegacyPortablePath.Match(path);
+        return match.Success ? match.Groups["root"].Value : null;
+    }
+
+    /// <summary>An absolute path (drive, UNC share, or /) through …\DSH\data\ into one of the folders a data folder
+    /// keeps paths of.</summary>
+    private static readonly System.Text.RegularExpressions.Regex LegacyPortablePath = new(
+        @"^(?<root>(?:[A-Za-z]:|[\\/]{2}[^\\/]+[\\/][^\\/]+)?(?:[\\/][^\\/]+)*?[\\/]DSH[\\/]data)[\\/](?:Chats|skills|plugins|agents)(?:[\\/]|$)",
+        System.Text.RegularExpressions.RegexOptions.IgnoreCase | System.Text.RegularExpressions.RegexOptions.CultureInvariant);
+
+    /// <summary>Apply <paramref name="map"/> (a path → its new value, or null to leave it) to every path the data
+    /// folder's files keep (see <see cref="RewriteAll"/>); write back each file it changed. Returns how many.</summary>
+    private static int RewritePaths(string root, Func<string, string?> map)
     {
         var changed = 0;
-        if (RewriteFile(Path.Combine(root, "settings.json"), node => RewriteEverything(node, from, to), indented: true)) changed++;
+        if (RewriteFile(Path.Combine(root, "settings.json"), node => RewriteEverything(node, map), indented: true)) changed++;
         var conversations = Path.Combine(root, "conversations");
         if (Directory.Exists(conversations))
         {
             foreach (var file in Directory.EnumerateFiles(conversations, "*.json"))
             {
-                if (RewriteFile(file, node => RewriteProperty(node?["session"], "cwd", from, to), indented: false)) changed++;
+                if (RewriteFile(file, node => RewriteProperty((node as JsonObject)?["session"], "cwd", map), indented: false)) changed++;
             }
         }
         if (RewriteFile(Path.Combine(root, TaskQueue.FileName), node =>
             {
                 var any = false;
-                if (node?["tasks"] is JsonArray tasks)
-                    foreach (var task in tasks) any |= RewriteProperty(task, "cwd", from, to);
+                if ((node as JsonObject)?["tasks"] is JsonArray tasks)
+                    foreach (var task in tasks) any |= RewriteProperty(task, "cwd", map);
                 return any;
             }, indented: true)) changed++;
+        if (RewriteMemoryLog(Path.Combine(root, "memory", MemoryStore.FileName), map)) changed++;
         return changed;
     }
 
     /// <summary>Parse <paramref name="path"/>, let <paramref name="rewrite"/> change it, and when it did, write it
-    /// back atomically. False when nothing changed, the file isn't there, or it isn't JSON.</summary>
+    /// back atomically. False when nothing changed, the file isn't there, it isn't JSON, or its JSON has a shape the
+    /// app never writes (a list where an object belongs, say): such a file is left as it is — the app sets a file it
+    /// can't read aside itself; it isn't this class's to fix.</summary>
     private static bool RewriteFile(string path, Func<JsonNode?, bool> rewrite, bool indented)
     {
         if (!File.Exists(path)) return false;
+        var text = File.ReadAllText(path);
         JsonNode? node;
+        bool changed;
         try
         {
-            node = JsonNode.Parse(File.ReadAllText(path));
+            try
+            {
+                node = JsonNode.Parse(text);
+                changed = rewrite(node);
+            }
+            catch (ArgumentException)
+            {
+                // The same property twice in one object (a hand-edited file). JsonNode refuses that; the app's own
+                // readers take the last one, so read it the way they do.
+                node = ParseLastWins(text);
+                changed = rewrite(node);
+            }
         }
-        catch (Exception ex) when (ex is JsonException or ArgumentException)
+        catch (Exception ex) when (ex is JsonException or ArgumentException or InvalidOperationException or FormatException)
         {
-            return false; // the app sets an unreadable file aside itself; it isn't this class's to fix
+            return false;
         }
-        if (!rewrite(node)) return false;
-        var text = node?.ToJsonString(new JsonSerializerOptions { WriteIndented = indented }) ?? "null";
-        WriteAtomically(path, text);
+        if (!changed) return false;
+        var json = node?.ToJsonString(new JsonSerializerOptions { WriteIndented = indented }) ?? "null";
+        WriteAtomically(path, json);
         return true;
     }
 
-    private static bool RewriteProperty(JsonNode? owner, string name, string from, string to)
+    /// <summary><paramref name="text"/> as a tree in which a property named twice in one object keeps its last
+    /// value, the way System.Text.Json's typed readers (AppConfig's, the conversation log's) read it.</summary>
+    private static JsonNode? ParseLastWins(string text)
+    {
+        using var document = JsonDocument.Parse(text);
+        return Convert(document.RootElement.Clone());
+
+        static JsonNode? Convert(JsonElement element)
+        {
+            switch (element.ValueKind)
+            {
+                case JsonValueKind.Object:
+                {
+                    var obj = new JsonObject();
+                    foreach (var property in element.EnumerateObject()) obj[property.Name] = Convert(property.Value);
+                    return obj;
+                }
+                case JsonValueKind.Array:
+                {
+                    var array = new JsonArray();
+                    foreach (var item in element.EnumerateArray()) array.Add(Convert(item));
+                    return array;
+                }
+                case JsonValueKind.Null:
+                    return null;
+                default:
+                    // Numbers keep their exact text; strings and true/false their values.
+                    return JsonValue.Create(element);
+            }
+        }
+    }
+
+    /// <summary>The memory log (one JSON object per line, see <see cref="MemoryStore"/>): the project of each note
+    /// that names a path <paramref name="map"/> changes. Every other line is kept exactly as it was, including lines
+    /// this can't read (the store keeps those too) and a last line a crash cut off.</summary>
+    private static bool RewriteMemoryLog(string path, Func<string, string?> map)
+    {
+        if (!File.Exists(path)) return false;
+        var lines = File.ReadAllText(path).Split('\n');
+        var any = false;
+        for (var i = 0; i < lines.Length; i++)
+        {
+            if (lines[i].IndexOf("\"project\"", StringComparison.Ordinal) < 0) continue;
+            try
+            {
+                if (JsonNode.Parse(lines[i]) is JsonObject entry && RewriteProperty(entry["item"], "project", map))
+                {
+                    // A line ending of a file edited by hand (\r\n) stays as it was.
+                    lines[i] = entry.ToJsonString() + (lines[i].EndsWith('\r') ? "\r" : "");
+                    any = true;
+                }
+            }
+            catch (Exception ex) when (ex is JsonException or ArgumentException or InvalidOperationException or FormatException)
+            {
+                // Not a line this can make sense of: it stays as it is.
+            }
+        }
+        if (!any) return false;
+        WriteAtomically(path, string.Join('\n', lines));
+        return true;
+    }
+
+    private static bool RewriteProperty(JsonNode? owner, string name, Func<string, string?> map)
     {
         if (owner is not JsonObject obj || obj[name] is not JsonValue value || !value.TryGetValue<string>(out var text)) return false;
-        if (Rewrite(text, from, to) is not { } rewritten) return false;
+        if (map(text) is not { } rewritten) return false;
         obj[name] = rewritten;
         return true;
     }
 
     /// <summary>Every string value and every property name in the tree.</summary>
-    private static bool RewriteEverything(JsonNode? node, string from, string to)
+    private static bool RewriteEverything(JsonNode? node, Func<string, string?> map)
     {
         var any = false;
         switch (node)
@@ -471,12 +707,12 @@ public static class DataFolderPaths
             case JsonObject obj:
             {
                 var entries = obj.ToList();
-                var renames = entries.Any(e => Rewrite(e.Key, from, to) is not null);
+                var renames = entries.Any(e => map(e.Key) is not null);
                 if (renames) obj.Clear();
                 foreach (var (key, child) in entries)
                 {
                     var value = child;
-                    if (value is JsonValue leaf && leaf.TryGetValue<string>(out var text) && Rewrite(text, from, to) is { } rewritten)
+                    if (value is JsonValue leaf && leaf.TryGetValue<string>(out var text) && map(text) is { } rewritten)
                     {
                         value = JsonValue.Create(rewritten);
                         if (!renames) obj[key] = value;
@@ -484,10 +720,10 @@ public static class DataFolderPaths
                     }
                     else
                     {
-                        any |= RewriteEverything(value, from, to);
+                        any |= RewriteEverything(value, map);
                     }
                     if (!renames) continue;
-                    var newKey = Rewrite(key, from, to) ?? key;
+                    var newKey = map(key) ?? key;
                     // The same folder named both ways (once under each name): the first one stays.
                     if (!obj.ContainsKey(newKey)) obj[newKey] = value;
                 }
@@ -497,14 +733,14 @@ public static class DataFolderPaths
             case JsonArray array:
                 for (var i = 0; i < array.Count; i++)
                 {
-                    if (array[i] is JsonValue leaf && leaf.TryGetValue<string>(out var text) && Rewrite(text, from, to) is { } rewritten)
+                    if (array[i] is JsonValue leaf && leaf.TryGetValue<string>(out var text) && map(text) is { } rewritten)
                     {
                         array[i] = JsonValue.Create(rewritten);
                         any = true;
                     }
                     else
                     {
-                        any |= RewriteEverything(array[i], from, to);
+                        any |= RewriteEverything(array[i], map);
                     }
                 }
                 break;

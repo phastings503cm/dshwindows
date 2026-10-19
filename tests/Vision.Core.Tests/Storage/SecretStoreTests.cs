@@ -335,6 +335,54 @@ public sealed class AppPathsTests : IDisposable
     }
 
     [Fact]
+    public void AFolderTheFormerAppCanAlsoWorkInIsRecognised()
+    {
+        // Legacy: DSH (Vision's former name) runs under its own single-instance name, so Vision must notice when the two
+        // could work in one data folder at once.
+        using var drive = new TempDirectory("vision-shared");
+        var program = Path.GetDirectoryName(drive.Write("Vision/portable", ""))!;
+        var own = Path.Combine(program, "data");
+        Assert.False(AppPaths.MayShareWithLegacyApp(own, program, null));
+        Assert.False(AppPaths.MayShareWithLegacyApp(AppPaths.DefaultRoot, program, null));
+        Assert.False(AppPaths.MayShareWithLegacyApp(AppPaths.DefaultRoot, program, "   "));
+
+        // DSH's own folder (Vision runs there for a session when bringing it over failed, or VISION_HOME names it).
+        Assert.True(AppPaths.MayShareWithLegacyApp(AppPaths.LegacyDefaultRoot, program, null));
+        Assert.True(AppPaths.MayShareWithLegacyApp(AppPaths.LegacyDefaultRoot + Path.DirectorySeparatorChar, program, null));
+        // The folder DSH_HOME names: DSH read it too.
+        var home = Path.Combine(drive.Path, "agent-home");
+        Assert.True(AppPaths.MayShareWithLegacyApp(home, program, home));
+        Assert.False(AppPaths.MayShareWithLegacyApp(own, program, home));
+        // A portable DSH beside this portable copy, whose data folder this copy runs on.
+        drive.Write("DSH/portable", "");
+        drive.Write("DSH/data/settings.json", "{}");
+        Assert.True(AppPaths.MayShareWithLegacyApp(Path.Combine(drive.Path, "DSH", "data"), program, null));
+        Assert.False(AppPaths.MayShareWithLegacyApp(own, program, null));
+        // This portable copy unpacked into a portable DSH's folder: one data folder for both.
+        drive.Write("Vision/DSH.exe", "");
+        Assert.True(AppPaths.MayShareWithLegacyApp(own, program, null));
+    }
+
+    [Theory]
+    [InlineData(@"E:\DSH\data\Chats\abc", @"E:\DSH\data")]
+    [InlineData(@"e:\tools\dsh\DATA\skills\x\SKILL.md", @"e:\tools\dsh\DATA")]
+    [InlineData(@"E:/DSH/data/plugins/p", @"E:/DSH/data")]
+    [InlineData(@"\\server\share\me\DSH\data\agents\a.md", @"\\server\share\me\DSH\data")]
+    [InlineData("/media/usb/DSH/data/Chats/abc", "/media/usb/DSH/data")]
+    [InlineData(@"E:\DSH\data\Chats", @"E:\DSH\data")]
+    [InlineData(@"E:\DSH\data", null)]
+    [InlineData(@"E:\DSH\data\conversations\abc.json", null)]
+    [InlineData(@"E:\DSH2\data\Chats\abc", null)]
+    [InlineData(@"E:\notDSH\data\Chats\abc", null)]
+    [InlineData(@"E:\DSH\database\Chats\abc", null)]
+    [InlineData(@"relative\DSH\data\Chats\abc", null)]
+    [InlineData(@"C:\code\app", null)]
+    [InlineData("", null)]
+    [InlineData(null, null)]
+    public void APortableDshsDataFolderIsRecognisedInAPath(string? path, string? expected) =>
+        Assert.Equal(expected, DataFolderPaths.LegacyPortableRootOf(path));
+
+    [Fact]
     public void APortableCopyFindsAPortableDshBesideIt()
     {
         using var drive = new TempDirectory("vision-usb");

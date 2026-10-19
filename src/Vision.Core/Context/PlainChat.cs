@@ -21,14 +21,26 @@ public static class PlainChat
     /// <summary>This chat's scratch folder (not created here).</summary>
     public static string Folder(string chatId) => Path.Combine(Root, chatId);
 
+    /// <summary>Legacy: where a portable copy of DSH kept scratch folders, <c>&lt;its folder&gt;\DSH\data\Chats</c>,
+    /// when <paramref name="path"/> is in one; otherwise null. A portable user who moved that data folder into Vision's
+    /// by hand still has chats recorded there.</summary>
+    private static string? LegacyPortableRoot(string? path) =>
+        DataFolderPaths.LegacyPortableRootOf(path) is { } data ? Path.Combine(data, "Chats") : null;
+
     /// <summary>Whether <paramref name="path"/> is a chat's scratch folder (or inside one) — under <see cref="Root"/>,
-    /// or under DSH's <see cref="LegacyRoot"/>.</summary>
-    public static bool IsScratch(string? path) => Under(Root, path) || Under(LegacyRoot, path);
+    /// or under DSH's <see cref="LegacyRoot"/> or a portable DSH's.</summary>
+    public static bool IsScratch(string? path) =>
+        Under(Root, path) || Under(LegacyRoot, path) || (LegacyPortableRoot(path) is { } portable && Under(portable, path));
 
     /// <summary><paramref name="path"/> where it is now: a scratch folder recorded under DSH's <see cref="LegacyRoot"/>
-    /// becomes the same folder under <see cref="Root"/>; anything else is returned as it is.</summary>
-    public static string InCurrentRoot(string path) =>
-        !Under(Root, path) && Under(LegacyRoot, path) && DataFolderPaths.Rewrite(path, LegacyRoot, Root) is { } moved ? moved : path;
+    /// (or a portable DSH's) becomes the same folder under <see cref="Root"/>; anything else is returned as it is.</summary>
+    public static string InCurrentRoot(string path)
+    {
+        if (Under(Root, path)) return path;
+        if (Under(LegacyRoot, path) && DataFolderPaths.Rewrite(path, LegacyRoot, Root) is { } moved) return moved;
+        if (LegacyPortableRoot(path) is { } portable && Under(portable, path) && DataFolderPaths.Rewrite(path, portable, Root) is { } carried) return carried;
+        return path;
+    }
 
     private static bool Under(string rootFolder, string? path)
     {
