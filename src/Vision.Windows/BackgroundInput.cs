@@ -301,6 +301,36 @@ internal static class UiaElements
         };
     }
 
+    /// <summary>What a click on <paramref name="element"/> acts on: the element itself when it has a pattern a
+    /// click stands for (or is a text field), else the nearest ancestor that has one — a click on a button's
+    /// caption or icon presses the button. The climb stops at windows, panes and documents.</summary>
+    public static (AutomationElement Element, ElementFacts Facts) Actionable(AutomationElement element)
+    {
+        var facts = Facts(element);
+        var walker = TreeWalker.ControlViewWalker;
+        var current = element;
+        var currentFacts = facts;
+        for (var hop = 0; hop < 4; hop++)
+        {
+            if (currentFacts.Invoke || currentFacts.Toggle || currentFacts.SelectionItem || currentFacts.ExpandCollapse || currentFacts.IsTextField)
+                return (current, currentFacts);
+            if (currentFacts.ControlType is "Window" or "Pane" or "Document") break;
+            AutomationElement? parent;
+            try
+            {
+                parent = walker.GetParent(current);
+            }
+            catch (Exception ex) when (IsGone(ex))
+            {
+                break;
+            }
+            if (parent is null || Automation.Compare(parent, AutomationElement.RootElement)) break;
+            current = parent;
+            currentFacts = Facts(parent);
+        }
+        return (element, facts);
+    }
+
     /// <summary>The element, or the nearest ancestor, that scrolls.</summary>
     public static AutomationElement? Scroller(AutomationElement element)
     {
@@ -396,15 +426,19 @@ internal static class PostedInput
         Native.PostMessage(control, Native.WM_KEYDOWN, new IntPtr(vk), KeyParam(vk, up: false))
         && Native.PostMessage(control, Native.WM_KEYUP, new IntPtr(vk), KeyParam(vk, up: true));
 
-    /// <summary>Type text at the control's caret: characters as WM_CHAR, Enter and Tab as the keys (the
-    /// app's own message loop turns them into characters, or a dialog acts on them). Returns how many
-    /// units went, or -1 when the very first was refused.</summary>
+    /// <summary>Type text at the control's caret, every unit as WM_CHAR — line breaks as '\r' and tabs as
+    /// '\t' too: a posted WM_KEYDOWN only becomes a character when the app's loop translates it, and that
+    /// character is queued behind everything already posted, so it would land after the rest of the text.
+    /// Returns how many units went, or -1 when the very first was refused.</summary>
     public static async Task<int> Chars(IntPtr control, IReadOnlyList<(ushort Code, bool IsVirtualKey)> units, CancellationToken cancellationToken)
     {
         for (var i = 0; i < units.Count; i++)
         {
             var (code, isKey) = units[i];
-            var sent = isKey ? Key(control, code) : Native.PostMessage(control, Native.WM_CHAR, new IntPtr(code), new IntPtr(1));
+            var character = isKey ? code switch { KeyNames.VkReturn => (ushort)'\r', KeyNames.VkTab => (ushort)'\t', KeyNames.VkBack => (ushort)'\b', _ => (ushort)0 } : code;
+            var sent = character != 0
+                ? Native.PostMessage(control, Native.WM_CHAR, new IntPtr(character), new IntPtr(1))
+                : Key(control, code);
             if (!sent) return i == 0 ? -1 : i;
             // A breather now and then: a window's message queue holds 10,000 posted messages.
             if (i % 40 == 39) await Task.Delay(2, cancellationToken).ConfigureAwait(false);

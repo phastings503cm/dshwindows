@@ -24,6 +24,7 @@ public sealed class BackgroundInputTests(ITestOutputHelper output)
     public async Task TextGoesIntoAWin32TextBoxWithoutTheKeyboardOrTheFocus()
     {
         using var edit = new Win32Control("EDIT", Win32Control.ES_MULTILINE | Win32Control.ES_WANTRETURN | Win32Control.ES_AUTOVSCROLL);
+        Assert.True(PostedInput.SetText(edit.Handle, "")); // a top-level EDIT starts out holding its title
         var front = Native.GetForegroundWindow();
         var cursor = Cursor();
         var target = InputTargets.ForWindow(edit.Handle);

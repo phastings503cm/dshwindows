@@ -38,8 +38,10 @@ internal static class ControlArgs
     {
         var (finished, found) = await MtaThread.Run(() =>
         {
-            if (UiaElements.Find(top, query, TimeSpan.FromSeconds(4)) is not { } element) return ((AutomationElement, ElementFacts, (int, int)?)?)null;
-            return (element, UiaElements.Facts(element), UiaElements.Center(element));
+            if (UiaElements.Find(top, query, TimeSpan.FromSeconds(4)) is not { } named) return ((AutomationElement, ElementFacts, (int, int)?)?)null;
+            // A button's caption names the button.
+            var (element, facts) = UiaElements.Actionable(named);
+            return (element, facts, UiaElements.Center(element));
         }, TimeSpan.FromSeconds(6), cancellationToken).ConfigureAwait(false);
         if (!finished) return (null, $"Error: '{appName}' did not answer UI Automation queries in time — it may be hung (inspect_process shows whether it is responding).");
         if (found is not { } hit)
@@ -58,7 +60,7 @@ internal static class ControlArgs
             try
             {
                 element = UiaElements.AtPoint(target.Top, target.ProcessId, point.X, point.Y);
-                if (element is not null) facts = UiaElements.Facts(element);
+                if (element is not null) (element, facts) = UiaElements.Actionable(element);
             }
             catch (Exception ex) when (UiaElements.IsGone(ex) || ex is InvalidOperationException)
             {
