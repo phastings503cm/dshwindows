@@ -261,6 +261,41 @@ public sealed class GuardianServiceTests : IDisposable
     });
 
     [Fact]
+    public void TheNotebookCopyIsMaskedAndCanBeSwitchedOff() => UiThread.Run(async () =>
+    {
+        // Guardian isn't private: a vault secret in a prompt never goes up as it is (the review of 10-19, #7).
+        var (config, host, guardian, fake) = Make();
+        var model = new FakeModelServer();
+        try
+        {
+            await guardian.SignInAsync("https://guardian.example.test", "pat@503cm.com", "pw");
+            var vm = ChatOnOwnServer(config, host, fake, model);
+            host.Vault.Add("BILLING_TOKEN", "vault-test-value-7f3a91c2d4e8");
+            host.Send("Rotate vault-test-value-7f3a91c2d4e8 in the billing service", vm.Id);
+            await WaitUntil("the prompt and its ending went up", () => fake.Prompts().Count(p => p["outcome"] is not null) == 1);
+            var texts = fake.Prompts().Select(p => p["text"]!.GetValue<string>()).ToList();
+            Assert.All(texts, t => Assert.DoesNotContain("vault-test-value-7f3a91c2d4e8", t));
+            Assert.All(texts, t => Assert.Equal("Rotate ⟦SECRET_1⟧ in the billing service", t));
+            Assert.Single(texts.Distinct()); // the start and the ending carry the same text: one row in Guardian
+            // This PC's own timeline keeps the prompt as typed.
+            Assert.Equal("Rotate vault-test-value-7f3a91c2d4e8 in the billing service", vm.PromptHistory[0].Text);
+
+            // Settings › Guardian › "Send my prompts to the notebook" off: nothing more goes up.
+            config.GuardianPromptSync = false;
+            var before = fake.Prompts().Count;
+            host.Send("hello again", vm.Id);
+            await WaitUntil("the turn ended", () => vm.PromptHistory.Count == 2 && vm.PromptHistory[1].Outcome != PromptOutcome.Running);
+            await Task.Delay(150);
+            Assert.Equal(before, fake.Prompts().Count);
+        }
+        finally
+        {
+            host.StopAll();
+            await Task.Delay(50);
+        }
+    });
+
+    [Fact]
     public void NotSignedInNothingIsSent() => UiThread.Run(async () =>
     {
         var (config, host, _, fake) = Make();

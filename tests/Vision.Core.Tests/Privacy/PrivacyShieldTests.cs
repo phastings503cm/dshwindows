@@ -30,6 +30,23 @@ public sealed class PrivacyShieldTests
         sent.SystemPrompt + "\n" + string.Join("\n", sent.Messages.Select(m => m.Content + string.Join("", (m.ToolCalls ?? []).Select(c => c.Arguments))));
 
     [Fact]
+    public void TextForTheNotebookIsMaskedTheSameWayEveryTime()
+    {
+        // Vault values only (the shield off): an email stays, the secret goes.
+        var vaultOnly = new ShieldOptions { Categories = SensitiveCategories.None, VaultSecrets = ["hunter2-very-secret"] };
+        const string prompt = "Log in as pat@example.com with hunter2-very-secret and fix the build";
+        Assert.Equal("Log in as pat@example.com with ⟦SECRET_1⟧ and fix the build", OutgoingText.Masked(prompt, vaultOnly));
+        // The shield on: the email goes too.
+        var shield = Options(vault: ["hunter2-very-secret"]);
+        var masked = OutgoingText.Masked(prompt, shield);
+        Assert.DoesNotContain("pat@example.com", masked);
+        Assert.DoesNotContain("hunter2-very-secret", masked);
+        // The start and the ending of a prompt are pushed separately: both must read the same.
+        Assert.Equal(masked, OutgoingText.Masked(prompt, shield));
+        Assert.Equal(prompt, OutgoingText.Masked(prompt, null));
+    }
+
+    [Fact]
     public void APrivateRouteIsNeverWrapped()
     {
         Assert.IsNotType<ShieldedClient>(ProviderClients.Create(Spark, shield: Options()));

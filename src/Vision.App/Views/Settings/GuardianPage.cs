@@ -356,6 +356,12 @@ public sealed class GuardianPage : UserControl
     {
         var panel = new StackPanel();
         panel.Children.Add(Ui.Text("Every prompt you send in a chat goes to your Guardian notebook, with how the turn ended — completed, needs you, failed or stopped.", 13));
+        var masking = Ui.Secondary("Before a prompt goes up, the keys and passwords in your vault are masked, and — with Settings › Privacy's shield on — whatever it masks for models that aren't private.");
+        masking.Margin = new Thickness(0, 4, 0, 0);
+        panel.Children.Add(masking);
+        var sync = Ui.Check("Send my prompts to the notebook", _model.Config.GuardianPromptSync, on => _model.Config.GuardianPromptSync = on);
+        sync.Margin = new Thickness(0, 6, 0, 0);
+        panel.Children.Add(sync);
         var buttons = Ui.Buttons(
             Ui.Button(_notebook is null ? "Show my latest prompts" : "Refresh", async () =>
             {

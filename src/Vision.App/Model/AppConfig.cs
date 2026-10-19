@@ -92,6 +92,8 @@ public sealed partial class AppConfig : ObservableObject
     [ObservableProperty] private bool _computerToolsEnabled = true;
     /// <summary>Each chat may click and type only in apps it started itself (and what those started).</summary>
     [ObservableProperty] private bool _machineOwnAppsOnly;
+    /// <summary>Settings › Guardian › "Send my prompts to the notebook" (on by default; masked either way).</summary>
+    [ObservableProperty] private bool _guardianPromptSync = true;
     [ObservableProperty] private int _skillSourcesRaw = (int)SkillSources.All;
     /// <summary>The one-time notice about bringing in Claude Code and Cursor has been shown or used, so it
     /// doesn't come back.</summary>
@@ -527,6 +529,7 @@ public sealed partial class AppConfig : ObservableObject
         public bool? CheckForUpdates { get; set; }
         public bool? ComputerToolsEnabled { get; set; }
         public bool? MachineOwnAppsOnly { get; set; }
+        public bool? GuardianPromptSync { get; set; }
         public int? SkillSources { get; set; }
         public bool? ExternalImportOffered { get; set; }
         public List<string>? DisabledSkills { get; set; }
@@ -588,6 +591,7 @@ public sealed partial class AppConfig : ObservableObject
             CheckForUpdates = stored?.CheckForUpdates ?? true;
             ComputerToolsEnabled = stored?.ComputerToolsEnabled ?? true;
             MachineOwnAppsOnly = stored?.MachineOwnAppsOnly ?? false;
+            GuardianPromptSync = stored?.GuardianPromptSync ?? true;
             SkillSourcesRaw = stored?.SkillSources ?? (int)SkillSources.All;
             ExternalImportOffered = stored?.ExternalImportOffered ?? false;
             foreach (var id in stored?.DisabledSkills ?? []) DisabledSkills.Add(id);
@@ -749,6 +753,7 @@ public sealed partial class AppConfig : ObservableObject
             CheckForUpdates = CheckForUpdates,
             ComputerToolsEnabled = ComputerToolsEnabled,
             MachineOwnAppsOnly = MachineOwnAppsOnly ? true : null,
+            GuardianPromptSync = GuardianPromptSync ? null : false,
             SkillSources = SkillSourcesRaw,
             ExternalImportOffered = ExternalImportOffered,
             DisabledSkills = DisabledSkills.OrderBy(s => s, StringComparer.Ordinal).ToList(),

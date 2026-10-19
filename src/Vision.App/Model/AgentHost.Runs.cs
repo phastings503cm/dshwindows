@@ -533,10 +533,14 @@ public sealed partial class AgentHost
     /// row. Silent on failure: the timeline file has it.</summary>
     private void PushPrompt(SessionVM vm, PromptRecord record)
     {
-        if (GuardianEta() is not { } client) return;
+        if (!Config.GuardianPromptSync || GuardianEta() is not { } client) return;
+        // Guardian isn't private: the notebook copy is masked like a request to a model that isn't (the vault's secrets
+        // always, and what the sensitive-data shield masks when it is on).
+        var shield = ShieldFor(null);
         var snapshot = record.Clone();
-        var title = vm.Title;
-        var project = vm.ProjectName;
+        snapshot.Text = OutgoingText.Masked(snapshot.Text, shield);
+        var title = OutgoingText.Masked(vm.Title, shield);
+        var project = vm.ProjectName is { } name ? OutgoingText.Masked(name, shield) : null;
         _ = PushAsync();
 
         async Task PushAsync()

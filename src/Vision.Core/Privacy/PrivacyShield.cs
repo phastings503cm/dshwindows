@@ -39,6 +39,18 @@ public sealed class ShieldOptions
     public SensitiveDetector Detector => _detector ??= new SensitiveDetector(Categories, CustomTerms, VaultSecrets);
 }
 
+/// <summary>Text that leaves this PC for somewhere other than a model — a prompt copied to Guardian's Prompt Notebook — masked
+/// the way a request to a model that isn't private is: the vault's secrets always, and with the shield on whatever it masks
+/// (the same placeholders, so the same prompt always reads the same and Guardian keeps one row for it).</summary>
+public static class OutgoingText
+{
+    public static string Masked(string text, ShieldOptions? shield)
+    {
+        if (shield is null || string.IsNullOrEmpty(text)) return text;
+        return new ShieldMap().Mask(text, shield.Detector);
+    }
+}
+
 /// <summary>What one request had masked — how many distinct values of each kind (never the values) — and how many
 /// pictures and files that aren't plain text it carried, which can't be checked and go as they are.</summary>
 public sealed record ShieldReport(string Route, IReadOnlyDictionary<SensitiveKind, int> Counts, int Unchecked = 0)
