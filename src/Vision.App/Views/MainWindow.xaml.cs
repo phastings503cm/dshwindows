@@ -335,6 +335,9 @@ public partial class MainWindow : Window
     /// <summary>Open the queue's add card and use it (the self-test drives it: the card has to survive being opened again and again).</summary>
     public void SelfTestAddQueueTasks(params string[] titles) => _queuePanel.SelfTestAddTasks(titles);
 
+    /// <summary>The chat view, for the self-test's measurements.</summary>
+    internal ChatView SelfTestChatView => _chatView;
+
     /// <summary>The panel is on the right, so dragging left makes it wider and the chat gives way (never past its minimum).</summary>
     private void QueueSplitter_DragDelta(object sender, DragDeltaEventArgs e)
     {

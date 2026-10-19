@@ -256,6 +256,24 @@ public partial class ChatView : UserControl
         menu.IsOpen = true;
     }
 
+    // MARK: - Self-test hooks
+
+    /// <summary>The composer, for the self-test's measurements.</summary>
+    internal TextBox SelfTestComposer => Composer;
+
+    /// <summary>Attachments waiting in the composer, for the self-test.</summary>
+    internal int SelfTestAttachmentCount => _attachments.Count;
+
+    /// <summary>The transcript's scroll viewer, for the self-test's measurements.</summary>
+    internal ScrollViewer? SelfTestScroller
+    {
+        get
+        {
+            HookScroller();
+            return _scroller;
+        }
+    }
+
     // MARK: - Scrolling
 
     private void HookScroller()
