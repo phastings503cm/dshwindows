@@ -116,6 +116,8 @@ public static class AppPaths
     public static string Conversations => Path.Combine(Root, "conversations");
     public static string Plugins => Path.Combine(Root, "plugins");
     public static string Logs => Path.Combine(Root, "logs");
+    /// <summary>What model servers refused, per server and model (see <see cref="RequestAdaptationStore"/>).</summary>
+    public static string RequestAdaptations => Path.Combine(Root, "request-adaptations.json");
 
     /// <summary>Create <paramref name="path"/> if needed and return it.</summary>
     public static string Ensure(string path)

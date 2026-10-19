@@ -143,7 +143,7 @@ public sealed class AgentTool : IToolExecutor
                     if (runId is not null) roster!.Note(runId, "waiting for a free server");
                     try
                     {
-                        lease = await fleet.AcquireAsync(definition.Server, cancellationToken, sensitive, context.Unattended).ConfigureAwait(false);
+                        lease = await fleet.AcquireAsync(definition.Server, cancellationToken, sensitive, context.Unattended, context.FleetHome).ConfigureAwait(false);
                     }
                     catch (FleetUnavailableException unavailable)
                     {

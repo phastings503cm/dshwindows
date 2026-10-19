@@ -18,6 +18,9 @@ public sealed record SessionSkillSelection(IReadOnlyList<string> Pinned, bool Au
     public static SessionSkillSelection Default { get; } = new([], true);
 }
 
+/// <summary>A chat's model choice: the route it talks to and its thinking level (a <see cref="ThinkingLevel"/> raw value).</summary>
+public sealed record ChatChoice(string? Route, string? Thinking);
+
 /// <summary>What code mode reopens with for one project.</summary>
 public sealed record CodeState(IReadOnlyList<string> Files, string? Active, bool Terminal, bool Tree, bool Chat = true);
 
@@ -126,6 +129,9 @@ public sealed partial class AppConfig : ObservableObject
     /// <summary>Per-chat skill choices.</summary>
     public Dictionary<string, SessionSkillSelection> SessionSkills { get; } = new(StringComparer.Ordinal);
     public Dictionary<string, CodeState> CodeStates { get; } = new(StringComparer.OrdinalIgnoreCase);
+    /// <summary>Per project folder ("" = chats without a project): the model and thinking level its chats last chose — what a
+    /// new chat there starts with (see AgentHost.ChatRoutes.cs).</summary>
+    public Dictionary<string, ChatChoice> ProjectChoices { get; } = new(StringComparer.OrdinalIgnoreCase);
 
     public sealed record WindowPlacement(double Left, double Top, double Width, double Height, bool Maximized);
 
@@ -235,6 +241,7 @@ public sealed partial class AppConfig : ObservableObject
         }
         if (wasPrimary) ActiveRoute = copy.RouteId;
         OnPropertyChanged(nameof(ActiveProvider));
+        if (old is not null && old.RouteId != copy.RouteId) NoteRouteRenamed(old.RouteId, copy.RouteId);
         return copy;
     }
 
@@ -259,6 +266,56 @@ public sealed partial class AppConfig : ObservableObject
     }
 
     partial void OnActiveRouteChanged(string? value) => OnPropertyChanged(nameof(ActiveProvider));
+
+    // MARK: - Each chat's own model
+
+    /// <summary>A route was saved under a new id (renamed, or its model changed): the chats on it follow it there.</summary>
+    public event Action<string, string>? RouteRenamed;
+
+    /// <summary>Tell the chats on <paramref name="oldRouteId"/> that it is now <paramref name="newRouteId"/>.</summary>
+    public void NoteRouteRenamed(string oldRouteId, string newRouteId)
+    {
+        if (oldRouteId == newRouteId) return;
+        foreach (var (key, choice) in ProjectChoices.ToList())
+            if (choice.Route == oldRouteId) ProjectChoices[key] = choice with { Route = newRouteId };
+        RouteRenamed?.Invoke(oldRouteId, newRouteId);
+        Persist();
+    }
+
+    /// <summary>A configured route that is switched on, with its API key (null when it is gone or off).</summary>
+    public ProviderProfile? UsableRoute(string? routeId)
+    {
+        if (routeId is null || Providers.FirstOrDefault(p => p.RouteId == routeId) is not { IsEnabled: true } stored) return null;
+        var resolved = stored.DeepCopy();
+        var key = ApiKey(stored);
+        resolved.ApiKey = key.Length == 0 ? null : key;
+        return resolved;
+    }
+
+    /// <summary>The key a project's choice is kept under: its folder ("" for chats without a project).</summary>
+    public static string ProjectKey(string? path)
+    {
+        if (string.IsNullOrWhiteSpace(path)) return "";
+        try
+        {
+            return Path.TrimEndingDirectorySeparator(Path.GetFullPath(path));
+        }
+        catch (Exception ex) when (ex is ArgumentException or NotSupportedException or PathTooLongException)
+        {
+            return path.TrimEnd('\\', '/');
+        }
+    }
+
+    /// <summary>What a new chat in this project starts with (null = nothing chosen there yet).</summary>
+    public ChatChoice? LastChoice(string? project) => ProjectChoices.GetValueOrDefault(ProjectKey(project));
+
+    public void RememberChoice(ChatChoice choice, string? project)
+    {
+        var key = ProjectKey(project);
+        if (ProjectChoices.GetValueOrDefault(key) == choice) return;
+        ProjectChoices[key] = choice;
+        Persist();
+    }
 
     // MARK: - Secrets (Credential Manager)
 
@@ -468,6 +525,7 @@ public sealed partial class AppConfig : ObservableObject
         public List<string>? DisabledSkills { get; set; }
         public Dictionary<string, SessionSkillSelection>? SessionSkills { get; set; }
         public Dictionary<string, CodeState>? CodeStates { get; set; }
+        public Dictionary<string, ChatChoice>? ProjectChoices { get; set; }
         public string? SparkUrl { get; set; }
         public string? SparkUser { get; set; }
         public string? SparkPin { get; set; }
@@ -526,6 +584,7 @@ public sealed partial class AppConfig : ObservableObject
             foreach (var id in stored?.DisabledSkills ?? []) DisabledSkills.Add(id);
             foreach (var (k, v) in stored?.SessionSkills ?? []) SessionSkills[k] = v;
             foreach (var (k, v) in stored?.CodeStates ?? []) CodeStates[k] = v;
+            foreach (var (k, v) in stored?.ProjectChoices ?? []) if (v is not null) ProjectChoices[k] = v;
             SparkUrl = stored?.SparkUrl ?? "";
             SparkUser = stored?.SparkUser ?? "";
             SparkPin = stored?.SparkPin;
@@ -684,6 +743,7 @@ public sealed partial class AppConfig : ObservableObject
             DisabledSkills = DisabledSkills.OrderBy(s => s, StringComparer.Ordinal).ToList(),
             SessionSkills = new Dictionary<string, SessionSkillSelection>(SessionSkills),
             CodeStates = new Dictionary<string, CodeState>(CodeStates),
+            ProjectChoices = ProjectChoices.Count == 0 ? null : new Dictionary<string, ChatChoice>(ProjectChoices),
             SparkUrl = SparkUrl,
             SparkUser = SparkUser,
             SparkPin = SparkPin,

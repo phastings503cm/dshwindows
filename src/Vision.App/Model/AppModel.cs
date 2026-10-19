@@ -70,6 +70,8 @@ public sealed partial class AppModel : ObservableObject
 
         // Only the primary model's own box switching holds the chats back (another box may switch freely).
         Host.IsServerSwitching = () => Spark.IsSwitchingFor(Config.Providers.FirstOrDefault(p => p.RouteId == Config.ActiveRoute));
+        // A chat waits only for its own model's box: another chat's box switching holds nothing back.
+        Host.IsRouteSwitching = route => Spark.IsSwitchingFor(route);
         // Agents that reported while the primary's box was busy switching models are heard as soon as it is done — another
         // box switching holds nothing back. (Every status poll raises IsSwitching, changed or not, so only the step from
         // switching to not switching counts.)

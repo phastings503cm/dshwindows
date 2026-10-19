@@ -165,12 +165,22 @@ public sealed class PlanGuide : IWizardGuide
         }
         if (_plan is { HasRegions: true } withRegions)
         {
-            panel.Children.Add(Subheading("Where is your account?"));
-            var regions = new StackPanel { Orientation = Orientation.Horizontal };
+            // Z.ai's "regions" are its endpoints: which one decides which kind of key works (a Coding Plan key works only on the
+            // Coding Plan endpoint), so each says what it is for.
+            var endpoints = withRegions.RegionLabel == "Endpoint";
+            panel.Children.Add(Subheading(endpoints ? "Which endpoint?" : "Where is your account?"));
+            var regions = new StackPanel { Orientation = endpoints ? Orientation.Vertical : Orientation.Horizontal };
             foreach (var region in withRegions.Regions)
             {
                 var id = region.Id;
-                var radio = new RadioButton { Content = region.Label, GroupName = "plan-region", IsChecked = _region == id, Margin = new Thickness(0, 0, 20, 0) };
+                object content = region.Detail is { } detail && endpoints
+                    ? Ui.Stack(Ui.Text(region.Label, 13, FontWeights.SemiBold), Paragraph(detail, 12, "TextFillColorSecondaryBrush"))
+                    : region.Label;
+                var radio = new RadioButton
+                {
+                    Content = content, GroupName = "plan-region", IsChecked = _region == id,
+                    Margin = endpoints ? new Thickness(0, 2, 0, 6) : new Thickness(0, 0, 20, 0),
+                };
                 radio.Checked += (_, _) =>
                 {
                     if (_region == id) return;
@@ -181,7 +191,8 @@ public sealed class PlanGuide : IWizardGuide
                 regions.Children.Add(radio);
             }
             panel.Children.Add(regions);
-            panel.Children.Add(Paragraph("Keys only work in the region where you made them.", 12.5, "TextFillColorSecondaryBrush"));
+            panel.Children.Add(Paragraph(endpoints && withRegions.Note is { } note ? note : "Keys only work in the region where you made them.",
+                12.5, "TextFillColorSecondaryBrush"));
         }
         panel.Children.Add(Aside("Every plan here is an online service: your messages go to the provider's servers. Vision masks sensitive details — keys, emails, phone numbers, card numbers, your own custom terms — before anything is sent to a model that isn't private (Settings › AI Models › Sensitive data)."));
         return panel;
@@ -259,6 +270,8 @@ public sealed class PlanGuide : IWizardGuide
     private bool _checking;
     private bool _checked;
     private string? _checkError;
+    /// <summary>Z.ai: the endpoint the key answered on instead of the chosen one (offered as a switch).</summary>
+    private string? _worksOn;
     /// <summary>What /models listed (null when it wasn't asked or didn't work).</summary>
     private IReadOnlyList<string>? _listed;
     private CancellationTokenSource? _work;
@@ -276,6 +289,7 @@ public sealed class PlanGuide : IWizardGuide
         var region = Region;
         _checking = true;
         _checkError = null;
+        _worksOn = null;
         _listed = null;
         RenderIf(PlanPage.Check);
         _work?.Cancel();
@@ -292,22 +306,36 @@ public sealed class PlanGuide : IWizardGuide
                     _listed = await client.ListModelsAsync(ct);
                     listed = _listed.Count > 0;
                 }
-                catch (LlmException error) when (error.Kind == LlmErrorKind.Http && error.StatusCode is 404 or 405)
+                catch (LlmException error) when (error.Kind == LlmErrorKind.Http && (error.StatusCode is 404 or 405 || plan.Id == SubscriptionPlans.Zai))
                 {
-                    // No model list here: a one-token reply proves the key instead.
+                    // No model list here: a one-token reply proves the key instead. (Z.ai's check below says what a refused key
+                    // means, and which endpoint it belongs to.)
                 }
             }
-            if (!listed)
+            if (plan.Id == SubscriptionPlans.Zai && ZaiEndpoints.FromRaw(region.Id) is { } endpoint)
             {
-                var request = new LlmRequest("", [LlmMessage.User("Reply with OK.")], [], plan.Recommended.Id, MaxTokens: 1);
-                await foreach (var _ in client.StreamAsync(request, ct)) { }
+                // Z.ai lists models for any valid key on any endpoint, while only the right endpoint can chat: a one-token
+                // reply proves it — and when the key or account doesn't fit, the other endpoints say which one it belongs to.
+                var result = await ZaiDiagnosis.RunAsync(endpoint, plan.Recommended.Id, (where, token) => PingAsync(plan, where.RawValue(), token), ct);
+                if (!result.Ok)
+                {
+                    _checkError = result.Message;
+                    _worksOn = result.WorksOn?.RawValue();
+                    return;
+                }
+            }
+            else if (!listed || plan.ChecksWithChat)
+            {
+                await PingAsync(plan, _region, ct);
             }
             _checked = true;
             _chosen ??= Recommend();
         }
         catch (LlmException error) when (error.Kind == LlmErrorKind.Http)
         {
-            _checkError = SubscriptionPlans.ExplainError(plan, region, error.StatusCode, error.Body);
+            _checkError = error.Message.Length > 0 && error.Message != LlmException.Http(error.StatusCode, error.Body).Message
+                ? error.Message
+                : SubscriptionPlans.ExplainError(plan, region, error.StatusCode, error.Body);
         }
         catch (LlmException error) when (error.Kind is LlmErrorKind.Connection or LlmErrorKind.Sse)
         {
@@ -328,15 +356,35 @@ public sealed class PlanGuide : IWizardGuide
         }
     }
 
+    /// <summary>A one-token reply from <paramref name="region"/>: proves the key works there (throws what the server said).</summary>
+    private async Task PingAsync(SubscriptionPlan plan, string region, CancellationToken ct)
+    {
+        var route = plan.Route(region, plan.Recommended.Id);
+        route.ApiKey = Key;
+        var request = new LlmRequest("", [LlmMessage.User("Reply with OK.")], [], plan.Recommended.Id, MaxTokens: 1);
+        await foreach (var _ in ProviderClients.Create(route).StreamAsync(request, ct)) { }
+    }
+
     private UIElement CheckPage()
     {
         var plan = _plan!;
         var panel = Ui.Stack(
             Heading("Checking your key"),
-            Lead(plan.ListsModels ? "Vision asks the plan which models your key can use." : "Vision sends a one-word request to check the key works."));
+            Lead(plan.ListsModels && !plan.ChecksWithChat ? "Vision asks the plan which models your key can use." : "Vision sends a one-word request to check the key works."));
         if (_checking) panel.Children.Add(Busy($"Asking {new Uri(Region.BaseUrl).Host}…"));
         else if (_checkError is { } error)
-            panel.Children.Add(Note(Tone.Error, error, "The key didn't work", Ui.Buttons(Ui.Button("Try again", () => _ = CheckAsync(), accent: true))));
+        {
+            var switchTo = _worksOn is { } other && _plan!.Regions.FirstOrDefault(r => r.Id == other) is { } better
+                ? Ui.Button($"Switch to {better.Label}", () =>
+                {
+                    _region = better.Id;
+                    Forget();
+                    _ = CheckAsync();
+                }, accent: true)
+                : null;
+            panel.Children.Add(Note(Tone.Error, error, "The key didn't work",
+                Ui.Buttons(switchTo, Ui.Button("Try again", () => _ = CheckAsync(), accent: switchTo is null))));
+        }
         else if (_checked)
             panel.Children.Add(Note(Tone.Success, _listed is { Count: > 0 } listed ? $"Your key works — {listed.Count} model(s) available." : "Your key works.", "It's accepted"));
         return panel;
@@ -351,6 +399,14 @@ public sealed class PlanGuide : IWizardGuide
     {
         var plan = _plan!;
         if (_listed is not { Count: > 0 } listed) return plan.Models.Select(m => m.Id).ToList();
+        if (plan.Id == SubscriptionPlans.Zai)
+        {
+            // Its own presets first (the recommended one on top), then the rest of what the key can use.
+            var chat = SubscriptionPlans.ChatModels(plan, listed);
+            return plan.Models.Select(m => m.Id).Where(id => chat.Contains(id, StringComparer.OrdinalIgnoreCase))
+                .Concat(chat.Where(id => plan.Models.All(m => !string.Equals(m.Id, id, StringComparison.OrdinalIgnoreCase))).Order(StringComparer.OrdinalIgnoreCase))
+                .ToList();
+        }
         if (plan.Id != SubscriptionPlans.OpenAi) return listed.Order(StringComparer.OrdinalIgnoreCase).ToList();
         string[] notChat = ["embedding", "tts", "whisper", "dall-e", "moderation", "image", "audio", "realtime", "transcribe", "search", "davinci", "babbage", "sora"];
         return listed.Where(id => !notChat.Any(word => id.Contains(word, StringComparison.OrdinalIgnoreCase)))
@@ -390,8 +446,11 @@ public sealed class PlanGuide : IWizardGuide
             list.Children.Add(radio);
         }
         panel.Children.Add(Ui.Card(new ScrollViewer { Content = list, MaxHeight = 280, VerticalScrollBarVisibility = ScrollBarVisibility.Auto }));
-        if (SubscriptionPlans.AlwaysThinks(_chosen))
-            panel.Children.Add(Paragraph("GLM-5 always thinks before it answers; the thinking setting picks how much (Off asks for the least).", 12.5, "TextFillColorSecondaryBrush"));
+        if (_chosen is { } chosen && ModelRequestRules.For(Probe(chosen), chosen) is { AlwaysThinks: true } rules)
+            panel.Children.Add(Paragraph(rules.ThinkingLevels.Count == 0
+                ? "This model always thinks before it answers, and takes no thinking setting."
+                : $"This model always thinks before it answers; the thinking setting picks how much ({string.Join(", ", rules.ThinkingLevels.Select(rules.Label))} — Off asks for the least).",
+                12.5, "TextFillColorSecondaryBrush"));
         return panel;
     }
 
@@ -470,7 +529,9 @@ public sealed class PlanGuide : IWizardGuide
         }
         catch (LlmException error) when (error.Kind == LlmErrorKind.Http)
         {
-            _saveError = SubscriptionPlans.ExplainError(plan, Region, error.StatusCode, error.Body);
+            _saveError = error.Message != LlmException.Http(error.StatusCode, error.Body).Message
+                ? error.Message
+                : SubscriptionPlans.ExplainError(plan, Region, error.StatusCode, error.Body, model);
         }
         catch (OperationCanceledException)
         {
@@ -513,6 +574,22 @@ public sealed class PlanGuide : IWizardGuide
     }
 
     // MARK: - Self-test
+
+    /// <summary>Z.ai's endpoint picker, and a Coding Plan key checked on the General API (for the self-test; no network).</summary>
+    internal void ShowZaiDemo(PlanPage page)
+    {
+        _demo = true;
+        _plan = SubscriptionPlans.Find(SubscriptionPlans.Zai);
+        _region = ZaiEndpoint.General.RawValue();
+        _keyBox.Password = "0123456789abcdef.ZyXwVuTsRq";
+        _checked = false;
+        _checking = false;
+        _checkError = page == PlanPage.Check ? ZaiDiagnosis.SwitchAdvice(ZaiEndpoint.General, ZaiEndpoint.Coding) : null;
+        _worksOn = page == PlanPage.Check ? ZaiEndpoint.Coding.RawValue() : null;
+        _chosen = _plan!.Recommended.Id;
+        Page = page;
+        _host.Render();
+    }
 
     internal void ShowDemo(PlanPage page)
     {

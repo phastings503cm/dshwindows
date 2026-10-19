@@ -26,16 +26,18 @@ public static class ProviderClients
 
     /// <summary>The client for <paramref name="profile"/>. <paramref name="handler"/> replaces the
     /// network (tests). With <paramref name="shield"/> switched on, a route that isn't private gets its
-    /// requests masked (a private route never does).</summary>
-    public static IProviderClient Create(ProviderProfile profile, HttpMessageHandler? handler = null, ShieldOptions? shield = null)
+    /// requests masked (a private route never does). <paramref name="notice"/> hears the one line a client says
+    /// when it adapted to a parameter the server refused (it was dropped, remembered, and the turn carried on).</summary>
+    public static IProviderClient Create(ProviderProfile profile, HttpMessageHandler? handler = null, ShieldOptions? shield = null,
+                                         Action<string>? notice = null)
     {
-        var client = Raw(profile, handler);
+        var client = Raw(profile, handler, notice);
         return shield is { Enabled: true } && !profile.IsPrivateRoute ? new ShieldedClient(client, shield) : client;
     }
 
-    private static IProviderClient Raw(ProviderProfile profile, HttpMessageHandler? handler)
+    private static IProviderClient Raw(ProviderProfile profile, HttpMessageHandler? handler, Action<string>? notice)
     {
-        if (profile.Kind != ProviderKind.Bedrock) return new OpenAiClient(profile, handler);
+        if (profile.Kind != ProviderKind.Bedrock) return new OpenAiClient(profile, handler, onNotice: notice);
         var usesApiKey = profile.AwsProfile is null && !string.IsNullOrEmpty(profile.ApiKey);
         return new BedrockClient(profile, usesApiKey ? null : AwsCredentials?.Invoke(profile), handler);
     }

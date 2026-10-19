@@ -183,6 +183,11 @@ public partial class ChatView : UserControl
             case nameof(SessionVM.Cwd):
                 UpdateMeta();
                 break;
+            case nameof(SessionVM.RouteId):
+                UpdateMeta();
+                UpdateGauge();
+                UpdateStarter();
+                break;
             case nameof(SessionVM.LastUsage):
             case nameof(SessionVM.ContextUsed):
                 UpdateMeta();
@@ -294,7 +299,7 @@ public partial class ChatView : UserControl
         Starter.Visibility = empty ? Visibility.Visible : Visibility.Collapsed;
         Transcript.Visibility = empty ? Visibility.Collapsed : Visibility.Visible;
         if (!empty || _session is not { } session) return;
-        StarterSubtitle.Text = _model.Config.ActiveProvider is { } provider ? $"Running on {provider.DisplayName}" : "No model configured";
+        StarterSubtitle.Text = _model.Host.ChatRoute(session) is { } provider ? $"Running on {provider.DisplayName}" : "No model configured";
         // A chat without a project is a regular chat: general openers (and a skill or two), and a quiet way to open a folder.
         StarterTitle.Text = session.ProjectName ?? session.Title;
         OpenFolderLink.Visibility = session.IsPlain ? Visibility.Visible : Visibility.Collapsed;
@@ -371,17 +376,17 @@ public partial class ChatView : UserControl
         PresetText.SetResourceReference(TextBlock.ForegroundProperty, fullAccess ? "SystemFillColorCriticalBrush" : "TextFillColorSecondaryBrush");
         PresetInfo.ToolTip = session.Preset.Detail();
 
-        var current = _model.Host.ActiveModelId ?? _model.Config.ActiveProvider?.Model ?? "No model";
-        var limit = _model.Host.ContextLimit();
+        // This chat's own model: another chat (another project) may be on another one at the same time.
+        var route = _model.Host.ChatRoute(session);
+        var current = _model.Host.ModelIdFor(session) ?? route?.Model ?? "No model";
+        var limit = _model.Host.ContextLimit(session);
         ModelMenuText.Text = $"{current} · {Menus.ShortTokens(limit)}";
-        var masked = _model.Config.ActiveProvider is { IsPrivateRoute: false } && _model.Config.Privacy.Mask;
-        ModelMenuButton.ToolTip = "Model in use and its context window. Pick a Spark Swapper model to switch what that box serves " +
-                                  "(also /swap), or make another model the primary." +
+        var masked = route is { IsPrivateRoute: false } && _model.Config.Privacy.Mask;
+        ModelMenuButton.ToolTip = $"This chat's model{(route is null ? "" : $" ({route.DisplayName})")} and its context window. Pick another model for this chat " +
+                                  "(other chats keep theirs; new chats in this project start with it), or a Spark Swapper model to switch what that box serves (also /swap)." +
                                   (masked ? "\nNot private: sensitive details are masked before anything is sent to it." : "");
 
-        var fallback = _model.Config.ActiveProvider?.Thinking;
-        var level = session.Thinking ?? fallback;
-        ThinkingText.Text = $"Thinking: {level?.Label() ?? "Default"}";
+        ThinkingText.Text = Menus.ThinkingLabel(_model, session);
         ThinkingButton.ToolTip = "How hard the model thinks before answering (sent as reasoning_effort / enable_thinking). Also: /think <level>";
 
         ProjectInfo.Visibility = session.ProjectName is null ? Visibility.Collapsed : Visibility.Visible;
@@ -395,16 +400,16 @@ public partial class ChatView : UserControl
     private void UpdateGauge()
     {
         if (_session is not { } session) return;
-        var limit = _model.Host.ContextLimit();
+        var limit = _model.Host.ContextLimit(session);
         var used = _model.Host.ContextUsed(session.Id, Composer.Text);
         var fraction = limit > 0 ? Math.Min(1.0, used / (double)limit) : 0;
         GaugeFill.Width = Math.Max(fraction > 0 ? 3 : 0, 64 * fraction);
         var key = fraction >= 0.9 ? "SystemFillColorCriticalBrush" : fraction >= 0.7 ? "SystemFillColorCautionBrush" : "TextFillColorSecondaryBrush";
         GaugeFill.SetResourceReference(Border.BackgroundProperty, key);
         GaugeText.Text = $"{used:N0} / {limit:N0} ctx";
-        var model = _model.Host.ActiveModelId ?? "this model";
+        var model = _model.Host.ModelIdFor(session) ?? "this model";
         Gauge.ToolTip = GaugeText.ToolTip =
-            $"Context window in use for {model}: {used:N0} of {limit:N0} tokens — window {_model.Host.ContextSource()}. Type /compact to free space.";
+            $"Context window in use for {model}: {used:N0} of {limit:N0} tokens — window {_model.Host.ContextSource(session)}. Type /compact to free space.";
     }
 
     private void UpdateSkillsButton()
@@ -638,7 +643,7 @@ public partial class ChatView : UserControl
     private void ModelMenu_Click(object sender, RoutedEventArgs e)
     {
         if (_model.Spark.Boxes.Any(b => b.Status is null)) _ = _model.Spark.RefreshAsync();
-        Menus.Open(Menus.Model(_model), ModelMenuButton, PlacementMode.Top);
+        Menus.Open(Menus.Model(_model, _session), ModelMenuButton, PlacementMode.Top);
     }
 
     private void Thinking_Click(object sender, RoutedEventArgs e)

@@ -159,4 +159,28 @@ public sealed class ConversationLogTests : IDisposable
         Assert.Equal("naïve 😀", reloaded.LoadItems("s")[0].Text);
         Assert.Equal(_dir.Path, reloaded.StorageDirectory);
     }
+
+    /// <summary>Each chat's own model and thinking level are stored with it (session.route, session.thinking — the fields
+    /// Vision for macOS writes); a chat from before they existed reads as "not chosen".</summary>
+    [Fact]
+    public void AChatsModelChoiceIsStoredWithIt()
+    {
+        var log = NewLog();
+        log.Upsert("s1", _dir["one"], "One", null);
+        log.SetChoice("s1", "Spark B|qwen3.8", "low");
+        File.WriteAllText(Path.Combine(_dir.Path, "old.json"),
+            """{"session":{"id":"old","title":"Old","updatedAt":"2026-10-01T10:00:00+00:00"},"items":[]}""");
+
+        var reloaded = NewLog();
+        var chat = reloaded.List().Single(s => s.Id == "s1");
+        Assert.Equal("Spark B|qwen3.8", chat.Route);
+        Assert.Equal("low", chat.Thinking);
+        var old = reloaded.List().Single(s => s.Id == "old");
+        Assert.Null(old.Route);
+        Assert.Null(old.Thinking);
+        Assert.Contains("\"route\":\"Spark B|qwen3.8\"", File.ReadAllText(Path.Combine(_dir.Path, "s1.json")));
+
+        reloaded.SetChoice("s1", null, null);
+        Assert.Null(NewLog().List().Single(s => s.Id == "s1").Route);
+    }
 }

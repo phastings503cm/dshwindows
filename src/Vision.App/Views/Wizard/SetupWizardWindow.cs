@@ -179,6 +179,13 @@ public sealed class SetupWizardWindow : Window, IGuideHost
         ((PlanGuide)_guide!).ShowDemo(page);
     }
 
+    /// <summary>For the self-test: the Z.ai plan's endpoint picker and its key check, with sample state.</summary>
+    internal void ShowZaiDemo(PlanPage page)
+    {
+        if (_guide is not PlanGuide) StartPlanGuide(SubscriptionPlans.Zai);
+        ((PlanGuide)_guide!).ShowZaiDemo(page);
+    }
+
     /// <summary>For the self-test: the Bedrock guide on <paramref name="page"/>, with sample state.</summary>
     internal void ShowBedrockDemo(BedrockPage page, bool terms = false)
     {
@@ -583,6 +590,9 @@ public sealed class SetupWizardWindow : Window, IGuideHost
         panel.Children.Add(Choice(Icons.Key, "A subscription or API plan — GLM, Kimi, Qwen, OpenAI",
             "Use your Z.ai, Kimi, Alibaba Cloud or OpenAI plan. A guide shows where to get the key.",
             false, () => StartPlanGuide()));
+        panel.Children.Add(Choice(Icons.Key, "Z.ai (GLM) — GLM-5.3 with a Coding Plan or API key",
+            "Pick the endpoint your key is for (Coding Plan, General API, or China). Vision checks the key, and says which endpoint it belongs to if it's on the wrong one.",
+            false, () => StartPlanGuide(SubscriptionPlans.Zai)));
         panel.Children.Add(Choice(Icons.Education, "I have a DGX Spark — walk me through everything (beginner)",
             "Step by step, with a picture for each: power it on, find it on your network, install Spark Swapper, and connect Vision. No terminal needed — it can even make a USB stick to reinstall it.",
             false, () => StartGuide(resume: false)));
@@ -649,6 +659,9 @@ public sealed class SetupWizardWindow : Window, IGuideHost
         panel.Children.Add(Choice(Icons.Key, "A subscription or API plan — GLM, Kimi, Qwen, OpenAI",
             "Use your Z.ai, Kimi, Alibaba Cloud or OpenAI plan. A guide shows where to get the key.",
             false, () => StartPlanGuide()));
+        panel.Children.Add(Choice(Icons.Key, "Z.ai (GLM) — GLM-5.3 with a Coding Plan or API key",
+            "Pick the endpoint your key is for (Coding Plan, General API, or China). Vision checks the key, and says which endpoint it belongs to if it's on the wrong one.",
+            false, () => StartPlanGuide(SubscriptionPlans.Zai)));
         foreach (var kind in ProviderKinds.All)
         {
             var (title, detail) = kind switch

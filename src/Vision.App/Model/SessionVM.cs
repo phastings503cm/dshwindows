@@ -130,6 +130,10 @@ public sealed partial class SessionVM : ObservableObject
     [ObservableProperty] private bool _stopping;
     /// <summary>This chat's thinking level; null = the provider's default.</summary>
     [ObservableProperty] private ThinkingLevel? _thinking;
+    /// <summary>The route (<see cref="ProviderProfile.RouteId"/>) this chat talks to — its own, stored with the conversation, so
+    /// two chats in two projects never share a model by accident. Null = not chosen yet (it takes the primary when it next
+    /// sends, and keeps it). Set through <see cref="AgentHost.SetChatRoute"/>.</summary>
+    [ObservableProperty] private string? _routeId;
     /// <summary>The model's live reasoning for the current step (not persisted).</summary>
     [ObservableProperty] private string _reasoning = "";
     [ObservableProperty] private DateTimeOffset? _reasoningStarted;

@@ -58,6 +58,8 @@ public sealed class ModelsPage : UserControl
             var menu = new ContextMenu();
             menu.Items.Add(Menus.Item("Spark Swapper (connection code)…", () => model.ShowSwapperGuide(), Icons.Connect));
             menu.Items.Add(Menus.Item("Subscription plan…", () => model.ShowPlanGuide(), Icons.Key));
+            menu.Items.Add(Menus.Item("Z.ai (GLM)…", () => Edit(new ProviderProfile(ProviderKind.OpenAICompat, ZaiEndpoint.Coding.RouteName(),
+                ZaiEndpoint.Coding.BaseUrl(), "glm-5.3") { ContextWindow = 1_000_000 }), Icons.Key));
             menu.Items.Add(Menus.Item("Amazon Bedrock…", () => model.ShowBedrockGuide(), Icons.Cloud));
             menu.Items.Add(Menus.Item("Other OpenAI-compatible server…",
                 () => Edit(new ProviderProfile(ProviderKind.OpenAICompat, "New server", "http://127.0.0.1:8000/v1", "")), Icons.Add));
@@ -243,6 +245,19 @@ public sealed class ModelsPage : UserControl
         if (primary && !enabled)
             controls.Children.Add(WithMargin(Ui.Status("Switched off, but it's the primary: switch it on, or make another model primary.", "SystemFillColorCautionBrush"),
                 new Thickness(0, 4, 16, 4)));
+        // What the server refused before (and Vision stopped sending), with a way to try those settings again.
+        if (provider.Kind != ProviderKind.Bedrock
+            && RequestAdaptationStore.Shared.Adaptation(RequestAdaptationStore.Key(provider.BaseUrl, provider.Model)) is { IsEmpty: false } learned)
+        {
+            var text = Ui.Secondary($"Learned from the server: {learned.Summary.Replace("`", "")}", 12);
+            text.ToolTip = "The server refused these settings for this model, so Vision stopped sending them (it said so in the chat). Forget it to send them again.";
+            var forget = Ui.LinkButton("Forget", () =>
+            {
+                RequestAdaptationStore.Shared.ForgetKey(RequestAdaptationStore.Key(provider.BaseUrl, provider.Model));
+                Rebuild();
+            });
+            controls.Children.Add(WithMargin(Ui.Stack(Orientation.Horizontal, text, WithMargin(forget, new Thickness(6, 0, 0, 0))), new Thickness(0, 4, 16, 4)));
+        }
         if (_model.RouteChecks.TryGetValue(provider.RouteId, out var check))
         {
             var dot = new System.Windows.Shapes.Ellipse { Width = 8, Height = 8, Margin = new Thickness(0, 0, 5, 0), VerticalAlignment = VerticalAlignment.Center };
@@ -472,6 +487,16 @@ public sealed class ModelsPage : UserControl
             profile.ApiKey = key.Length == 0 ? null : key;
             try
             {
+                // Z.ai lists models for any valid key on any endpoint; only a reply proves the endpoint fits the key.
+                if (ZaiEndpoints.Of(profile.BaseUrl) is { } endpoint)
+                {
+                    var result = await ZaiDiagnosis.RunAsync(endpoint, profile.Model, async (where, ct) =>
+                    {
+                        var request = new LlmRequest("", [LlmMessage.User("Reply with OK.")], [], profile.Model, MaxTokens: 1);
+                        await foreach (var _ in ProviderClients.Create(profile with { BaseUrl = where.BaseUrl() }).StreamAsync(request, ct)) { }
+                    });
+                    return (route, new AppModel.RouteCheck(result.Ok, result.Message, DateTimeOffset.Now));
+                }
                 var client = ProviderClients.Create(profile);
                 var models = await client.ListModelsAsync();
                 var info = await client.ModelInfoAsync();
@@ -515,6 +540,19 @@ public sealed class ProviderEditorWindow : Window
     private readonly TextBox _headers = Ui.Field(mono: true);
     private readonly TextBlock _status = Ui.Secondary("");
     private readonly StackPanel _keyRow;
+    /// <summary>Z.ai's endpoint (Coding Plan, General API, China — Coding Plan, China — General API), shown for a Z.ai route.</summary>
+    private readonly ComboBox _endpoint = new() { MinWidth = 260 };
+    private readonly TextBlock _endpointDetail = Ui.Secondary("", 11.5);
+    private readonly StackPanel _endpointRow;
+    private readonly TextBlock _thinkingHint = Ui.Secondary("", 11.5);
+    private readonly TextBlock _temperatureHint = Ui.Secondary("", 11.5);
+    /// <summary>What the Test button found, in plain words, and a switch to the endpoint the key belongs to.</summary>
+    private readonly TextBlock _testResult = Ui.Text("", 12.5);
+    private readonly Button _switchEndpoint = Ui.Button("Switch", () => { }, accent: true);
+    private ZaiEndpoint? _worksOn;
+    private bool _testing;
+    /// <summary>The kind picker's entry for Z.ai: an OpenAI-compatible route at one of Z.ai's endpoints.</summary>
+    private const string ZaiKind = "zai";
 
     public ProviderEditorWindow(AppModel model, ProviderProfile profile)
     {
@@ -530,11 +568,42 @@ public sealed class ProviderEditorWindow : Window
 
         // A Bedrock route's kind, address and sign-in come from its guide; the rest can be tuned here.
         var bedrock = profile.Kind == ProviderKind.Bedrock;
+        var zai = !bedrock && ZaiEndpoints.Of(profile.BaseUrl) is not null;
         foreach (var kind in bedrock ? [ProviderKind.Bedrock] : ProviderKinds.All)
-            _kind.Items.Add(new ComboBoxItem { Content = kind.Label(), Tag = kind, IsSelected = kind == profile.Kind });
+            _kind.Items.Add(new ComboBoxItem { Content = kind.Label(), Tag = kind, IsSelected = !zai && kind == profile.Kind });
+        // Z.ai (GLM) is first-class: an OpenAI-compatible route, with its endpoints to pick from and its models listed.
+        if (!bedrock) _kind.Items.Add(new ComboBoxItem { Content = "Z.ai (GLM)", Tag = ZaiKind, IsSelected = zai });
         _kind.IsEnabled = !bedrock;
         _url.IsReadOnly = bedrock;
-        _kind.SelectionChanged += (_, _) => UpdateKeyVisibility();
+        foreach (var endpoint in ZaiEndpoints.All)
+            _endpoint.Items.Add(new ComboBoxItem { Content = endpoint.Name(), Tag = endpoint, IsSelected = ZaiEndpoints.Of(profile.BaseUrl) == endpoint });
+        _endpoint.SelectionChanged += (_, _) =>
+        {
+            if (_endpoint.SelectedItem is not ComboBoxItem { Tag: ZaiEndpoint chosen }) return;
+            var before = ZaiEndpoints.Of(_url.Text);
+            _url.Text = chosen.BaseUrl();
+            // A name Vision gave the route follows the endpoint; one the user typed stays.
+            if (_name.Text.Trim().Length == 0 || before is { } was && _name.Text.Trim() == was.RouteName()) _name.Text = chosen.RouteName();
+            _endpointDetail.Text = chosen.Detail();
+            ClearTest();
+        };
+        _kind.SelectionChanged += (_, _) =>
+        {
+            if (IsZai && ZaiEndpoints.Of(_url.Text) is null)
+            {
+                _url.Text = ZaiEndpoint.Coding.BaseUrl();
+                if (_name.Text.Trim().Length == 0 || _name.Text.Trim() == "New server") _name.Text = ZaiEndpoint.Coding.RouteName();
+                if (_modelName.Text.Trim().Length == 0) _modelName.Text = "glm-5.3";
+            }
+            UpdateKeyVisibility();
+            UpdateZai();
+        };
+        _url.TextChanged += (_, _) =>
+        {
+            UpdateThinkingChoices();
+            ClearTest();
+            if (IsZai) SelectEndpoint(ZaiEndpoints.Of(_url.Text));
+        };
         _name.Text = profile.Name;
         _url.Text = profile.BaseUrl;
         _key.Password = model.Config.ApiKey(profile);
@@ -543,10 +612,18 @@ public sealed class ProviderEditorWindow : Window
         _temperature.Text = profile.Temperature?.ToString(System.Globalization.CultureInfo.InvariantCulture) ?? "";
         _maxTokens.Text = profile.MaxOutputTokens?.ToString() ?? "";
         _context.Text = profile.ContextWindow?.ToString() ?? "";
-        _thinking.Items.Add(new ComboBoxItem { Content = "Server default", Tag = "", IsSelected = profile.ReasoningEffort is null });
-        foreach (var level in ThinkingLevels.All)
-            _thinking.Items.Add(new ComboBoxItem { Content = $"{level.Label()} — {level.Blurb()}", Tag = level.RawValue(), IsSelected = profile.ReasoningEffort == level.RawValue() });
-        _vision.IsChecked = profile.Vision ?? true;
+        _chosenEffort = profile.ReasoningEffort;
+        _thinking.SelectionChanged += (_, _) =>
+        {
+            if (!_fillingThinking) _chosenEffort = _thinking.SelectedItem is ComboBoxItem { Tag: string raw } && raw.Length > 0 ? raw : null;
+        };
+        _modelName.AddHandler(System.Windows.Controls.Primitives.TextBoxBase.TextChangedEvent, new TextChangedEventHandler((_, _) =>
+        {
+            UpdateThinkingChoices();
+            ClearTest();
+        }));
+        _modelName.SelectionChanged += (_, _) => Dispatcher.BeginInvoke(UpdateThinkingChoices);
+        _vision.IsChecked = profile.Vision ?? ModelRequestRules.For(profile).AcceptsImages ?? true;
         _interactiveOnly.IsChecked = profile.IsInteractiveOnly;
         _interactiveOnly.ToolTip = "The plan's terms allow only interactive use (the Qwen Coding Plan): task lists and other unattended work won't run on it as the primary.";
         _pin = profile.PinnedCertificate;
@@ -557,15 +634,33 @@ public sealed class ProviderEditorWindow : Window
         Placeholder.SetText(_headers, "X-Org-Id: 1234");
 
         _keyRow = Labeled("API key", _key, "Stored in Windows Credential Manager and only sent to this server.");
+        _endpointRow = Labeled("Endpoint", _endpoint);
+        _endpointDetail.Margin = new Thickness(0, 4, 0, 0);
+        _endpointRow.Children.Add(_endpointDetail);
+        _testResult.TextWrapping = TextWrapping.Wrap;
+        _testResult.Margin = new Thickness(0, 8, 0, 0);
+        _switchEndpoint.Click += (_, _) =>
+        {
+            if (_worksOn is not { } better) return;
+            SelectEndpoint(better);
+            _ = TestAsync();
+        };
+        _switchEndpoint.Visibility = Visibility.Collapsed;
+        var test = Ui.Button("Test", () => _ = TestAsync(), tooltip: "Send a one-word request with this key and model, and say in plain words what went wrong if it fails");
+        var testRow = Ui.Stack(Orientation.Horizontal, test, WithGap(_switchEndpoint));
+        testRow.Margin = new Thickness(0, 4, 0, 0);
         var form = new StackPanel();
         form.Children.Add(Ui.Section("Server"));
         form.Children.Add(Ui.Card(Ui.Stack(
             Labeled("Kind", _kind),
+            _endpointRow,
             Labeled("Name", _name),
             Labeled("Base URL", _url, bedrock
                 ? "Bedrock's endpoint for the Region. To change the Region, model or AWS sign-in, use Change… on the Models page."
                 : "The OpenAI-compatible endpoint, usually ending in /v1."),
-            _keyRow)));
+            _keyRow,
+            testRow,
+            _testResult)));
         form.Children.Add(Ui.Section("Model"));
         var discover = Ui.Button("Discover", () => _ = DiscoverAsync());
         var modelRow = new DockPanel();
@@ -579,8 +674,8 @@ public sealed class ProviderEditorWindow : Window
             Labeled("Model", modelRow),
             Labeled("Context window", Ui.Stack(Orientation.Horizontal, _context, detect),
                 "Leave blank to auto-detect from the server (vLLM/SGLang report max_model_len). Only set it to force a smaller window."),
-            Labeled("Default thinking", _thinking, "Sent as enable_thinking / reasoning_effort. Each chat can override it (/think)."),
-            Labeled("Temperature", _temperature),
+            WithHint(Labeled("Default thinking", _thinking, "Only the levels this model takes are offered. Each chat can override it (/think)."), _thinkingHint),
+            WithHint(Labeled("Temperature", _temperature), _temperatureHint),
             Labeled("Max output tokens", _maxTokens),
             _vision)));
         form.Children.Add(Ui.Section("Use"));
@@ -621,6 +716,168 @@ public sealed class ProviderEditorWindow : Window
         root.Children.Add(footer);
         root.Children.Add(Ui.Scroll(form, new Thickness(20, 4, 20, 8)));
         Content = root;
+        UpdateKeyVisibility();
+        UpdateZai();
+        UpdateThinkingChoices();
+    }
+
+    private static T WithGap<T>(T element) where T : FrameworkElement
+    {
+        element.Margin = new Thickness(8, 0, 0, 0);
+        return element;
+    }
+
+    private static StackPanel WithHint(StackPanel labeled, TextBlock hint)
+    {
+        hint.Margin = new Thickness(0, 4, 0, 0);
+        labeled.Children.Add(hint);
+        return labeled;
+    }
+
+    private bool IsZai => _kind.SelectedItem is ComboBoxItem { Tag: ZaiKind };
+
+    private void SelectEndpoint(ZaiEndpoint? endpoint)
+    {
+        foreach (ComboBoxItem item in _endpoint.Items)
+            if (item.Tag is ZaiEndpoint e && e == endpoint && !item.IsSelected) item.IsSelected = true;
+    }
+
+    /// <summary>A Z.ai route shows its endpoint picker and offers its models.</summary>
+    private void UpdateZai()
+    {
+        _endpointRow.Visibility = IsZai ? Visibility.Visible : Visibility.Collapsed;
+        if (!IsZai) return;
+        SelectEndpoint(ZaiEndpoints.Of(_url.Text) ?? ZaiEndpoint.Coding);
+        _endpointDetail.Text = (ZaiEndpoints.Of(_url.Text) ?? ZaiEndpoint.Coding).Detail();
+        if (_modelName.Items.Count == 0 && SubscriptionPlans.Find(SubscriptionPlans.Zai) is { } plan)
+            foreach (var m in plan.Models) _modelName.Items.Add(m.Id);
+    }
+
+    private string? _chosenEffort;
+    private bool _fillingThinking;
+
+    /// <summary>The thinking levels this model takes (GLM-5.3: Low, High, Max; Kimi K2.6: Off, On; Kimi K2.7 Code: none).</summary>
+    private void UpdateThinkingChoices()
+    {
+        var rules = ModelRequestRules.For(Draft());
+        _fillingThinking = true;
+        try
+        {
+            _thinking.Items.Clear();
+            _thinking.Items.Add(new ComboBoxItem { Content = "Server default", Tag = "", IsSelected = _chosenEffort is null });
+            var wanted = ThinkingLevels.FromRaw(_chosenEffort) is { } level ? rules.NearestLevel(level) : null;
+            foreach (var offered in rules.ThinkingLevels)
+                _thinking.Items.Add(new ComboBoxItem
+                {
+                    Content = $"{rules.Label(offered)} — {(rules.Thinking.Kind == ThinkingControlKind.Toggle && offered != ThinkingLevel.Off ? "Thinks before answering" : offered.Blurb())}",
+                    Tag = offered.RawValue(),
+                    IsSelected = wanted == offered,
+                });
+            if (_thinking.SelectedItem is null) _thinking.SelectedIndex = 0;
+        }
+        finally
+        {
+            _fillingThinking = false;
+        }
+        _thinkingHint.Text = rules.ThinkingLevels.Count == 0
+            ? rules.AlwaysThinks ? "This model always thinks and takes no thinking setting." : "This model has no thinking setting."
+            : rules.AlwaysThinks ? "This model always thinks; the setting picks how much." : "";
+        _thinkingHint.Visibility = _thinkingHint.Text.Length == 0 ? Visibility.Collapsed : Visibility.Visible;
+        _temperatureHint.Text = !rules.SendsTemperature
+            ? "This model fixes its own temperature, so Vision doesn't send one."
+            : rules.TemperatureRange is var (min, max) ? $"This model takes {min:0.#}–{max:0.#}; a higher setting is sent as {max:0.#}." : "";
+        _temperatureHint.Visibility = _temperatureHint.Text.Length == 0 ? Visibility.Collapsed : Visibility.Visible;
+    }
+
+    private void ClearTest()
+    {
+        if (_testing) return;
+        _testResult.Text = "";
+        _worksOn = null;
+        _switchEndpoint.Visibility = Visibility.Collapsed;
+    }
+
+    /// <summary>A one-word request with this key and model; a failure in plain words. For Z.ai, a key that doesn't fit the
+    /// endpoint is tried on the others, so the answer can say which one it belongs to.</summary>
+    private async Task TestAsync()
+    {
+        if (_testing) return;
+        _testing = true;
+        _worksOn = null;
+        _switchEndpoint.Visibility = Visibility.Collapsed;
+        _testResult.SetResourceReference(TextBlock.ForegroundProperty, "TextFillColorSecondaryBrush");
+        _testResult.Text = "Testing…";
+        var probe = Probe();
+        var model = probe.Model;
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(60));
+        try
+        {
+            if (model.Length == 0)
+            {
+                _testResult.Text = "Pick a model first.";
+                return;
+            }
+            async Task Ping(ProviderProfile route, CancellationToken ct)
+            {
+                var request = new LlmRequest("", [LlmMessage.User("Reply with OK.")], [], route.Model, MaxTokens: 1);
+                await foreach (var _ in ProviderClients.Create(route).StreamAsync(request, ct)) { }
+            }
+            bool ok;
+            string message;
+            if (ZaiEndpoints.Of(probe.BaseUrl) is { } endpoint)
+            {
+                var result = await ZaiDiagnosis.RunAsync(endpoint, model, (where, ct) => Ping(probe with { BaseUrl = where.BaseUrl() }, ct), timeout.Token);
+                (ok, message, _worksOn) = (result.Ok, result.Message, result.WorksOn);
+            }
+            else
+            {
+                try
+                {
+                    await Ping(probe, timeout.Token);
+                    (ok, message) = (true, $"✔ {probe.Name} answered with {model}.");
+                }
+                catch (LlmException error) when (error.Kind == LlmErrorKind.Http
+                                                 && SubscriptionPlans.ForBaseUrl(probe.BaseUrl) is { } found
+                                                 && error.Message == LlmException.Http(error.StatusCode, error.Body).Message)
+                {
+                    var (plan, region) = found;
+                    (ok, message) = (false, SubscriptionPlans.ExplainError(plan, region, error.StatusCode, error.Body, model));
+                }
+            }
+            _testResult.Text = message;
+            _testResult.SetResourceReference(TextBlock.ForegroundProperty, ok ? "SystemFillColorSuccessBrush" : "SystemFillColorCriticalBrush");
+            if (_worksOn is { } better)
+            {
+                _switchEndpoint.Content = $"Switch to {better.Name()}";
+                _switchEndpoint.Visibility = Visibility.Visible;
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            _testResult.Text = "No answer within a minute. Check the address, then try again.";
+            _testResult.SetResourceReference(TextBlock.ForegroundProperty, "SystemFillColorCriticalBrush");
+        }
+        catch (Exception error)
+        {
+            _testResult.Text = AgentHost.Describe(error);
+            _testResult.SetResourceReference(TextBlock.ForegroundProperty, "SystemFillColorCriticalBrush");
+        }
+        finally
+        {
+            _testing = false;
+        }
+    }
+
+    /// <summary>Self-test: the Z.ai editor after a Coding Plan key was tested on the General API (no network).</summary>
+    internal void ShowZaiDemo()
+    {
+        SelectEndpoint(ZaiEndpoint.General);
+        _key.Password = "0123456789abcdef.ZyXwVuTsRq";
+        _worksOn = ZaiEndpoint.Coding;
+        _testResult.Text = ZaiDiagnosis.SwitchAdvice(ZaiEndpoint.General, ZaiEndpoint.Coding);
+        _testResult.SetResourceReference(TextBlock.ForegroundProperty, "SystemFillColorCriticalBrush");
+        _switchEndpoint.Content = $"Switch to {ZaiEndpoint.Coding.Name()}";
+        _switchEndpoint.Visibility = Visibility.Visible;
         UpdateKeyVisibility();
     }
 
@@ -667,7 +924,10 @@ public sealed class ProviderEditorWindow : Window
             MaxOutputTokens = int.TryParse(_maxTokens.Text, out var m) && m > 0 ? m : null,
             ContextWindow = int.TryParse(_context.Text.Replace(",", "").Replace("_", ""), out var c) && c > 0 ? c : null,
             ReasoningEffort = _thinking.SelectedItem is ComboBoxItem { Tag: string raw } && raw.Length > 0 ? raw : null,
-            Vision = _vision.IsChecked == true ? null : false,
+            // Unticked: no images. Ticked: the default — unless the model is known not to read them (Z.ai's text models), when
+            // ticking it is the user's own say-so.
+            Vision = _vision.IsChecked != true ? false
+                : ModelRequestRules.For(_original with { Kind = SelectedKind, BaseUrl = _url.Text.Trim(), Model = _modelName.Text.Trim() }).AcceptsImages == false ? true : null,
             CustomHeaders = headers.Count == 0 ? null : headers,
             AwsProfile = SelectedKind == ProviderKind.Bedrock ? _original.AwsProfile : null,
             AwsRegion = SelectedKind == ProviderKind.Bedrock ? _original.AwsRegion : null,
@@ -747,6 +1007,8 @@ public sealed class ProviderEditorWindow : Window
         if (!existed || wasActive) config.Activate(profile);
         else config.Store(profile);
         config.SetApiKey(_key.Password, profile);
+        // The chats on this route follow it to its new name.
+        if (existed && _original.RouteId != profile.RouteId) config.NoteRouteRenamed(_original.RouteId, profile.RouteId);
         _model.Host.ResetRouteCache();
         DialogResult = true;
     }

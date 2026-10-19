@@ -18,6 +18,11 @@ public sealed record LogSession
     public string? Cwd { get; set; }
     public string? Preset { get; set; }
     public DateTimeOffset UpdatedAt { get; set; }
+    /// <summary>The route (<see cref="ProviderProfile.RouteId"/>) this chat talks to, and its thinking level (a
+    /// <see cref="ThinkingLevel"/> raw value) — each chat's own, so two chats in two projects never share a model by accident.
+    /// Null = not chosen yet (an older chat: it takes the primary when it next sends). The same fields as Vision for macOS.</summary>
+    public string? Route { get; set; }
+    public string? Thinking { get; set; }
 }
 
 /// <summary>Per-session conversation store: one JSON file per session under
@@ -81,6 +86,15 @@ public sealed class ConversationLog
         row.UpdatedAt = DateTimeOffset.Now;
         if (!string.IsNullOrEmpty(cwd)) row.Cwd = cwd;
         if (preset is not null) row.Preset = preset;
+        Persist(id);
+    }
+
+    /// <summary>Store the chat's own model choice.</summary>
+    public void SetChoice(string id, string? route, string? thinking)
+    {
+        if (!_rows.TryGetValue(id, out var row) || (row.Route == route && row.Thinking == thinking)) return;
+        row.Route = route;
+        row.Thinking = thinking;
         Persist(id);
     }
 

@@ -39,6 +39,9 @@ public sealed record ToolContext
     /// <summary>The model servers subagents run on (workers first, the primary as overflow). Null = a
     /// subagent uses this run's own client.</summary>
     public AgentFleet? Fleet { get; init; }
+    /// <summary>This chat's own server, which stands in for the fleet's primary (see <see cref="AgentFleet.AcquireAsync"/>).
+    /// Null = the configured primary.</summary>
+    public FleetServer? FleetHome { get; init; }
     /// <summary>The run is unattended (a chat's task list, a /goal carrying on by itself): its subagents never go to a server
     /// whose plan allows only interactive use.</summary>
     public bool Unattended { get; init; }

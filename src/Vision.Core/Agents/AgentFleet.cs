@@ -188,7 +188,11 @@ public sealed class AgentFleet
     /// Throws <see cref="FleetUnavailableException"/> when no server can be reached, and
     /// <see cref="NoPrivateServerException"/> when a sensitive task has no private server to go to. <paramref name="unattended"/>
     /// work (a chat's task list, a /goal carrying on by itself) never goes to a server whose plan allows only interactive use.</summary>
-    public async Task<FleetLease> AcquireAsync(string? preferred, CancellationToken cancellationToken, bool sensitive = false, bool unattended = false)
+    /// <param name="home">The asking chat's own server: it stands in for the configured primary, so a chat's subagents fall back
+    /// to the model that chat uses — never to the one another chat picked (the workers are shared). Null = the configured
+    /// primary.</param>
+    public async Task<FleetLease> AcquireAsync(string? preferred, CancellationToken cancellationToken, bool sensitive = false, bool unattended = false,
+                                               FleetServer? home = null)
     {
         var tried = new HashSet<string>(StringComparer.Ordinal);
         Exception? lastError = null;
@@ -200,8 +204,9 @@ public sealed class AgentFleet
             TimeSpan? recovery = null;
             lock (_lock)
             {
-                if (_servers.Count == 0) throw new FleetUnavailableException("No model server is configured.");
-                var pool = PoolLocked(sensitive, unattended);
+                var servers = ServersLocked(home);
+                if (servers.Count == 0) throw new FleetUnavailableException("No model server is configured.");
+                var pool = PoolLocked(sensitive, unattended, servers);
                 if (sensitive)
                 {
                     if (pool.Count == 0 || pool.All(s => tried.Contains(s.Id))) throw new NoPrivateServerException(lastError);
@@ -210,16 +215,17 @@ public sealed class AgentFleet
                     throw new NoUnattendedServerException();
                 else if (pool.All(s => tried.Contains(s.Id)))
                     throw new FleetUnavailableException("No model server answered" + (lastError is null ? "." : $": {lastError.Message}"), lastError);
-                chosen = ChooseLocked(preferred, tried, pool, sensitive);
+                chosen = ChooseLocked(preferred, tried, pool, sensitive, servers);
                 if (chosen is not null)
                 {
-                    _states[chosen.Id].InFlight++;
+                    if (!_states.TryGetValue(chosen.Id, out var state)) _states[chosen.Id] = state = new State();
+                    state.InFlight++;
                 }
                 else
                 {
                     waiter = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
                     _waiters.Add(waiter);
-                    recovery = NextRecoveryLocked(tried);
+                    recovery = NextRecoveryLocked(tried, servers);
                 }
             }
             if (chosen is null)
@@ -311,33 +317,51 @@ public sealed class AgentFleet
 
     /// <summary>Where a sensitive task may run: private workers, and the primary when it is private and may take
     /// subagents (or is the only server there is).</summary>
-    private List<FleetServer> EligibleForSensitiveLocked()
+    private List<FleetServer> EligibleForSensitiveLocked(List<FleetServer> servers)
     {
-        var anyWorkers = _servers.Any(s => !s.IsPrimary);
-        return _servers.Where(s => s.IsPrivate && (!s.IsPrimary || UsePrimaryWhenWorkersBusy || !anyWorkers)).ToList();
+        var anyWorkers = servers.Any(s => !s.IsPrimary);
+        return servers.Where(s => s.IsPrivate && (!s.IsPrimary || UsePrimaryWhenWorkersBusy || !anyWorkers)).ToList();
+    }
+
+    /// <summary>The servers one request may use: the configured ones, with the asking chat's own server as the primary.</summary>
+    private List<FleetServer> ServersLocked(FleetServer? home)
+    {
+        if (home is null) return [.. _servers];
+        var asPrimary = home.IsPrimary ? home : new FleetServer
+        {
+            Id = home.Id, Label = home.Label, IsPrimary = true, IsPrivate = home.IsPrivate, InteractiveOnly = home.InteractiveOnly,
+            MaxParallel = home.MaxParallel, Resolve = home.Resolve,
+        };
+        return [.. _servers.Where(s => !s.IsPrimary && s.Id != asPrimary.Id), asPrimary];
     }
 
     /// <summary>The servers a task may go to: private ones for a sensitive task, and none whose plan allows only interactive
     /// use for unattended work.</summary>
-    private List<FleetServer> PoolLocked(bool sensitive, bool unattended)
+    private List<FleetServer> PoolLocked(bool sensitive, bool unattended, List<FleetServer> servers)
     {
-        var pool = sensitive ? EligibleForSensitiveLocked() : [.. _servers];
+        var pool = sensitive ? EligibleForSensitiveLocked(servers) : [.. servers];
         return unattended ? pool.Where(s => !s.InteractiveOnly).ToList() : pool;
     }
 
-    private FleetServer? ChooseLocked(string? preferred, HashSet<string> tried, List<FleetServer> pool, bool sensitive)
+    private State StateLocked(string id)
+    {
+        if (!_states.TryGetValue(id, out var state)) _states[id] = state = new State();
+        return state;
+    }
+
+    private FleetServer? ChooseLocked(string? preferred, HashSet<string> tried, List<FleetServer> pool, bool sensitive, List<FleetServer> servers)
     {
         var now = _clock.GetUtcNow();
         var candidates = pool.Where(s => !tried.Contains(s.Id)).ToList();
         if (candidates.Count == 0) return null;
         // Skip servers that just failed — unless that would leave none.
-        var healthy = candidates.Where(s => IsHealthyLocked(_states[s.Id], now)).ToList();
+        var healthy = candidates.Where(s => IsHealthyLocked(StateLocked(s.Id), now)).ToList();
         if (healthy.Count == 0) healthy = candidates;
 
         FleetServer? PickFrom(IEnumerable<FleetServer> pool) =>
             pool.Where(HasCapacityLocked)
-                .OrderBy(s => _states[s.Id].InFlight / (double)Math.Max(1, s.MaxParallel))
-                .ThenBy(s => _servers.IndexOf(s))
+                .OrderBy(s => StateLocked(s.Id).InFlight / (double)Math.Max(1, s.MaxParallel))
+                .ThenBy(s => servers.FindIndex(x => x.Id == s.Id))
                 .FirstOrDefault();
 
         if (!string.IsNullOrWhiteSpace(preferred))
@@ -357,11 +381,11 @@ public sealed class AgentFleet
     }
 
     /// <summary>How long until the first blacklisted server (one not yet tried) is trusted again; null if none is waiting out a ban.</summary>
-    private TimeSpan? NextRecoveryLocked(HashSet<string> tried)
+    private TimeSpan? NextRecoveryLocked(HashSet<string> tried, List<FleetServer> servers)
     {
         var now = _clock.GetUtcNow();
         TimeSpan? soonest = null;
-        foreach (var server in _servers)
+        foreach (var server in servers)
         {
             if (tried.Contains(server.Id) || !_states.TryGetValue(server.Id, out var state)) continue;
             if (state.UnhealthyUntil is not { } until || until <= now) continue;
@@ -371,7 +395,7 @@ public sealed class AgentFleet
         return soonest;
     }
 
-    private bool HasCapacityLocked(FleetServer server) => _states[server.Id].InFlight < Math.Max(1, server.MaxParallel);
+    private bool HasCapacityLocked(FleetServer server) => StateLocked(server.Id).InFlight < Math.Max(1, server.MaxParallel);
 
     private static bool IsHealthyLocked(State state, DateTimeOffset now) => state.UnhealthyUntil is not { } until || until <= now;
 

@@ -99,6 +99,7 @@ public sealed partial class AgentHost : ObservableObject
             OnPropertyChanged(nameof(AnyRunning));
             OnPropertyChanged(nameof(RunningCount));
         };
+        InitChatRoutes();
         Reload();
         // Skills that ship with the app (godot-debugging) are kept current on every launch.
         try
@@ -212,6 +213,7 @@ public sealed partial class AgentHost : ObservableObject
         var vm = new SessionVM(id, "New chat", cwd, resolved);
         Sessions.Insert(0, vm);
         Log.Upsert(id, cwd, "New chat", resolved.RawValue());
+        AssignInitialChoice(vm);
         if (select) SelectedId = id;
         return vm;
     }
@@ -270,6 +272,9 @@ public sealed partial class AgentHost : ObservableObject
             var vm = new SessionVM(row.Id, row.Title, cwd, PermissionPresets.FromRaw(row.Preset) ?? PermissionPreset.WorkspaceWrite)
             {
                 UpdatedAt = row.UpdatedAt,
+                // The chat's own model and thinking level (null in a chat from before they were stored).
+                RouteId = row.Route,
+                Thinking = ThinkingLevels.FromRaw(row.Thinking),
             };
             Sessions.Add(vm);
         }
@@ -470,6 +475,8 @@ public sealed partial class AgentHost : ObservableObject
             VaultGrants = VaultGrantsFor(sessionId),
             BackgroundAgents = BackgroundPool(sessionId),
             Fleet = Fleet,
+            // This chat's subagents fall back to this chat's own model, never to another chat's (the workers are shared).
+            FleetHome = FleetHome(vm, profile),
             Unattended = IsUnattended(sessionId),
             Roster = RosterFor(sessionId),
             AgentTypes = agents,
@@ -558,7 +565,7 @@ public sealed partial class AgentHost : ObservableObject
         // "/deploy staging": a skill or command invoked by name.
         if (attachments.Count == 0 && MatchSkillCommand(text, vm) is var (skill, args) && InvocationText(skill, args) is { } expanded)
         {
-            if (IsServerSwitching?.Invoke() == true)
+            if (ChatServerSwitching(vm))
             {
                 vm.Note("The Spark is switching models right now — send again once it says it's ready.");
                 return;
@@ -568,7 +575,7 @@ public sealed partial class AgentHost : ObservableObject
             StartRun(vm, ct => RunTurnAsync(vm, display, [], goal: null, modelText: expanded, ct));
             return;
         }
-        if (IsServerSwitching?.Invoke() == true)
+        if (ChatServerSwitching(vm))
         {
             vm.Note("The Spark is switching models right now — send again once it says it's ready (usually a few minutes).");
             return;
@@ -640,25 +647,28 @@ public sealed partial class AgentHost : ObservableObject
 
             case SlashCommand.Think think:
             {
-                var fallback = Config.ActiveProvider?.Thinking;
+                var fallback = ChatRoute(vm)?.Thinking;
+                var rules = RequestRules(vm);
                 if (think.Argument is null)
                 {
                     var current = vm.Thinking ?? fallback;
                     vm.Note($"Thinking: **{current?.Label() ?? "server default"}**"
                             + (vm.Thinking is null ? " (from the provider setting)" : " (this chat)")
-                            + ". Change it with `/think off|low|medium|high|max|default`.");
+                            + ". Change it with `/think off|low|medium|high|max|default`."
+                            + (current is { } shown && rules is not null ? rules.Caveat(shown) : ""));
                     return;
                 }
                 var arg = think.Argument.ToLowerInvariant();
                 if (arg is "default" or "reset" or "auto")
                 {
-                    vm.Thinking = null;
+                    SetChatThinking(vm, null);
                     vm.Note($"Thinking back to the provider default ({fallback?.Label() ?? "server default"}).");
                 }
                 else if (ThinkingLevels.ParseUserInput(think.Argument) is { } level)
                 {
-                    vm.Thinking = level;
-                    vm.Note($"Thinking set to **{level.Label()}** for this chat — {level.Blurb().ToLowerInvariant()}.");
+                    SetChatThinking(vm, level);
+                    vm.Note($"Thinking set to **{level.Label()}** for this chat — {level.Blurb().ToLowerInvariant()}."
+                            + (rules?.Caveat(level) ?? ""));
                 }
                 else
                 {
@@ -670,12 +680,12 @@ public sealed partial class AgentHost : ObservableObject
             case SlashCommand.Context:
                 StartRun(vm, async _ =>
                 {
-                    await ResolveRouteAsync(force: true);
-                    var limit = ContextLimit();
+                    await ResolveRouteAsync(vm, force: true);
+                    var limit = ContextLimit(vm);
                     var used = ContextUsed(vm.Id, "");
-                    var model = Config.ActiveProvider is { } p ? Effective(p).Model : "?";
+                    var model = ModelIdFor(vm) ?? "?";
                     vm.Note($"Context: {Fmt.N(used)} of {Fmt.N(limit)} tokens used ({(int)(used / (double)Math.Max(limit, 1) * 100)}%). " +
-                            $"Model `{model}`; window {ContextSource()}. Auto-compaction starts at {(int)(Compaction.TriggerFraction * 100)}%.");
+                            $"Model `{model}`; window {ContextSource(vm)}. Auto-compaction starts at {(int)(Compaction.TriggerFraction * 100)}%.");
                 });
                 break;
 
@@ -724,7 +734,7 @@ public sealed partial class AgentHost : ObservableObject
                     UserSpoke(vm.Id);
                     return;
                 }
-                if (IsServerSwitching?.Invoke() == true)
+                if (ChatServerSwitching(vm))
                 {
                     vm.Note("The Spark is switching models right now — send again once it says it's ready.");
                     return;
@@ -800,19 +810,19 @@ public sealed partial class AgentHost : ObservableObject
                 vm.Note("Nothing to compact yet.");
                 return;
             }
-            if (await ResolveRouteAsync() is not { } profile)
+            if (await ResolveRouteAsync(vm) is not { } profile)
             {
                 vm.Note(LlmException.NoModel().Message, MessageRole.Error);
                 return;
             }
             var prompt = _systemPrompts.GetValueOrDefault(sessionId) ?? _basePrompt;
             var before = TokenEstimate.Request(prompt, messages);
-            if (Compaction.MakePlan(before, ContextLimit(), messages, force: true) is not { } plan)
+            if (Compaction.MakePlan(before, ContextLimit(profile), messages, force: true) is not { } plan)
             {
                 vm.Note($"The conversation is already as compact as it gets (~{Fmt.N(before)} tokens).");
                 return;
             }
-            var summary = await Compaction.SummarizeAsync(MakeClient(profile), plan, model: profile.Model, focus: focus,
+            var summary = await Compaction.SummarizeAsync(MakeClient(profile, sessionId), plan, model: profile.Model, focus: focus,
                 cancellationToken: ct);
             if (summary is null)
             {
@@ -861,7 +871,7 @@ public sealed partial class AgentHost : ObservableObject
         {
             // A server overflow that still surfaced tells us the real window is smaller than we
             // budgeted — learn it so the gauge and future compaction use the true number.
-            if (error.Kind == LlmErrorKind.Overflow && error.Limit > 0 && Config.ActiveProvider is { } provider)
+            if (error.Kind == LlmErrorKind.Overflow && error.Limit > 0 && ChatRoute(vm) is { } provider)
             {
                 _probedContext[provider.RouteId] = Math.Min(error.Limit, _probedContext.GetValueOrDefault(provider.RouteId, error.Limit));
                 ContextInfoChanged?.Invoke();
@@ -925,19 +935,26 @@ public sealed partial class AgentHost : ObservableObject
             if (title.Length > 0) RenameSession(sessionId, title);
         }
 
-        // Re-read what the server serves right now: the Spark can swap models between turns, and the
-        // window/model id must follow.
-        var profile = await ResolveRouteAsync() ?? throw LlmException.NoModel();
+        // The chat's own model (an older chat that never chose takes the primary now, and keeps it). Re-read what the server
+        // serves right now: the Spark can swap models between turns, and the window/model id must follow.
+        PinRouteIfUnset(vm);
+        var profile = await ResolveRouteAsync(vm) ?? throw LlmException.NoModel();
         ct.ThrowIfCancellationRequested();
-        var window = ContextLimit();
+        var window = ContextLimit(profile);
         var thinking = vm.Thinking;
         var skillState = BuildSkillState(vm);
         var shell = Config.ResolvedAgentShell;
         var key = new EngineKey(ProfileKey(profile), window, thinking, vm.Preset, skillState.Signature,
                                 Config.ComputerToolsEnabled, VisionOn(profile), shell.Executable, Vault.Revision,
-                                vm.Goal is not null, MemorySignature(vm), AgentsStampFor(vm), RoutingStamp(), IsUnattended(sessionId));
-        if (_engineKeys.TryGetValue(sessionId, out var previous) && !string.Equals(ModelOf(previous.Profile), profile.Model, StringComparison.Ordinal))
-            vm.Note($"The server is now serving `{profile.Model}` (was `{ModelOf(previous.Profile)}`) — switched to it, {Fmt.N(window)}-token window.");
+                                vm.Goal is not null, MemorySignature(vm), AgentsStampFor(vm), RoutingStamp(profile), IsUnattended(sessionId));
+        if (_engineKeys.TryGetValue(sessionId, out var previous))
+        {
+            // The chat was moved to another model (its model menu): say which one answers from here on.
+            if (!string.Equals(ServerOf(previous.Profile), ServerOf(ProfileKey(profile)), StringComparison.Ordinal))
+                vm.Note($"This chat now uses {RouteLabel(profile)} — `{profile.Model}`, {Fmt.N(window)}-token window.");
+            else if (!string.Equals(ModelOf(previous.Profile), profile.Model, StringComparison.Ordinal))
+                vm.Note($"The server is now serving `{profile.Model}` (was `{ModelOf(previous.Profile)}`) — switched to it, {Fmt.N(window)}-token window.");
+        }
         if (!_engines.TryGetValue(sessionId, out var engine) || _engineKeys.GetValueOrDefault(sessionId) != key)
         {
             engine = BuildEngine(vm, MakeChatClient(profile, sessionId), window, thinking, skillState);
@@ -1004,7 +1021,16 @@ public sealed partial class AgentHost : ObservableObject
     /// <summary>Every model client the host makes goes through here, so tests can swap the network. A route that isn't
     /// private gets the sensitive-data shield (reporting to <paramref name="sessionId"/>'s chat, when given).</summary>
     private IProviderClient MakeClient(ProviderProfile profile, string? sessionId = null) =>
-        ProviderClients.Create(profile, HttpHandlerForTesting, ShieldFor(sessionId));
+        ProviderClients.Create(profile, HttpHandlerForTesting, ShieldFor(sessionId),
+            sessionId is null ? null : text => _dispatcher.BeginInvoke(DispatcherPriority.Normal, () => OnAdapted(sessionId, text)));
+
+    /// <summary>A parameter the server refused was dropped (and remembered): one line in the chat, not an error.</summary>
+    private void OnAdapted(string sessionId, string text)
+    {
+        if (Session(sessionId) is not { } vm) return;
+        vm.Note(text);
+        Log.RecordItem(sessionId, "notice", text);
+    }
 
     /// <summary>Tests: answer model requests from this handler instead of the network.</summary>
     public HttpMessageHandler? HttpHandlerForTesting { get; set; }
@@ -1018,6 +1044,9 @@ public sealed partial class AgentHost : ObservableObject
             p.CustomHeaders is null ? "" : string.Join(",", p.CustomHeaders.OrderBy(h => h.Key).Select(h => $"{h.Key}={h.Value}")));
 
     private static string ModelOf(string profileKey) => profileKey.Split('|') is { Length: > 3 } parts ? parts[3] : "";
+
+    /// <summary>The kind, name and address in a profile key: which route it is, whatever model it serves.</summary>
+    private static string ServerOf(string profileKey) => string.Join("|", profileKey.Split('|').Take(3));
 
     private void Apply(EngineEvent evt, string sessionId)
     {
@@ -1151,7 +1180,8 @@ public sealed partial class AgentHost : ObservableObject
     {
         if (profile is null) return true;
         if (_noVisionRoutes.Contains(profile.RouteId)) return false;
-        return profile.Vision ?? true;
+        // Unset: what the model is known to take (Z.ai's text models read no images), else assume it can.
+        return profile.Vision ?? ModelRequestRules.For(profile).AcceptsImages ?? true;
     }
 
     // MARK: - Skills
@@ -1311,7 +1341,7 @@ public sealed partial class AgentHost : ObservableObject
     public async Task<GeneratedSkill> GenerateSkillAsync(string goal, SessionVM? vm, string? improving = null,
                                                          CancellationToken ct = default)
     {
-        var profile = await ResolveRouteAsync() ?? throw LlmException.NoModel();
+        var profile = await (vm is null ? ResolveRouteAsync() : ResolveRouteAsync(vm)) ?? throw LlmException.NoModel();
         if (vm is not null && !_transcripts.ContainsKey(vm.Id)) Hydrate(vm);
         var conversation = vm is not null ? _transcripts.GetValueOrDefault(vm.Id) ?? [] : [];
         var request = new SkillGenerationRequest(goal, conversation, Skills(vm).Select(s => s.Name).ToList(), improving);
@@ -1384,23 +1414,10 @@ public sealed partial class AgentHost : ObservableObject
     /// <summary>The active model's context budget, in tokens: a user override in the provider config
     /// wins, then a value learned by probing the server, then the well-known model tables, then a
     /// conservative default. Read-only — the probe lives in <see cref="EnsureContextProbe"/>.</summary>
-    public int ContextLimit()
-    {
-        if (Config.ActiveProvider is not { } provider) return FallbackContextWindow.DefaultLimit;
-        if (provider.ContextWindow is > 0 and var overridden) return overridden;
-        if (_probedContext.TryGetValue(provider.RouteId, out var probed)) return probed;
-        return FallbackContextWindow.Limit(Effective(provider).Model) ?? FallbackContextWindow.DefaultLimit;
-    }
+    public int ContextLimit() => ContextLimit(Config.ActiveProvider);
 
-    /// <summary>Where the current window figure came from, for /context and the gauge tooltip.</summary>
-    public string ContextSource()
-    {
-        if (Config.ActiveProvider is not { } provider) return "default";
-        if (provider.ContextWindow is > 0) return "set manually in Settings";
-        if (_probedContext.ContainsKey(provider.RouteId)) return "detected from the server";
-        if (FallbackContextWindow.Limit(Effective(provider).Model) is not null) return "from the built-in model table (server did not report one)";
-        return "a conservative default (server did not report one — set it in Settings)";
-    }
+    /// <summary>Where the primary's window figure came from (a chat's: <see cref="ContextSource(SessionVM?)"/>).</summary>
+    public string ContextSource() => ContextSource((SessionVM?)null);
 
     /// <summary>The model id actually in use for the active route (follows a swap).</summary>
     public string? ActiveModelId => Config.ActiveProvider is { } p ? Effective(p).Model : null;
@@ -1418,49 +1435,13 @@ public sealed partial class AgentHost : ObservableObject
     public async Task<ProviderProfile?> ResolveRouteAsync(bool force = false)
     {
         if (Config.ActiveProvider is not { } provider) return null;
-        var routeId = provider.RouteId;
-        var fresh = _routeInfo.TryGetValue(routeId, out var known) && DateTimeOffset.Now - known.At < TimeSpan.FromSeconds(15);
-        if (force || !fresh)
-        {
-            var info = await MakeClient(provider).ModelInfoAsync();
-            if (info.Served.Count > 0)
-            {
-                _routeInfo[routeId] = new RouteInfo(info.Id, info.Served, info.ContextWindow, DateTimeOffset.Now);
-                if (info.ContextWindow is > 0 and var limit && _probedContext.GetValueOrDefault(routeId) != limit)
-                    _probedContext[routeId] = limit;
-                ContextInfoChanged?.Invoke();
-            }
-        }
+        await ProbeAsync(provider, force);
         return Config.ActiveProvider is { } current ? Effective(current) : null;
     }
 
-    /// <summary>Fire the server probe for the active route so ContextLimit fills in a learned value.
+    /// <summary>Fire the server probe for the selected chat's route so ContextLimit fills in a learned value.
     /// Safe to call repeatedly: one in flight at a time, and a recent answer is reused.</summary>
-    public void EnsureContextProbe()
-    {
-        if (Config.ActiveProvider is not { } provider) return;
-        var routeId = provider.RouteId;
-        if (_probingContext.Contains(routeId)) return;
-        if (_routeInfo.TryGetValue(routeId, out var info) && DateTimeOffset.Now - info.At < TimeSpan.FromSeconds(60)) return;
-        _probingContext.Add(routeId);
-        _ = ProbeAsync();
-
-        async Task ProbeAsync()
-        {
-            try
-            {
-                await ResolveRouteAsync(force: true);
-            }
-            catch (Exception)
-            {
-                // The gauge keeps its fallback figure.
-            }
-            finally
-            {
-                _probingContext.Remove(routeId);
-            }
-        }
-    }
+    public void EnsureContextProbe() => EnsureContextProbe(Selected);
 
     /// <summary>Forget cached probes (Settings changed the route, or the user asked).</summary>
     public void ResetRouteCache()
@@ -1505,16 +1486,15 @@ public sealed partial class AgentHost : ObservableObject
                                                                         IReadOnlyList<LlmMessage> messages,
                                                                         CancellationToken ct)
     {
-        var limit = _engineKeys.TryGetValue(sessionId, out var key) ? key.Window : ContextLimit();
+        var limit = _engineKeys.TryGetValue(sessionId, out var key) ? key.Window : ContextLimit(Session(sessionId));
         if (Compaction.MakePlan(used, limit, messages) is not { } plan) return messages;
         var vm = Session(sessionId);
         if (vm is not null) vm.Activity = "Compacting conversation to fit the context window…";
         try
         {
-            await ResolveRouteAsync();
-            var profile = Config.ActiveProvider is { } p ? Effective(p) : null;
+            var profile = await ResolveRouteAsync(vm);
             if (profile is null) return messages;
-            var summary = await Compaction.SummarizeAsync(MakeClient(profile), plan, model: profile.Model, cancellationToken: ct);
+            var summary = await Compaction.SummarizeAsync(MakeClient(profile, sessionId), plan, model: profile.Model, cancellationToken: ct);
             // No summary (no client, or it failed): keep the transcript as-is; the server may still
             // accept it, and an overflow is surfaced rather than silently dropped.
             if (summary is null) return messages;
