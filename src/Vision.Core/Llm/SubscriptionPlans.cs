@@ -9,8 +9,11 @@ namespace Vision.Core;
 // Moonshot), OpenAI, and Qwen (Alibaba Cloud). Each says where its API is (per region), where to get a key and
 // how, what the key looks like, which models to offer, and what its terms say. Researched October 2026.
 
-/// <summary>Where a plan is served: its API address and the page that hands out keys.</summary>
-public sealed record PlanRegion(string Id, string Label, string BaseUrl, string KeyPage, string? KeyPageLabel = null);
+/// <summary>Where a plan is served: its API address and the page that hands out keys. For Z.ai the "regions" are its four
+/// endpoints: <paramref name="RouteName"/> names the saved route, <paramref name="Detail"/> is the line under the picker, and
+/// <paramref name="IsSubscription"/> says whether a subscription is needed there.</summary>
+public sealed record PlanRegion(string Id, string Label, string BaseUrl, string KeyPage, string? KeyPageLabel = null,
+                                string? RouteName = null, string? Detail = null, bool? IsSubscription = null);
 
 /// <summary>A model a plan offers, with its context window when known.</summary>
 public sealed record PlanModel(string Id, string? Note = null, int? Context = null);
@@ -44,6 +47,11 @@ public sealed record SubscriptionPlan
     public string? KeyPrefix { get; init; }
     /// <summary>The plan's terms allow only interactive use: the route is made interactive-only.</summary>
     public bool InteractiveOnly { get; init; }
+    /// <summary>What the guide calls the choice between regions: "Region", or "Endpoint" (Z.ai).</summary>
+    public string RegionLabel { get; init; } = "Region";
+    /// <summary>Checking the key takes a one-token reply even when /models answers (Z.ai lists models for any valid key, on any
+    /// endpoint, while only the right endpoint can chat).</summary>
+    public bool ChecksWithChat { get; init; }
     public ProviderKind Kind { get; init; } = ProviderKind.OpenAICompat;
 
     public PlanRegion DefaultRegion => Regions[0];
@@ -58,7 +66,7 @@ public sealed record SubscriptionPlan
     public ProviderProfile Route(string? region, string model)
     {
         var where = Region(region);
-        var name = HasRegions && where.Id != DefaultRegion.Id ? $"{Name} ({where.Label})" : Name;
+        var name = where.RouteName ?? (HasRegions && where.Id != DefaultRegion.Id ? $"{Name} ({where.Label})" : Name);
         return new ProviderProfile(Kind, name, where.BaseUrl, model)
         {
             ContextWindow = Models.FirstOrDefault(m => m.Id == model)?.Context,
@@ -80,12 +88,17 @@ public sealed record SubscriptionPlan
         }
         if (Id == SubscriptionPlans.QwenApi && trimmed.StartsWith("sk-sp-", StringComparison.Ordinal))
             return "That's a Coding Plan key (it starts with sk-sp-). Choose \"Qwen — Alibaba Cloud Coding Plan\" for it, or use a pay-as-you-go key here.";
+        if (Id == SubscriptionPlans.Zai && trimmed.StartsWith("sk-", StringComparison.Ordinal))
+            return "That looks like another service's key. Z.ai keys come from z.ai (or open.bigmodel.cn) and don't start with sk-.";
         return null;
     }
 }
 
 public static partial class SubscriptionPlans
 {
+    /// <summary>Z.ai (GLM): one plan, four endpoints (Coding Plan, General API, and both in China).</summary>
+    public const string Zai = "zai";
+    /// <summary>Plan ids of earlier builds (a Coding Plan and a pay-as-you-go plan), still understood by <see cref="Find"/>.</summary>
     public const string ZaiCoding = "zai-coding";
     public const string ZaiApi = "zai-api";
     public const string KimiCode = "kimi-code";
@@ -102,48 +115,36 @@ public static partial class SubscriptionPlans
 
     public static IReadOnlyList<SubscriptionPlan> All { get; } =
     [
+        // Z.ai (GLM): one provider, four endpoints. A GLM Coding Plan key works only on the Coding Plan endpoint (on the
+        // General API it gets 1113 "Insufficient balance"); a key made at open.bigmodel.cn works only on the China endpoints.
+        // Models from docs.z.ai (2026-10-19): glm-5.3 (1M, always thinks: low/high/max), glm-5.2, glm-5.1, glm-5, glm-4.7,
+        // glm-4.6 (text), glm-5.3-flash / -flashx (vision).
         new()
         {
-            Id = ZaiCoding, Provider = "Z.ai", Name = "Z.ai — GLM Coding Plan",
-            Summary = "A monthly GLM plan for coding tools, with GLM-5.3.",
-            Regions =
-            [
-                new(International, "International", "https://api.z.ai/api/coding/paas/v4", ZaiKeys),
-                new(China, "China (BigModel)", "https://open.bigmodel.cn/api/coding/paas/v4", BigModelKeys),
-            ],
+            Id = Zai, Provider = "Z.ai", Name = "Z.ai (GLM)",
+            Summary = "GLM-5.3 and the other GLM models — with a GLM Coding Plan, or pay-as-you-go.",
+            Regions = ZaiEndpoints.All.Select(e => new PlanRegion(e.RawValue(), e.Name(), e.BaseUrl(), e.IsChina() ? BigModelKeys : ZaiKeys,
+                "API Keys", e.RouteName(), e.Detail(), e.IsCoding())).ToList(),
             SubscribeUrl = "https://z.ai/subscribe",
             KeySteps =
             [
                 "Sign in at z.ai (open.bigmodel.cn in China).",
-                "Subscribe to the GLM Coding Plan if you haven't yet (z.ai/subscribe).",
+                "For the Coding Plan endpoint: subscribe to the GLM Coding Plan if you haven't yet (z.ai/subscribe). For the General API: add credit to the account.",
                 "Open the API keys page — the button below does it.",
                 "Create a new API key.",
                 "Copy it. It's shown only once, so paste it into Vision straight away.",
             ],
-            KeyHint = "A long string of letters and digits with a dot in it.",
-            Models = [new("glm-5.3", "GLM-5.3 · always thinks", 1_000_000)],
-            TermsNote = "Z.ai offers the Coding Plan for use in coding tools.",
-            Note = "Coding Plan keys work only on the coding address Vision uses. A key refused there may be for the other region, or a pay-as-you-go key.",
-        },
-        new()
-        {
-            Id = ZaiApi, Provider = "Z.ai", Name = "Z.ai — pay-as-you-go API",
-            Summary = "GLM-5.3 billed per token, without a subscription.",
-            Regions =
+            KeyHint = "A long string of letters and digits with a dot in the middle (not sk-…). A Coding Plan key works only on the Coding Plan endpoint.",
+            Models =
             [
-                new(International, "International", "https://api.z.ai/api/paas/v4", ZaiKeys),
-                new(China, "China (BigModel)", "https://open.bigmodel.cn/api/paas/v4", BigModelKeys),
+                new("glm-5.3", "1M context · always thinks", 1_000_000), new("glm-5.2"), new("glm-5.1"), new("glm-5"), new("glm-4.7"),
+                new("glm-4.6"), new("glm-5.3-flash", "reads images"),
             ],
-            KeySteps =
-            [
-                "Sign in at z.ai (open.bigmodel.cn in China) and add credit to your account.",
-                "Open the API keys page — the button below does it.",
-                "Create a new API key (an API key, not a Coding Plan key).",
-                "Copy it. It's shown only once, so paste it into Vision straight away.",
-            ],
-            KeyHint = "A long string of letters and digits with a dot in it.",
-            Models = [new("glm-5.3", "GLM-5.3 · always thinks", 1_000_000)],
-            Note = "Billed per token.",
+            ListsModels = true,
+            ChecksWithChat = true,
+            RegionLabel = "Endpoint",
+            TermsNote = "Z.ai offers the GLM Coding Plan for use in coding tools; the General API is billed per token.",
+            Note = "Coding Plan keys work only on the Coding Plan endpoint, and keys made at open.bigmodel.cn only on the China ones. If the check fails, Vision tries the key on the other endpoints and says which one it belongs to.",
         },
         new()
         {
@@ -266,7 +267,22 @@ public static partial class SubscriptionPlans
         },
     ];
 
-    public static SubscriptionPlan? Find(string? id) => All.FirstOrDefault(p => p.Id == id);
+    public static SubscriptionPlan? Find(string? id)
+    {
+        if (id is ZaiCoding or ZaiApi) id = Zai;
+        return All.FirstOrDefault(p => p.Id == id);
+    }
+
+    /// <summary>The chat models in a provider's model list: OpenAI's chat models, Z.ai's glm-* text and vision models (its list
+    /// also holds image, speech and embedding models), anyone else's as listed.</summary>
+    public static IReadOnlyList<string> ChatModels(SubscriptionPlan plan, IReadOnlyList<string> listed)
+    {
+        if (plan.Id != Zai) return listed;
+        string[] notChat = ["embedding", "image", "video", "voice", "asr", "tts", "realtime", "ocr"];
+        var chat = listed.Where(id => id.StartsWith("glm-", StringComparison.OrdinalIgnoreCase)
+                                      && !notChat.Any(word => id.Contains(word, StringComparison.OrdinalIgnoreCase))).ToList();
+        return chat.Count == 0 ? plan.Models.Select(m => m.Id).ToList() : chat;
+    }
 
     /// <summary>The plan a base URL belongs to, if any (so the route editor can say "Kimi Code").</summary>
     public static (SubscriptionPlan Plan, PlanRegion Region)? ForBaseUrl(string? baseUrl)
@@ -309,33 +325,14 @@ public static partial class SubscriptionPlans
     [GeneratedRegex(@"-\d{4}-\d{2}-\d{2}$|-\d{4}$", RegexOptions.CultureInvariant)]
     private static partial Regex DateSuffix();
 
-    /// <summary>GLM-5 models always think: thinking can't be switched off (the request fails), and their effort words
-    /// are low, high and max.</summary>
-    public static bool AlwaysThinks(string? model) =>
-        model is not null && model.Split('/')[^1].StartsWith("glm-5", StringComparison.OrdinalIgnoreCase);
-
-    /// <summary>Whether a route follows GLM's thinking rules (<see cref="AlwaysThinks"/>, <see cref="GlmEffort"/>): any GLM-5
-    /// model wherever it is served, and anything on Z.ai's own servers (api.z.ai, open.bigmodel.cn).</summary>
-    public static bool UsesGlmRules(string? baseUrl, string? model)
-    {
-        if (AlwaysThinks(model)) return true;
-        if (!Uri.TryCreate(baseUrl, UriKind.Absolute, out var uri)) return false;
-        var host = uri.Host.ToLowerInvariant();
-        return host is "z.ai" or "bigmodel.cn" || host.EndsWith(".z.ai", StringComparison.Ordinal) || host.EndsWith(".bigmodel.cn", StringComparison.Ordinal);
-    }
-
-    /// <summary>The effort word a GLM-5 model takes for a thinking level: Off and Low → low, Medium and High → high,
-    /// Max → max.</summary>
-    public static string GlmEffort(ThinkingLevel level) => level switch
-    {
-        ThinkingLevel.Off or ThinkingLevel.Low => "low",
-        ThinkingLevel.Medium or ThinkingLevel.High => "high",
-        _ => "max",
-    };
-
     /// <summary>A plan's refusal in plain words, for the guide's key check.</summary>
-    public static string ExplainError(SubscriptionPlan plan, PlanRegion region, int status, string body)
+    public static string ExplainError(SubscriptionPlan plan, PlanRegion region, int status, string body, string? model = null)
     {
+        model ??= plan.Recommended.Id;
+        if (plan.Id == Zai && ZaiErrors.Explain(status, body, ZaiEndpoints.FromRaw(region.Id), model) is { } zai) return zai.Message;
+        if (plan.Id is KimiCode or MoonshotApi
+            && KimiErrors.Explain(status, body, plan.Id == KimiCode ? KnownProvider.KimiCode : KnownProvider.Moonshot, model) is { } kimi)
+            return kimi.Message;
         var lower = body.ToLowerInvariant();
         switch (status)
         {

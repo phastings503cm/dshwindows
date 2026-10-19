@@ -22,7 +22,7 @@ namespace Vision.Core;
 //   2. the Qwen/DeepSeek XML convention emitted inside plain text, for backends that lack
 //      function calling (see XmlToolCalls).
 
-public sealed class OpenAiClient : IProviderClient
+public sealed partial class OpenAiClient : IProviderClient
 {
     /// <summary>A stream that sends nothing for this long is treated as dead (and the call retried,
     /// see RequestRetry). Generous: a local server prefilling a few hundred thousand tokens sends
@@ -45,10 +45,20 @@ public sealed class OpenAiClient : IProviderClient
 
     public ProviderProfile Profile { get; }
     private readonly HttpClient _http;
+    /// <summary>What servers refused before, per server and model (see <see cref="RequestAdaptationStore"/>).</summary>
+    private readonly RequestAdaptationStore _adaptations;
+    /// <summary>One line for the chat when the client adapted to a refusal ("… doesn't take `temperature` …").</summary>
+    private readonly Action<string>? _onNotice;
 
-    public OpenAiClient(ProviderProfile profile, HttpMessageHandler? handler = null)
+    /// <summary>How many refused parameters one request adapts to before the refusal is reported.</summary>
+    public const int MaxAdaptations = 3;
+
+    public OpenAiClient(ProviderProfile profile, HttpMessageHandler? handler = null, RequestAdaptationStore? adaptations = null,
+                        Action<string>? onNotice = null)
     {
         Profile = profile;
+        _adaptations = adaptations ?? RequestAdaptationStore.Shared;
+        _onNotice = onNotice;
         _http = new HttpClient(handler ?? HandlerFor(profile.PinnedCertificate), disposeHandler: false)
         {
             Timeout = Timeout.InfiniteTimeSpan,
@@ -94,7 +104,7 @@ public sealed class OpenAiClient : IProviderClient
                     delta => channel.Writer.TryWrite(new LlmStreamEvent.Text(delta)),
                     delta => channel.Writer.TryWrite(new LlmStreamEvent.Reasoning(delta)),
                     isRetry: false, cts.Token).ConfigureAwait(false);
-                channel.Writer.TryWrite(new LlmStreamEvent.Done(result.Calls, result.Finish, result.Usage));
+                channel.Writer.TryWrite(new LlmStreamEvent.Done(result.Calls, result.Finish, result.Usage) { ProviderState = result.ProviderState });
                 channel.Writer.TryComplete();
             }
             catch (Exception ex)
@@ -266,6 +276,8 @@ public sealed class OpenAiClient : IProviderClient
         new(@"exceed the maximum context length of (\d+)", RegexOptions.IgnoreCase),
         new(@"max context length of (\d+)", RegexOptions.IgnoreCase),
         new(@"maximum context tokens: (\d+)", RegexOptions.IgnoreCase),
+        // Kimi Code: "Your request exceeded model token limit: 262144".
+        new(@"exceeded model token limit: (\d+)", RegexOptions.IgnoreCase),
     ];
 
     /// <summary>The real context limit from an overflow error body, e.g. SGLang's "This model's
@@ -294,7 +306,9 @@ public sealed class OpenAiClient : IProviderClient
 
     // MARK: One streaming turn
 
-    internal sealed record TurnResult(string Text, IReadOnlyList<ToolCall> Calls, string? Finish, LlmUsage? Usage);
+    /// <param name="ProviderState">The reasoning to send back with this message, for a model that wants it (see
+    /// <see cref="ReasoningEcho"/>).</param>
+    internal sealed record TurnResult(string Text, IReadOnlyList<ToolCall> Calls, string? Finish, LlmUsage? Usage, string? ProviderState = null);
 
     internal sealed class PendingCall
     {
@@ -304,14 +318,15 @@ public sealed class OpenAiClient : IProviderClient
     }
 
     private async Task<TurnResult> RunTurnAsync(LlmRequest request, Action<string> onText, Action<string> onReasoning,
-                                                bool isRetry, CancellationToken cancellationToken)
+                                                bool isRetry, CancellationToken cancellationToken, int adapted = 0)
     {
         if (!Uri.TryCreate(Profile.Endpoint("chat/completions"), UriKind.Absolute, out var url))
             throw LlmException.Unsupported($"bad base URL: {Profile.BaseUrl}");
 
+        var bodyObject = MakeBodyObject(request);
         using var req = new HttpRequestMessage(HttpMethod.Post, url)
         {
-            Content = new StringContent(MakeBody(request), TextUtil.Utf8NoBom, "application/json"),
+            Content = new StringContent(bodyObject.ToJsonString(), TextUtil.Utf8NoBom, "application/json"),
         };
         req.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("text/event-stream"));
         ApplyHeaders(req);
@@ -352,9 +367,29 @@ public sealed class OpenAiClient : IProviderClient
                 // SGLang / vLLM report a context overflow as "This model's maximum context length
                 // is N tokens; however, you requested M ...".
                 if (OverflowLimit(body) is { } limit) throw LlmException.Overflow(limit, body);
+                // A parameter this server or model refuses ("invalid temperature: only 1 is allowed for this model"):
+                // leave it out from now on, say so in one line, and try again — once per parameter.
+                var key = AdaptationKey(request);
+                if (adapted < MaxAdaptations
+                    && ParameterRejection.Change(code, body, RequestBody.Keys(bodyObject)) is { } change
+                    && _adaptations.Adaptation(key)?.Contains(change) != true)
+                {
+                    _adaptations.Learn(change, key);
+                    var provider = KnownProviders.Of(Profile);
+                    var who = provider == KnownProvider.Other ? (Profile.Name.Length == 0 ? "The model server" : Profile.Name) : provider.Label();
+                    _onNotice?.Invoke(ParameterRejection.Notice(change, who, RequestModel(request)));
+                    return await RunTurnAsync(request, onText, onReasoning, isRetry, cancellationToken, adapted + 1).ConfigureAwait(false);
+                }
                 // A proxy in front of the model (nginx's client_max_body_size) refusing the body:
                 // the conversation must shrink, like an overflow.
                 if (code == 413) throw LlmException.Overflow(0, "request too large for the server (HTTP 413)");
+                // Z.ai's prompt-too-long business code; Kimi Code's 2 MB message cap.
+                if (KnownProviders.Of(Profile) == KnownProvider.Zai && ParameterRejection.BusinessCode(body) == "1261")
+                    throw LlmException.Overflow(0, "Z.ai: prompt too long (1261)");
+                if (code == 400 && TotalSizeCap().IsMatch(body)) throw LlmException.Overflow(0, TextUtil.Prefix(ParameterRejection.Text(body), 160));
+                // A provider error that means something specific (Z.ai's "no balance" 429 is not a rate limit).
+                if (ProviderExplanation(code, body, RequestModel(request)) is { } explained)
+                    throw LlmException.Rejected(code, explained.Message, body, explained.Permanent);
                 throw LlmException.Http(code, body);
             }
 
@@ -414,6 +449,12 @@ public sealed class OpenAiClient : IProviderClient
                 }
             }
             if (state.Finish == "error") throw LlmException.Http(500, "the server ended the reply with an error");
+            // Z.ai's own finish reasons: the window is full, its network failed mid-reply, or its filter stopped the reply.
+            if (state.Finish == "model_context_window_exceeded") throw LlmException.Overflow(0, "the model's context window is full (model_context_window_exceeded)");
+            if (state.Finish == "network_error") throw LlmException.Sse("the provider's network failed mid-reply (network_error)");
+            if (state.Finish == "sensitive")
+                throw LlmException.Rejected(400, "The provider's content filter stopped the reply (finish_reason: sensitive). Rephrase the request, or use another model for it.",
+                    "finish_reason: sensitive", permanent: true);
             // Every OpenAI-compatible server ends a reply with a finish_reason and/or data: [DONE].
             // Neither means the connection closed mid-reply (server restarted, proxy dropped it) — a
             // failure worth retrying, not a short answer.
@@ -439,9 +480,37 @@ public sealed class OpenAiClient : IProviderClient
                 for (var i = 0; i < parsed.Count; i++)
                     calls.Add(new ToolCall($"xml-{i}", parsed[i].Name, parsed[i].ArgumentsJson));
             }
-            return new TurnResult(full, calls, state.Finish, state.Usage);
+            var providerState = EchoesReasoning(request) && state.Reasoning.Length > 0 ? ReasoningEcho.State(state.Reasoning.ToString()) : null;
+            return new TurnResult(full, calls, state.Finish, state.Usage, providerState);
         }
     }
+
+    /// <summary>The model a request goes to.</summary>
+    private string RequestModel(LlmRequest request) => string.IsNullOrEmpty(request.Model) ? Profile.Model : request.Model;
+
+    /// <summary>The key lessons are kept under for this request's server and model.</summary>
+    public string AdaptationKey(LlmRequest request) => RequestAdaptationStore.Key(Profile.BaseUrl, RequestModel(request));
+
+    /// <summary>What this request's model takes (<see cref="ModelRequestRules"/>).</summary>
+    public ModelRequestRules RulesFor(LlmRequest request) => ModelRequestRules.For(Profile, RequestModel(request));
+
+    /// <summary>Whether this request's model wants its reasoning back on assistant tool-call messages.</summary>
+    private bool EchoesReasoning(LlmRequest request) =>
+        RulesFor(request).EchoReasoning || _adaptations.Adaptation(AdaptationKey(request))?.EchoReasoning == true;
+
+    /// <summary>A provider's error in plain words, when Vision knows what it means.</summary>
+    private ProviderErrorExplanation? ProviderExplanation(int status, string body, string model) =>
+        KnownProviders.Of(Profile) switch
+        {
+            KnownProvider.Zai => ZaiErrors.Explain(status, body, ZaiEndpoints.Of(Profile.BaseUrl), model),
+            KnownProvider.Moonshot => KimiErrors.Explain(status, body, KnownProvider.Moonshot, model),
+            KnownProvider.KimiCode => KimiErrors.Explain(status, body, KnownProvider.KimiCode, model),
+            _ => null,
+        };
+
+    /// <summary>Kimi Code: "total message size 5943865 exceeds limit 2097152".</summary>
+    [GeneratedRegex(@"total message size \d+ exceeds limit \d+", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
+    private static partial Regex TotalSizeCap();
 
     /// <summary>The first 8 KB of an error reply (enough for any message; a proxy's HTML page can be huge).</summary>
     internal static async Task<string> ReadErrorBodyAsync(HttpResponseMessage response, CancellationToken cancellationToken)
@@ -469,6 +538,8 @@ public sealed class OpenAiClient : IProviderClient
     internal sealed class StreamState
     {
         public readonly StringBuilder Text = new();
+        /// <summary>The reasoning that streamed (sent back only for models that want it; capped).</summary>
+        public readonly StringBuilder Reasoning = new();
         public LlmUsage? Usage;
         public string? Finish;
         public readonly SortedDictionary<int, PendingCall> Pending = new();
@@ -531,7 +602,11 @@ public sealed class OpenAiClient : IProviderClient
         if (first["delta"] is JsonObject delta)
         {
             var reasoning = JsonArgs.String(delta, "reasoning_content") ?? JsonArgs.String(delta, "reasoning");
-            if (!string.IsNullOrEmpty(reasoning)) onReasoning(reasoning);
+            if (!string.IsNullOrEmpty(reasoning))
+            {
+                if (state.Reasoning.Length < 400_000) state.Reasoning.Append(reasoning);
+                onReasoning(reasoning);
+            }
             var content = JsonArgs.String(delta, "content");
             if (!string.IsNullOrEmpty(content))
             {
@@ -647,8 +722,15 @@ public sealed class OpenAiClient : IProviderClient
         string.IsNullOrWhiteSpace(arguments) || !Engine.ValidArguments(arguments) ? "{}" : arguments;
 
     /// <summary>The chat-completions request body, as JSON text.</summary>
-    public string MakeBody(LlmRequest request)
+    public string MakeBody(LlmRequest request) => MakeBodyObject(request).ToJsonString();
+
+    /// <summary>The request body: the messages, then only the parameters this model takes (<see cref="ModelRequestRules"/>),
+    /// minus what the server refused before (<see cref="RequestAdaptationStore"/>).</summary>
+    public JsonObject MakeBodyObject(LlmRequest request)
     {
+        var rules = RulesFor(request);
+        var learned = _adaptations.Adaptation(AdaptationKey(request));
+        var echo = rules.EchoReasoning || learned?.EchoReasoning == true;
         var messages = new JsonArray();
         // Some OpenAI-compatible servers (SGLang on the DGX Spark, notably) reject any request with
         // more than one system message, or with one anywhere but index 0 — e.g. after compaction
@@ -664,7 +746,7 @@ public sealed class OpenAiClient : IProviderClient
                     if (!string.IsNullOrEmpty(m.Content)) systemParts.Add(m.Content);
                     break;
                 case MessageRole.User:
-                    messages.Add(new JsonObject { ["role"] = "user", ["content"] = UserContent(m) });
+                    messages.Add(new JsonObject { ["role"] = "user", ["content"] = rules.TextOnlyContent ? TextOnlyContent(m) : UserContent(m) });
                     break;
                 case MessageRole.Assistant:
                     var msg = new JsonObject { ["role"] = "assistant", ["content"] = m.Content ?? "" };
@@ -681,6 +763,13 @@ public sealed class OpenAiClient : IProviderClient
                             });
                         }
                         msg["tool_calls"] = arr;
+                    }
+                    // Kimi (thinking): an assistant message that called tools must carry its reasoning. One rebuilt from text
+                    // (a relaunch, compaction) no longer has it: a short stand-in keeps the request valid.
+                    if (echo)
+                    {
+                        if (ReasoningEcho.Reasoning(m.ProviderState) is { } reasoning) msg["reasoning_content"] = reasoning;
+                        else if (m.ToolCalls is { Count: > 0 }) msg["reasoning_content"] = ReasoningEcho.Placeholder;
                     }
                     messages.Add(msg);
                     break;
@@ -711,9 +800,17 @@ public sealed class OpenAiClient : IProviderClient
         // unknown fields, so only send it for OpenAI-family endpoints.
         if (Profile.Kind is ProviderKind.OpenAI or ProviderKind.OpenRouter or ProviderKind.OpenAICompat)
             body["stream_options"] = new JsonObject { ["include_usage"] = true };
-        if ((request.Temperature ?? Profile.Temperature) is { } t) body["temperature"] = t;
-        if ((request.MaxTokens ?? Profile.MaxOutputTokens) is { } mt) body["max_tokens"] = mt;
-        ApplyThinking(request, body);
+        if (rules.SendsTemperature && (request.Temperature ?? Profile.Temperature) is { } t)
+        {
+            if (rules.TemperatureRange is var (min, max)) t = Math.Clamp(t, min, max);
+            body["temperature"] = t;
+        }
+        if ((request.MaxTokens ?? Profile.MaxOutputTokens) is { } mt)
+        {
+            if (rules.MaxOutputTokens is { } cap) mt = Math.Min(mt, cap);
+            body[rules.MaxTokensField] = mt;
+        }
+        ApplyThinking(request, body, rules);
         if (request.Tools.Count > 0)
         {
             var tools = new JsonArray();
@@ -743,7 +840,28 @@ public sealed class OpenAiClient : IProviderClient
             }
             body["tools"] = tools;
         }
-        return body.ToJsonString();
+        if (learned is not null) RequestBody.Apply(learned, body);
+        return body;
+    }
+
+    /// <summary>A user message as one string, for APIs that take text only (Z.ai's text models): text files are folded in,
+    /// anything else is named in a line so the model knows it was there.</summary>
+    internal static string TextOnlyContent(LlmMessage m)
+    {
+        var text = new StringBuilder(m.Content ?? "");
+        foreach (var a in m.Attachments ?? [])
+        {
+            if (a.Kind == AttachmentKind.Image)
+            {
+                text.Append($"\n\n[Image {a.Name} not sent: this model reads text only.]");
+                continue;
+            }
+            if (Array.IndexOf(a.Data, (byte)0) < 0 && TextUtil.Utf8NoBom.GetString(a.Data) is var decoded)
+                text.Append($"\n\n--- {a.Name} ---\n{decoded}");
+            else
+                text.Append($"\n\n[{a.Name} is attached, but it isn't text and this model reads text only.]");
+        }
+        return text.ToString();
     }
 
     private static JsonObject EmptySchema() => new() { ["type"] = "object", ["properties"] = new JsonObject() };
@@ -758,49 +876,74 @@ public sealed class OpenAiClient : IProviderClient
 
     /// <summary>The effort word that will go on the wire (after any learned remap), or null when none
     /// is sent.</summary>
-    public string? EffortWord(LlmRequest request)
+    public string? EffortWord(LlmRequest request) => EffortWord(request, RulesFor(request));
+
+    private string? EffortWord(LlmRequest request, ModelRequestRules rules)
     {
-        if (ThinkingLevelFor(request) is not { } level || level.WireEffort() is not { } word) return null;
+        if (ThinkingLevelFor(request) is not { } level) return null;
+        var word = rules.Thinking.Kind switch
+        {
+            // A fixed vocabulary (GLM-5.3: low/high/max; Kimi Code: none/low/high/max): the nearest offered level's word.
+            ThinkingControlKind.Effort => rules.EffortWord(level),
+            ThinkingControlKind.Template or ThinkingControlKind.EffortField => level.WireEffort(),
+            _ => null,
+        };
+        if (word is null) return null;
         if (ReasoningEffortCache.Shared.Accepted(EffortRoute(request), word) is { } learned)
             return learned.Length == 0 ? null : learned;
         return word;
     }
 
-    /// <summary>Put the thinking controls on the request body.
+    /// <summary>Put the thinking controls on the request body, the way this model takes them (<see cref="ModelRequestRules"/>).
     ///
-    /// Self-hosted servers get chat_template_kwargs — that is how Qwen3.x, GLM and DeepSeek templates
-    /// switch thinking on/off and read the effort — plus the top-level reasoning_effort (SGLang
-    /// forwards it to the template too; vLLM's gpt-oss path reads it there). Hosted APIs only
-    /// understand the top-level field, and only when thinking is on.</summary>
-    public void ApplyThinking(LlmRequest request, JsonObject body)
+    /// Self-hosted servers get chat_template_kwargs — that is how Qwen3.x, GLM and DeepSeek templates switch thinking on/off
+    /// and read the effort — plus the top-level reasoning_effort (SGLang forwards it to the template too; vLLM's gpt-oss path
+    /// reads it there). Hosted APIs only understand the top-level field, and only when thinking is on. Models with their own
+    /// rules get exactly what they take: a fixed effort vocabulary (GLM-5.3, Kimi K3, Kimi Code), a thinking.type toggle
+    /// (Kimi K2.6, older GLMs), or nothing (Kimi K2.7 Code always thinks).</summary>
+    public void ApplyThinking(LlmRequest request, JsonObject body) => ApplyThinking(request, body, RulesFor(request));
+
+    private void ApplyThinking(LlmRequest request, JsonObject body, ModelRequestRules rules)
     {
         if (ThinkingLevelFor(request) is not { } level) return;
-        // GLM-5 always thinks: switching thinking off fails the request, so Off asks for the least of it, in the words
-        // it accepts (low, high, max). Z.ai's own servers take the same words for every model.
-        if (SubscriptionPlans.UsesGlmRules(Profile.BaseUrl, string.IsNullOrEmpty(request.Model) ? Profile.Model : request.Model))
+        var effort = EffortWord(request, rules);
+        switch (rules.Thinking.Kind)
         {
-            body["reasoning_effort"] = SubscriptionPlans.GlmEffort(level);
-            return;
-        }
-        var effort = EffortWord(request);
-        if (Profile.IsSelfHosted && Profile.Kind is ProviderKind.OpenAICompat or ProviderKind.OpenAI or ProviderKind.OpenRouter)
-        {
-            var kwargs = new JsonObject { ["enable_thinking"] = level != ThinkingLevel.Off };
-            if (effort is not null)
-            {
-                kwargs["reasoning_effort"] = effort;
-                body["reasoning_effort"] = effort;
-            }
-            body["chat_template_kwargs"] = kwargs;
-        }
-        else if (Profile.Kind is ProviderKind.Ollama or ProviderKind.LmStudio)
-        {
-            if (level == ThinkingLevel.Off) body["chat_template_kwargs"] = new JsonObject { ["enable_thinking"] = false };
-            if (effort is not null) body["reasoning_effort"] = effort;
-        }
-        else if (effort is not null)
-        {
-            body["reasoning_effort"] = effort;
+            case ThinkingControlKind.Template:
+                if (Profile.Kind is ProviderKind.OpenAICompat or ProviderKind.OpenAI or ProviderKind.OpenRouter)
+                {
+                    var kwargs = new JsonObject { ["enable_thinking"] = level != ThinkingLevel.Off };
+                    if (effort is not null)
+                    {
+                        kwargs["reasoning_effort"] = effort;
+                        body["reasoning_effort"] = effort;
+                    }
+                    body["chat_template_kwargs"] = kwargs;
+                }
+                else if (Profile.Kind is ProviderKind.Ollama or ProviderKind.LmStudio)
+                {
+                    if (level == ThinkingLevel.Off) body["chat_template_kwargs"] = new JsonObject { ["enable_thinking"] = false };
+                    if (effort is not null) body["reasoning_effort"] = effort;
+                }
+                else if (effort is not null)
+                {
+                    body["reasoning_effort"] = effort;
+                }
+                break;
+            case ThinkingControlKind.EffortField:
+                if (effort is not null) body["reasoning_effort"] = effort;
+                break;
+            case ThinkingControlKind.Effort:
+                // A model that always thinks is never told not to (that fails the request): only how hard.
+                if (effort is not null)
+                {
+                    body["reasoning_effort"] = effort;
+                    if (rules.Thinking.InTemplate) body["chat_template_kwargs"] = new JsonObject { ["reasoning_effort"] = effort };
+                }
+                break;
+            case ThinkingControlKind.Toggle:
+                body["thinking"] = new JsonObject { ["type"] = level == ThinkingLevel.Off ? "disabled" : "enabled" };
+                break;
         }
     }
 
@@ -993,4 +1136,27 @@ public static class AppInfo
         typeof(AppInfo).Assembly.GetCustomAttributes(typeof(System.Reflection.AssemblyInformationalVersionAttribute), false)
             .OfType<System.Reflection.AssemblyInformationalVersionAttribute>()
             .FirstOrDefault()?.InformationalVersion.Split('+')[0] ?? "0.0.0";
+}
+
+// MARK: - Reasoning sent back
+
+/// <summary>Kimi's thinking models want each assistant message that called tools to carry the reasoning that led to it
+/// (<c>reasoning_content</c>), or they answer 400 "thinking is enabled but reasoning_content is missing". The client keeps a
+/// reply's reasoning in the message's <see cref="LlmMessage.ProviderState"/> and sends it back from there.</summary>
+public static class ReasoningEcho
+{
+    private const string Prefix = "openai.reasoning_content:";
+
+    /// <summary>What a message is sent back with when its reasoning wasn't kept (the transcript was rebuilt from text).</summary>
+    public const string Placeholder = "(Earlier reasoning was not kept.)";
+
+    public static string State(string reasoning) => Prefix + reasoning;
+
+    /// <summary>The reasoning in a provider state this client wrote (null for another client's state, e.g. Bedrock's).</summary>
+    public static string? Reasoning(string? state)
+    {
+        if (state is null || !state.StartsWith(Prefix, StringComparison.Ordinal)) return null;
+        var text = state[Prefix.Length..];
+        return text.Length == 0 ? null : text;
+    }
 }

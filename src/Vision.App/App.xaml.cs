@@ -76,6 +76,8 @@ public partial class App : Application
         PlainChat.RecycleBin = ShellIntegration.MoveToRecycleBin;
         // Bedrock routes sign requests with the AWS CLI's sign-in.
         AwsAccounts.Install();
+        // What servers refused before (a temperature, a thinking setting) is remembered across launches.
+        RequestAdaptationStore.Shared.FilePath = AppPaths.RequestAdaptations;
         var config = new AppConfig();
         if (selfTest is null)
         {

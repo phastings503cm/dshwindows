@@ -7,9 +7,9 @@ public sealed class SubscriptionPlansTests
     [Fact]
     public void TheCatalogHoldsThePlansInOrder()
     {
-        Assert.Equal(["zai-coding", "zai-api", "kimi-code", "moonshot-api", "openai", "qwen-coding", "qwen-api"],
+        Assert.Equal(["zai", "kimi-code", "moonshot-api", "openai", "qwen-coding", "qwen-api"],
             SubscriptionPlans.All.Select(p => p.Id));
-        Assert.Equal(["Z.ai — GLM Coding Plan", "Z.ai — pay-as-you-go API", "Kimi Code (subscription)", "Moonshot (Kimi) — pay-as-you-go API",
+        Assert.Equal(["Z.ai (GLM)", "Kimi Code (subscription)", "Moonshot (Kimi) — pay-as-you-go API",
                       "OpenAI API", "Qwen — Alibaba Cloud Coding Plan", "Qwen — Model Studio pay-as-you-go"],
             SubscriptionPlans.All.Select(p => p.Name));
         Assert.All(SubscriptionPlans.All, p =>
@@ -23,10 +23,10 @@ public sealed class SubscriptionPlansTests
     }
 
     [Theory]
-    [InlineData("zai-coding", "intl", "https://api.z.ai/api/coding/paas/v4", "https://z.ai/manage-apikey/apikey-list", "glm-5.3")]
-    [InlineData("zai-coding", "china", "https://open.bigmodel.cn/api/coding/paas/v4", "https://open.bigmodel.cn/usercenter/apikeys", "glm-5.3")]
-    [InlineData("zai-api", "intl", "https://api.z.ai/api/paas/v4", "https://z.ai/manage-apikey/apikey-list", "glm-5.3")]
-    [InlineData("zai-api", "china", "https://open.bigmodel.cn/api/paas/v4", "https://open.bigmodel.cn/usercenter/apikeys", "glm-5.3")]
+    [InlineData("zai", "coding", "https://api.z.ai/api/coding/paas/v4", "https://z.ai/manage-apikey/apikey-list", "glm-5.3")]
+    [InlineData("zai", "chinaCoding", "https://open.bigmodel.cn/api/coding/paas/v4", "https://open.bigmodel.cn/usercenter/apikeys", "glm-5.3")]
+    [InlineData("zai", "general", "https://api.z.ai/api/paas/v4", "https://z.ai/manage-apikey/apikey-list", "glm-5.3")]
+    [InlineData("zai", "chinaGeneral", "https://open.bigmodel.cn/api/paas/v4", "https://open.bigmodel.cn/usercenter/apikeys", "glm-5.3")]
     [InlineData("kimi-code", "intl", "https://api.kimi.ai/coding/v1", "https://www.kimi.com/code/console", "kimi-for-coding")]
     [InlineData("kimi-code", "china", "https://api.kimi.com/coding/v1", "https://www.kimi.com/code/console", "kimi-for-coding")]
     [InlineData("moonshot-api", "intl", "https://api.moonshot.ai/v1", "https://platform.moonshot.ai/console/api-keys", "kimi-k2.7-code")]
@@ -53,15 +53,19 @@ public sealed class SubscriptionPlansTests
         Assert.Equal(["kimi-for-coding", "k3", "k3-256k", "kimi-for-coding-highspeed"], SubscriptionPlans.Find("kimi-code")!.Models.Select(m => m.Id));
         Assert.Equal(["qwen3.7-plus", "qwen3.6-plus", "qwen3-coder-plus", "qwen3-coder-next", "qwen3.5-plus", "kimi-k2.5", "glm-5", "MiniMax-M2.5"],
             SubscriptionPlans.Find("qwen-coding")!.Models.Select(m => m.Id));
-        Assert.Equal(1_000_000, SubscriptionPlans.Find("zai-coding")!.Recommended.Context);
+        Assert.Equal(1_000_000, SubscriptionPlans.Find("zai")!.Recommended.Context);
+        Assert.Equal(["glm-5.3", "glm-5.2", "glm-5.1", "glm-5", "glm-4.7", "glm-4.6", "glm-5.3-flash"], SubscriptionPlans.Find("zai")!.Models.Select(m => m.Id));
+        Assert.True(SubscriptionPlans.Find("zai")!.ListsModels);
+        Assert.True(SubscriptionPlans.Find("zai")!.ChecksWithChat);
+        Assert.Equal("Endpoint", SubscriptionPlans.Find("zai")!.RegionLabel);
         Assert.False(SubscriptionPlans.Find("kimi-code")!.ListsModels);
         Assert.True(SubscriptionPlans.Find("openai")!.ListsModels);
         Assert.True(SubscriptionPlans.Find("moonshot-api")!.ListsModels);
         Assert.True(SubscriptionPlans.Find("qwen-api")!.ListsModels);
-        Assert.Equal("Z.ai offers the Coding Plan for use in coding tools.", SubscriptionPlans.Find("zai-coding")!.TermsNote);
+        Assert.Equal("Z.ai offers the GLM Coding Plan for use in coding tools; the General API is billed per token.", SubscriptionPlans.Find("zai")!.TermsNote);
         Assert.Equal("A ChatGPT Plus or Pro subscription doesn't include API access — the API is billed separately at platform.openai.com.",
             SubscriptionPlans.Find("openai")!.Note);
-        Assert.Equal("https://z.ai/subscribe", SubscriptionPlans.Find("zai-coding")!.SubscribeUrl);
+        Assert.Equal("https://z.ai/subscribe", SubscriptionPlans.Find("zai")!.SubscribeUrl);
     }
 
     [Fact]
@@ -94,7 +98,7 @@ public sealed class SubscriptionPlansTests
     [Fact]
     public void ARouteKeepsAKnownContextWindow()
     {
-        Assert.Equal(1_000_000, SubscriptionPlans.Find("zai-coding")!.Route("intl", "glm-5.3").ContextWindow);
+        Assert.Equal(1_000_000, SubscriptionPlans.Find("zai")!.Route("coding", "glm-5.3").ContextWindow);
         Assert.Equal(262_144, SubscriptionPlans.Find("kimi-code")!.Route("intl", "k3-256k").ContextWindow);
         Assert.Null(SubscriptionPlans.Find("kimi-code")!.Route("intl", "k3").ContextWindow);
     }
@@ -136,55 +140,33 @@ public sealed class SubscriptionPlansTests
         Assert.True(new ProviderProfile(ProviderKind.OpenAICompat, "p", "https://192.168.1.42:11443/v1", "m").IsSelfHosted);
     }
 
-    // MARK: - GLM-5 thinking
+    // MARK: - Z.ai, one plan with four endpoints
 
-    private static JsonObject Body(string model, ThinkingLevel? level, string baseUrl = "https://api.z.ai/api/coding/paas/v4")
+    [Fact]
+    public void ZaiIsOnePlanWithFourEndpoints()
     {
-        var client = new OpenAiClient(new ProviderProfile(ProviderKind.OpenAICompat, "z", baseUrl, model));
-        return JsonNode.Parse(client.MakeBody(new LlmRequest("sys", [LlmMessage.User("hi")], [], model, Thinking: level)))!.AsObject();
-    }
-
-    [Theory]
-    [InlineData(ThinkingLevel.Off, "low")]
-    [InlineData(ThinkingLevel.Low, "low")]
-    [InlineData(ThinkingLevel.Medium, "high")]
-    [InlineData(ThinkingLevel.High, "high")]
-    [InlineData(ThinkingLevel.Max, "max")]
-    public void Glm5AlwaysThinksAndTakesItsOwnEffortWords(ThinkingLevel level, string effort)
-    {
-        var body = Body("glm-5.3", level);
-        Assert.Equal(effort, body["reasoning_effort"]!.GetValue<string>());
-        Assert.Null(body["chat_template_kwargs"]); // never "enable_thinking: false"
-        Assert.Null(body["thinking"]);
-        // The same on a server of your own.
-        var local = Body("glm-5.3", level, "http://192.168.1.42:8000/v1");
-        Assert.Equal(effort, local["reasoning_effort"]!.GetValue<string>());
-        Assert.Null(local["chat_template_kwargs"]);
+        var zai = SubscriptionPlans.Find("zai")!;
+        Assert.Same(zai, SubscriptionPlans.Find("zai-coding")); // the ids of earlier builds still find it
+        Assert.Same(zai, SubscriptionPlans.Find("zai-api"));
+        Assert.Equal(["Coding Plan", "General API", "China — Coding Plan", "China — General API"], zai.Regions.Select(r => r.Label));
+        Assert.Equal(["GLM Coding Plan", "Z.ai API", "GLM Coding Plan (China)", "Z.ai API (China)"],
+            zai.Regions.Select(r => zai.Route(r.Id, "glm-5.3").Name));
+        Assert.Equal([true, false, true, false], zai.Regions.Select(r => r.IsSubscription == true));
+        Assert.Equal("For a GLM Coding Plan subscription — Coding Plan keys work only here.", zai.DefaultRegion.Detail);
+        Assert.Equal("coding", zai.DefaultRegion.Id);
+        Assert.Contains("don't start with sk-", zai.KeyMistake("sk-abc123"));
+        Assert.Null(zai.KeyMistake("0123abcd.EfGh"));
     }
 
     [Fact]
-    public void OtherHostedModelsKeepTheUsualThinkingParameters()
+    public void ZaisModelListKeepsTheChatModels()
     {
-        var off = Body("kimi-for-coding", ThinkingLevel.Off, "https://api.kimi.ai/coding/v1");
-        Assert.Null(off["reasoning_effort"]);
-        Assert.Null(off["chat_template_kwargs"]); // hosted: never template kwargs
-        Assert.Equal("high", Body("kimi-for-coding", ThinkingLevel.High, "https://api.kimi.ai/coding/v1")["reasoning_effort"]!.GetValue<string>());
-        Assert.False(SubscriptionPlans.AlwaysThinks("glm-4.6"));
-        Assert.True(SubscriptionPlans.AlwaysThinks("zai/glm-5.3"));
-    }
-
-    [Theory]
-    [InlineData("https://api.z.ai/api/coding/paas/v4", "glm-4.6", true)]       // Z.ai's servers: every model
-    [InlineData("https://open.bigmodel.cn/api/paas/v4", "glm-4.6", true)]
-    [InlineData("https://coding-intl.dashscope.aliyuncs.com/v1", "glm-5", true)] // a GLM-5 model anywhere
-    [InlineData("http://192.168.1.42:8000/v1", "glm-5.3", true)]
-    [InlineData("https://coding-intl.dashscope.aliyuncs.com/v1", "qwen3.7-plus", false)]
-    [InlineData("https://notz.ai.example.com/v1", "glm-4.6", false)]
-    public void GlmRulesFollowTheHostAndTheModel(string baseUrl, string model, bool expected)
-    {
-        Assert.Equal(expected, SubscriptionPlans.UsesGlmRules(baseUrl, model));
-        // Off on Z.ai never switches thinking off there.
-        if (expected) Assert.Equal("low", Body(model, ThinkingLevel.Off, baseUrl)["reasoning_effort"]!.GetValue<string>());
+        var zai = SubscriptionPlans.Find("zai")!;
+        Assert.Equal(["glm-5.3", "glm-4.6", "glm-5.3-flash"],
+            SubscriptionPlans.ChatModels(zai, ["glm-5.3", "embedding-3", "glm-4.6", "cogview-4", "glm-asr-2", "glm-5.3-flash", "glm-tts"]));
+        Assert.Equal(zai.Models.Select(m => m.Id), SubscriptionPlans.ChatModels(zai, ["cogview-4"]));
+        var openai = SubscriptionPlans.Find("openai")!;
+        Assert.Equal(["a", "b"], SubscriptionPlans.ChatModels(openai, ["a", "b"]));
     }
 
     [Fact]
@@ -200,9 +182,11 @@ public sealed class SubscriptionPlansTests
     public void RefusalsAreExplainedInPlainWords()
     {
         var kimi = SubscriptionPlans.Find("kimi-code")!;
-        var zai = SubscriptionPlans.Find("zai-coding")!;
-        Assert.Equal("The key wasn't accepted — check it's a Z.ai — GLM Coding Plan key for the China (BigModel) region.",
-            SubscriptionPlans.ExplainError(zai, zai.Region("china"), 401, "{}"));
+        var zai = SubscriptionPlans.Find("zai")!;
+        Assert.Equal("Z.ai didn't accept the key (HTTP 401).", SubscriptionPlans.ExplainError(zai, zai.Region("chinaCoding"), 401, "{}"));
+        // A Coding Plan key on the General API: the 429 that used to read "usage limit used up".
+        Assert.StartsWith("Z.ai says this account has no balance on the General API (1113). If this is a GLM Coding Plan key, switch the endpoint to Coding Plan",
+            SubscriptionPlans.ExplainError(zai, zai.Region("general"), 429, """{"error":{"code":"1113","message":"Insufficient balance or no resource package. Please recharge."}}"""));
         Assert.Equal("The plan's usage limit is used up for now. Try again later, or check your plan's usage page.",
             SubscriptionPlans.ExplainError(zai, zai.DefaultRegion, 429, ""));
         var agents = SubscriptionPlans.ExplainError(kimi, kimi.DefaultRegion, 403, """{"error":{"message":"Kimi For Coding is only available for Coding Agents"}}""");
