@@ -324,6 +324,8 @@ public sealed class CheckpointTests : IDisposable
         var dirty = _tools.Root.Write("dirty.txt", "dirty v1\n");
         var removed = _tools.Root.Write("removed.txt", "removed v1\n");
         Git("init", "-q");
+        // The runner's own git may convert line endings (core.autocrlf): this repository keeps files as written.
+        Git("config", "core.autocrlf", "false");
         Git("add", ".");
         Git("commit", "-q", "-m", "start");
         File.WriteAllText(dirty, "dirty v2 (uncommitted, before the command)\n");
