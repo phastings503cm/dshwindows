@@ -56,7 +56,7 @@ public sealed partial class SelfTest
             var view = LongChatView(window) ?? throw new InvalidOperationException("no chat view");
             var scroller = view.Transcript.Template.FindName("Scroller", view.Transcript) as ScrollViewer
                            ?? throw new InvalidOperationException("no transcript scroll viewer");
-            var lag = await LongChatLag(window, 2000);
+            var lag = await LongChatBusy(window, 2000);
             Note($"probe long chat: open — select + replay {selectMs:N0} ms, first layout at {layoutMs:N0} ms, idle at {settledMs:N0} ms; " +
                  $"{LongChatShape(view, scroller)}; {lag}");
             var open = LongChatMemory();
@@ -69,18 +69,36 @@ public sealed partial class SelfTest
             var pager = view.SelfTestPagingWindow ?? throw new InvalidOperationException("no transcript window");
             Note($"probe paging: the window holds {pager.Items.Count:N0} of {chat.Entries.Count:N0} rows ({pager.Earlier:N0} earlier, " +
                  $"{pager.Later:N0} newer, {(pager.IsLive ? "live" : "NOT LIVE")}); pinned {view.SelfTestPagingPinned}");
+            // The wheel first, as a reader starts: 10 notches up from the end (before the change: 0 px, snapped back).
+            var events = new List<string>();
+            void Log(object? sender, ScrollChangedEventArgs e)
+            {
+                if (events.Count < 12)
+                    events.Add($"Δ{e.VerticalChange:F0}/ext{e.ExtentHeightChange:+0;-0;0}/vp{e.ViewportHeightChange:+0;-0;0}→{e.VerticalOffset:F0} reader {view.SelfTestPagingReader} pinned {view.SelfTestPagingPinned}");
+            }
+            scroller.ScrollChanged += Log;
+            var wheelStart = scroller.VerticalOffset;
+            var wheelTarget = scroller.InputHitTest(new Point(scroller.ActualWidth / 2, scroller.ActualHeight / 2)) as UIElement;
+            await LongChatWheel(wheelTarget, 10, 120);
+            scroller.UpdateLayout();
+            Note($"probe paging: 10 wheel notches up from the end moved the transcript {wheelStart - scroller.VerticalOffset:F0} px; pinned {view.SelfTestPagingPinned}; " +
+                 $"events: {string.Join(" | ", events)}");
+            events.Clear();
+
             watch.Restart();
             view.SelfTestPagingAsReader(scroller.ScrollToTop);
+            var readerBefore = view.SelfTestPagingReader;
             window.UpdateLayout();
             var topMs = watch.ElapsedMilliseconds;
-            Note($"probe long chat: scrolled to the top in {topMs:N0} ms; {LongChatShape(view, scroller)}");
+            Note($"probe long chat: scrolled to the top in {topMs:N0} ms; {LongChatShape(view, scroller)}; reader {readerBefore}; events: {string.Join(" | ", events)}");
+            scroller.ScrollChanged -= Log;
             Capture(window, "long-chat-top");
             var earlier = pager.Earlier;
             await Dispatcher.Yield(DispatcherPriority.ApplicationIdle);
             await Settle(300);
             Note($"probe paging: arriving at the top loaded {earlier - pager.Earlier:N0} earlier rows ({pager.Earlier:N0} left) and held the " +
                  $"reader's place — {LongChatShape(view, scroller)}");
-            if (pager.Earlier >= earlier) throw new InvalidOperationException("scrolling to the top didn't load the page before");
+            if (pager.Earlier >= earlier) Fail("probe-long-chat", new InvalidOperationException("scrolling to the top didn't load the page before"));
 
             // "Load earlier messages" pressed: how long it takes, and how far the row being read moves (it shouldn't).
             for (var i = 0; i < 3; i++)
@@ -94,7 +112,7 @@ public sealed partial class SelfTest
                 var top = container?.TranslatePoint(new Point(0, 0), scroller).Y ?? double.NaN;
                 Note($"probe paging: Load earlier #{i + 1} brought {count} rows in {loadMs:N0} ms; the row being read moved {top - anchor.Top:+0.0;-0.0;0} px; " +
                      $"window {pager.Start:N0}–{pager.End:N0} ({pager.Items.Count} rows, {(pager.IsLive ? "live" : $"{pager.Later:N0} newer")})");
-                if (double.IsNaN(top) || Math.Abs(top - anchor.Top) > 2) throw new InvalidOperationException($"the row being read moved {top - anchor.Top} px");
+                if (double.IsNaN(top) || Math.Abs(top - anchor.Top) > 2) Fail("probe-long-chat", new InvalidOperationException($"the row being read moved {top - anchor.Top} px"));
             }
 
             // Jump to an old prompt (what the Prompts timeline and search do): the window moves to it, it is in view and flashes.
@@ -109,7 +127,7 @@ public sealed partial class SelfTest
             var shownTop = shown?.TranslatePoint(new Point(0, 0), scroller).Y ?? double.NaN;
             Note($"probe paging: jump to prompt 151 (row {targetIndex:N0}) {(jumped ? "done" : "FAILED")} in {jumpMs:N0} ms — window {pager.Start:N0}–{pager.End:N0} " +
                  $"({pager.Earlier:N0} earlier, {pager.Later:N0} newer); its top is {shownTop:F0} px into a {scroller.ViewportHeight:F0} px viewport");
-            if (!jumped || double.IsNaN(shownTop) || shownTop < -1 || shownTop > scroller.ViewportHeight - 20) throw new InvalidOperationException("the jumped-to prompt isn't in view");
+            if (!jumped || double.IsNaN(shownTop) || shownTop < -1 || shownTop > scroller.ViewportHeight - 20) Fail("probe-long-chat", new InvalidOperationException("the jumped-to prompt isn't in view"));
             await Settle(350);
             Capture(window, "long-chat-jump");
 
@@ -120,7 +138,7 @@ public sealed partial class SelfTest
             var foundRow = view.SelfTestPagingContainer(found);
             var foundTop = foundRow?.TranslatePoint(new Point(0, 0), scroller).Y ?? double.NaN;
             Note($"probe find: “Prompt 42:” — {view.SelfTestFindCount}; window {pager.Start:N0}–{pager.End:N0}; the match's top is {foundTop:F0} px into the viewport");
-            if (foundRow is null || foundTop < -1 || foundTop > scroller.ViewportHeight - 20) throw new InvalidOperationException("Find didn't bring its match into view");
+            if (foundRow is null || foundTop < -1 || foundTop > scroller.ViewportHeight - 20) Fail("probe-long-chat", new InvalidOperationException("Find didn't bring its match into view"));
             Capture(window, "long-chat-find");
             view.SelfTestCloseFind();
 
@@ -140,14 +158,14 @@ public sealed partial class SelfTest
             chat.EndStreaming();
             Note($"probe paging: back to the latest ({(pager.IsLive ? "live" : "NOT LIVE")}, pinned {view.SelfTestPagingPinned}); a streamed reply of 40 chunks " +
                  $"was followed to the end after {followed} of them; window {pager.Items.Count} rows");
-            if (followed < 38) throw new InvalidOperationException("the streamed reply wasn't followed");
+            if (followed < 38) Fail("probe-long-chat", new InvalidOperationException("the streamed reply wasn't followed"));
 
             // A long session followed at its bottom: the window lets go of its oldest rows.
             for (var i = 0; i < 400; i++) chat.AppendMessage(i % 2 == 0 ? MessageRole.User : MessageRole.Assistant, $"follow-up {i}");
             await Settle(300);
             Note($"probe paging: 400 more rows while following the end — the window holds {pager.Items.Count} ({pager.Earlier:N0} earlier); " +
                  $"at the end: {scroller.VerticalOffset >= scroller.ScrollableHeight - 2}");
-            if (pager.Items.Count > pager.MaxRows + pager.PageSize) throw new InvalidOperationException("the live window kept growing");
+            if (pager.Items.Count > pager.MaxRows + pager.PageSize) Fail("probe-long-chat", new InvalidOperationException("the live window kept growing"));
 
             // The very long prompt: collapsed, Copy gives it back whole, Show more opens it in its own box, Show less closes it.
             var longRow = chat.Entries.OfType<MessageEntryVM>().First(m => ReferenceEquals(m.Text, longText) || m.Text.Length == longText.Length);
@@ -156,7 +174,7 @@ public sealed partial class SelfTest
             var row = view.SelfTestPagingContainer(longRow) ?? throw new InvalidOperationException("the long prompt's row isn't laid out");
             var body = LongChatFind<MessageBody>(row) ?? throw new InvalidOperationException("no message body");
             Note($"probe paging: the {LongChatLongLines:N0}-line prompt's row is {row.ActualHeight:F0} px tall, collapsed {body.IsCollapsed}, “{body.ToggleLabel}”");
-            if (!body.IsCollapsed || row.ActualHeight > 1500) throw new InvalidOperationException("the long prompt isn't collapsed");
+            if (!body.IsCollapsed || row.ActualHeight > 1500) Fail("probe-long-chat", new InvalidOperationException("the long prompt isn't collapsed"));
             await CheckCopy(window, view, body, longRow, longText);
 
             watch.Restart();
@@ -167,7 +185,7 @@ public sealed partial class SelfTest
             var boxLines = box is null ? 0 : LongChatFind<VirtualizingStackPanel>(box)?.Children.Count ?? 0;
             Note($"probe paging: Show more in {openMs:N0} ms — {(body.InBox ? "in its own box" : "INLINE")} {box?.ActualHeight:F0} px tall with {boxLines} of " +
                  $"{LongChatLongLines:N0} lines laid out; the row is {row.ActualHeight:F0} px; “{body.ToggleLabel}”");
-            if (!body.InBox || row.ActualHeight > MessageBody.BoxHeight + 300) throw new InvalidOperationException("Show more didn't open the box");
+            if (!body.InBox || row.ActualHeight > MessageBody.BoxHeight + 300) Fail("probe-long-chat", new InvalidOperationException("Show more didn't open the box"));
             var lag2 = await LongChatLag(window, 1000);
             Note($"probe paging: with it open, {lag2}");
             await Settle(300);
@@ -221,7 +239,7 @@ public sealed partial class SelfTest
         var copied = LongChatClipboard();
         Note($"probe copy: Copy on the {LongChatLongLines:N0}-line prompt put {copied?.Length ?? 0:N0} characters on the clipboard — " +
              $"{(copied == sent ? "exactly the prompt as sent" : copied is null ? "CLIPBOARD UNREADABLE" : "NOT THE PROMPT")}; the button says “{(button.IsCopied ? "Copied" : "Copy")}”");
-        if (copied is not null && copied != sent) throw new InvalidOperationException("Copy didn't give back the prompt");
+        if (copied is not null && copied != sent) Fail("probe-long-chat", new InvalidOperationException("Copy didn't give back the prompt"));
         Capture(window, "long-chat-copied");
 
         // Ctrl+C in a short reply with nothing selected copies the whole reply.
@@ -238,7 +256,7 @@ public sealed partial class SelfTest
             Note($"probe copy: Ctrl+C in a reply with nothing selected {(handled ? "copied" : "DID NOT COPY")} " +
                  $"{(reply == replyRow.Text ? "exactly the reply" : reply is null ? "nothing readable" : "SOMETHING ELSE")} ({reply?.Length ?? 0:N0} characters); " +
                  $"a /goal prompt copies as “{TranscriptCopy.Prompt("🎯 /goal ship the release")}”");
-            if (!handled || (reply is not null && reply != replyRow.Text)) throw new InvalidOperationException("Ctrl+C didn't copy the reply");
+            if (!handled || (reply is not null && reply != replyRow.Text)) Fail("probe-long-chat", new InvalidOperationException("Ctrl+C didn't copy the reply"));
         }
     }
 
@@ -401,6 +419,42 @@ public sealed partial class SelfTest
         }
         lags.Sort();
         return $"input waits max {lags.LastOrDefault():N0} ms over {lags.Count} samples, {layouts:N0} layout passes in {milliseconds / 1000.0:F0} s";
+    }
+
+    /// <summary><see cref="LongChatLag"/>, and what kept the UI thread busy meanwhile: the longest dispatcher operations by
+    /// priority and method.</summary>
+    private static async Task<string> LongChatBusy(Window window, int milliseconds)
+    {
+        var hooks = window.Dispatcher.Hooks;
+        var started = new Dictionary<DispatcherOperation, long>();
+        var spent = new Dictionary<string, (long Ms, int Count)>();
+        var clock = Stopwatch.StartNew();
+        var method = typeof(DispatcherOperation).GetField("_method", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic);
+        void Start(object? sender, DispatcherHookEventArgs e) => started[e.Operation] = clock.ElapsedMilliseconds;
+        void Done(object? sender, DispatcherHookEventArgs e)
+        {
+            if (!started.Remove(e.Operation, out var at)) return;
+            var name = method?.GetValue(e.Operation) is Delegate d ? $"{d.Method.DeclaringType?.Name}.{d.Method.Name}" : "?";
+            var key = $"{e.Operation.Priority}:{name}";
+            var (ms, count) = spent.GetValueOrDefault(key);
+            spent[key] = (ms + clock.ElapsedMilliseconds - at, count + 1);
+        }
+        hooks.OperationStarted += Start;
+        hooks.OperationCompleted += Done;
+        hooks.OperationAborted += Done;
+        string lag;
+        try
+        {
+            lag = await LongChatLag(window, milliseconds);
+        }
+        finally
+        {
+            hooks.OperationStarted -= Start;
+            hooks.OperationCompleted -= Done;
+            hooks.OperationAborted -= Done;
+        }
+        var top = spent.OrderByDescending(p => p.Value.Ms).Take(4).Select(p => $"{p.Key} {p.Value.Ms:N0} ms ×{p.Value.Count}");
+        return $"{lag}; busiest: {string.Join(", ", top)}";
     }
 
     /// <summary>Raise the wheel the way the input system does (tunnel, then bubble).</summary>
