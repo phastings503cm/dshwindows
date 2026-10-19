@@ -28,6 +28,10 @@ public sealed class OpenClawSelection
     public HashSet<string> ModelServers { get; init; } = new(StringComparer.OrdinalIgnoreCase);
     /// <summary>Hold the skills for approval in Settings › Skills instead of switching them on.</summary>
     public bool SkillsAsDrafts { get; init; }
+    /// <summary>When Vision already has a skill of that name.</summary>
+    public OpenClawConflict SkillConflict { get; init; } = OpenClawConflict.KeepBoth;
+    /// <summary>When the vault already has that name (with another value: the same value is never stored twice).</summary>
+    public OpenClawConflict CredentialConflict { get; init; } = OpenClawConflict.KeepBoth;
 
     /// <summary>Everything the bundle offers that is ticked by default: memory, recent daily logs and
     /// USER.md; skills without scripts; credentials as "ask first"; compatible model servers.</summary>
@@ -131,7 +135,7 @@ public static class OpenClawImporter
                 progress?.Report($"Adding {credential.Name} to the vault…");
                 try
                 {
-                    var name = AddToVault(vault, credential, selection.Credentials[credential.Name], out var reason);
+                    var name = AddToVault(vault, credential, selection.Credentials[credential.Name], selection.CredentialConflict, out var reason);
                     if (name is null) skippedCredentials[credential.Name] = reason!;
                     else created.Add(name);
                 }
@@ -154,7 +158,8 @@ public static class OpenClawImporter
             {
                 try
                 {
-                    var (ok, skipped) = await ImportSkillsAsync(source, chosen, locations, selection.SkillsAsDrafts, progress, problems, cancellationToken)
+                    var (ok, skipped) = await ImportSkillsAsync(source, chosen, locations, selection.SkillsAsDrafts, selection.SkillConflict, progress,
+                            problems, cancellationToken)
                         .ConfigureAwait(false);
                     if (selection.SkillsAsDrafts) drafted.AddRange(ok);
                     else imported.AddRange(ok);
@@ -185,7 +190,8 @@ public static class OpenClawImporter
     // MARK: - Vault
 
     /// <summary>Add one credential; the name it landed under, or null with the reason it didn't.</summary>
-    private static string? AddToVault(CredentialVault vault, OpenClawCredential credential, VaultAccess access, out string? reason)
+    private static string? AddToVault(CredentialVault vault, OpenClawCredential credential, VaultAccess access, OpenClawConflict conflict,
+                                      out string? reason)
     {
         reason = null;
         var value = credential.Secret.Reveal();
@@ -204,6 +210,16 @@ public static class OpenClawImporter
                 {
                     reason = $"{name} is already in the vault with this value.";
                     return null;
+                }
+                if (conflict == OpenClawConflict.Skip)
+                {
+                    reason = $"The vault already has {name} with a different value; kept that one.";
+                    return null;
+                }
+                if (conflict == OpenClawConflict.Replace && !vault.IsSessionOnly(existing.Id))
+                {
+                    vault.Update(existing with { Description = description, Access = access }, value);
+                    return name;
                 }
                 name = CredentialName(credential.Name, attempt + 1);
                 continue;
@@ -229,10 +245,17 @@ public static class OpenClawImporter
         error is IOException or UnauthorizedAccessException or TimeoutException or SocketException or ObjectDisposedException or InvalidOperationException;
 
     private static async Task<(List<string> Imported, Dictionary<string, string> Skipped)> ImportSkillsAsync(
-        IFileSource source, List<OpenClawSkill> chosen, SkillLocations locations, bool asDrafts, IProgress<string>? progress,
+        IFileSource source, List<OpenClawSkill> chosen, SkillLocations locations, bool asDrafts, OpenClawConflict conflict, IProgress<string>? progress,
         List<string> problems, CancellationToken cancellationToken)
     {
         var skipped = new Dictionary<string, string>(StringComparer.Ordinal);
+        if (conflict == OpenClawConflict.Skip && !asDrafts)
+        {
+            // Vision's own skill of that name stays as it is.
+            var kept = chosen.Where(s => Directory.Exists(Path.Combine(locations.UserSkills, SkillNaming.Slug(s.Name) is { Length: > 0 } slug ? slug : "skill"))).ToList();
+            foreach (var skill in kept) skipped[skill.Name] = $"Vision already has a skill named {SkillNaming.Slug(skill.Name)}; kept that one.";
+            chosen = chosen.Except(kept).ToList();
+        }
         var ledger = ImportLedger.Load(locations);
         var staging = Path.Combine(Path.GetTempPath(), "vision-openclaw-" + Guid.NewGuid().ToString("N")[..12]);
         try
@@ -282,7 +305,7 @@ public static class OpenClawImporter
                 string FolderOf(ImportCandidate c) => Path.GetFileName(Path.GetDirectoryName(c.Id) ?? "");
                 var mine = plan.Candidates.Where(c => staged.ContainsKey(FolderOf(c))).ToList();
                 var ids = mine.Select(c => c.Id).ToList();
-                var result = SkillImporter.Perform(plan, ids, SkillScope.User, null, asDrafts, ConflictPolicy.Rename, locations);
+                var result = SkillImporter.Perform(plan, ids, SkillScope.User, null, asDrafts, conflict.Policy(), locations);
                 foreach (var (name, reason) in result.Skipped) skipped[name] = reason;
                 var landed = new List<string>();
                 foreach (var candidate in mine)
