@@ -231,7 +231,14 @@ public sealed class RewindWindow : Window
             _diff.Document = new FlowDocument();
             return;
         }
-        _diff.Document = Render(CheckpointRewind.Diff(_model.Host.Checkpoints, file, _session.WorkspacePath ?? turn.Workspace));
+        // Worked out off the UI thread: a long file takes a moment.
+        var store = _model.Host.Checkpoints;
+        var root = _session.WorkspacePath ?? turn.Workspace;
+        _diff.Document = Render("…");
+        _ = Task.Run(() => CheckpointRewind.Diff(store, file, root)).ContinueWith(t =>
+        {
+            if (t.IsCompletedSuccessfully && ReferenceEquals((_files.SelectedItem as ListBoxItem)?.Tag, file)) _diff.Document = Render(t.Result);
+        }, TaskScheduler.FromCurrentSynchronizationContext());
     }
 
     /// <summary>A diff as a document: added lines green, removed lines red, hunk headers in the accent colour.</summary>

@@ -822,8 +822,7 @@ public sealed partial class AgentHost : ObservableObject
             case SlashCommand.Mcp mcp:
                 if (mcp.Argument?.Trim().ToLowerInvariant() is "reload" or "restart" or "reconnect")
                 {
-                    var count = Mcp.Statuses.Count(s => s.Config.Enabled);
-                    vm.Note($"Reconnecting {count} MCP server{(count == 1 ? "" : "s")}…");
+                    vm.Note($"Reconnecting {Mcp.Statuses.Count(s => s.Config.Enabled)} MCP server(s)…");
                     _ = Task.Run(() => Mcp.ReconnectAllAsync());
                 }
                 else McpCommand(vm);
@@ -928,6 +927,13 @@ public sealed partial class AgentHost : ObservableObject
             if (await ResolveRouteAsync(vm) is not { } profile)
             {
                 vm.Note(LlmException.NoModel().Message, MessageRole.Error);
+                return;
+            }
+            // A Sensitive chat's summary goes only where its turns may.
+            if (ConversationRefusal(vm, profile) is { } refused)
+            {
+                vm.Note(refused, MessageRole.Error);
+                Log.RecordItem(sessionId, "error", refused, isError: true);
                 return;
             }
             var prompt = _systemPrompts.GetValueOrDefault(sessionId) ?? _basePrompt;
@@ -1573,6 +1579,8 @@ public sealed partial class AgentHost : ObservableObject
                                                          CancellationToken ct = default)
     {
         var profile = await (vm is null ? ResolveRouteAsync() : ResolveRouteAsync(vm)) ?? throw LlmException.NoModel();
+        // A skill written from a Sensitive chat carries its conversation: only where the chat's turns may go.
+        if (vm is not null && ConversationRefusal(vm, profile) is { } refused) throw new SensitivityRefusalException(refused);
         if (vm is not null && !_transcripts.ContainsKey(vm.Id)) Hydrate(vm);
         var conversation = vm is not null ? _transcripts.GetValueOrDefault(vm.Id) ?? [] : [];
         var request = new SkillGenerationRequest(goal, conversation, Skills(vm).Select(s => s.Name).ToList(), improving);
@@ -1599,6 +1607,10 @@ public sealed partial class AgentHost : ObservableObject
         catch (OperationCanceledException)
         {
             vm.Note("Stopped.");
+        }
+        catch (SensitivityRefusalException refused)
+        {
+            vm.Note(refused.Message, MessageRole.Error);
         }
         catch (Exception error)
         {
@@ -1730,6 +1742,7 @@ public sealed partial class AgentHost : ObservableObject
         {
             var profile = await ResolveRouteAsync(vm);
             if (profile is null) return messages;
+            if (ConversationRefusal(vm, profile) is { } refused) throw new SensitivityRefusalException(refused);
             var summary = await Compaction.SummarizeAsync(MakeClient(profile, sessionId), plan, model: profile.Model, cancellationToken: ct);
             // No summary (no client, or it failed): keep the transcript as-is; the server may still
             // accept it, and an overflow is surfaced rather than silently dropped.

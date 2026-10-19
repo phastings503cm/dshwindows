@@ -646,8 +646,8 @@ public partial class ChatView : UserControl
         }
         if ((text.Length == 0 && _attachments.Count == 0) || session.Running) return;
         // A Sensitive chat on a model it may not use: say why, and keep what was typed (a command still runs — /sensitive off —
-        // but not /goal, which goes to the model).
-        if (SlashCommand.Parse(text) is null or SlashCommand.Goal && _model.Host.SensitiveRefusal(session) is { } refusal)
+        // but not what sends the conversation to the model: a message, /goal, /compact, /skill new …).
+        if (GoesToModel(text) && _model.Host.SensitiveRefusal(session) is { } refusal)
         {
             session.Note(refusal, MessageRole.Error);
             ScrollIfPinned();
@@ -661,6 +661,14 @@ public partial class ChatView : UserControl
         _model.Send(text, session, payload);
         ScrollIfPinned();
     }
+
+    /// <summary>Whether what was typed goes to the chat's model: a message, or a command that sends the conversation.</summary>
+    internal static bool GoesToModel(string text) => SlashCommand.Parse(text) switch
+    {
+        null or SlashCommand.Goal or SlashCommand.Compact => true,
+        SlashCommand.Skill { Argument: { } argument } => argument.Split(' ', 2)[0].ToLowerInvariant() is "new" or "generate" or "create",
+        _ => false,
+    };
 
     private void Stop_Click(object sender, RoutedEventArgs e)
     {

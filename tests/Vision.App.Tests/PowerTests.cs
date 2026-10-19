@@ -164,6 +164,15 @@ public sealed class PowerTests : IDisposable
         Assert.DoesNotContain("jane.doe@example.com", _server.Seen[0].AllUserText);
         Assert.Contains("--- Sensitive chat ---", _server.Seen[0].System);
 
+        // /compact sends the whole conversation: refused the same way while the shield is off, and nothing is sent.
+        host.Config.Privacy = host.Config.Privacy with { Mask = false };
+        var seen = _server.Seen.Count;
+        var errors = Notes(vm, MessageRole.Error).Count;
+        host.Send("/compact", vm.Id);
+        await WaitUntil("compact refused", () => !vm.Running && Notes(vm, MessageRole.Error).Count > errors);
+        Assert.StartsWith("This chat is Sensitive.", Notes(vm, MessageRole.Error).Last());
+        Assert.Equal(seen, _server.Seen.Count);
+
         host.SetChatSensitive(vm, false);
         Assert.Null(host.SensitivityHeader(vm));
         Assert.Equal("This chat is no longer Sensitive: every model may be used, with the usual masking for models that aren't private.", Notes(vm).Last());

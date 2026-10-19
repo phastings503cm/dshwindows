@@ -48,7 +48,7 @@ public sealed class CheckpointStore
 
     private string ObjectPath(string hash) => Path.Combine(Objects, hash[..2], hash);
 
-    /// Keep <paramref name="bytes"/> (once, however often it is put) and return its SHA-256.
+    /// <summary>Keep <paramref name="bytes"/> (once, however often it is put) and return its SHA-256.</summary>
     public string Put(byte[] bytes)
     {
         var hash = Hash(bytes);
@@ -64,7 +64,7 @@ public sealed class CheckpointStore
         return hash;
     }
 
-    /// The bytes stored under <paramref name="hash"/>, or null when they were pruned (or never kept).
+    /// <summary>The bytes stored under <paramref name="hash"/>, or null when they were pruned (or never kept).</summary>
     public byte[]? Get(string hash)
     {
         if (hash.Length < 3) return null;
@@ -160,7 +160,7 @@ public sealed class CheckpointStore
     /// <summary>What a prune removed, and what the contents still kept take.</summary>
     public sealed record PruneResult(int Records, int Objects, long BytesKept);
 
-    /// See the top of the file. <paramref name="now"/> is for tests.
+    /// <summary>See the top of the file. <paramref name="now"/> is for tests.</summary>
     public PruneResult Prune(TimeSpan? maxAge = null, long? maxBytes = null, DateTimeOffset? now = null)
     {
         var age = maxAge ?? DefaultMaxAge;

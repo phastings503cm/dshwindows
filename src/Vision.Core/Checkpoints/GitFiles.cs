@@ -86,8 +86,9 @@ public static class GitFiles
     public static IReadOnlyList<string> ParseStatus(string output) =>
         ParseEntries(output).Select(e => e.Path).Distinct(StringComparer.Ordinal).ToList();
 
-    /// <summary>What git's index has for <paramref name="relative"/> (a clean file's content), or null when it has nothing.</summary>
-    public static byte[]? IndexContent(string root, string relative) => Run(root, ["cat-file", "blob", ":" + relative]);
+    /// <summary>What git's index has for <paramref name="relative"/> (a clean file's content, as checked out: smudge filters and
+    /// line endings applied), or null when git can't say.</summary>
+    public static byte[]? IndexContent(string root, string relative) => Run(root, ["--literal-pathspecs", "cat-file", "--filters", ":" + relative]);
 
     /// <summary>Run git in <paramref name="folder"/> and return its standard output; null on any failure.</summary>
     internal static byte[]? Run(string folder, IReadOnlyList<string> arguments)

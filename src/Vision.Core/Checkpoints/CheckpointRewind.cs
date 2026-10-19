@@ -13,7 +13,8 @@ namespace Vision.Core;
 /// <param name="Conflict">Why it would throw away a later change ("changed since this turn"); null = safe.</param>
 /// <param name="Skipped">Why it can't be rewound at all; null = it can.</param>
 /// <param name="AlreadyThere">It already holds what it held before the turn: nothing to do.</param>
-public sealed record RewindItem(CheckpointFile File, string? Restore, string? Conflict, string? Skipped, bool AlreadyThere)
+/// <param name="Seen">What it held when the plan was made (its hash; null = no file) — checked again just before writing.</param>
+public sealed record RewindItem(CheckpointFile File, string? Restore, string? Conflict, string? Skipped, bool AlreadyThere, string? Seen = null)
 {
     public string Path => File.Path;
 }
@@ -47,7 +48,7 @@ public sealed class RewindResult
 
 public static class CheckpointRewind
 {
-    /// What rewinding <paramref name="turn"/> would do now, file by file.
+    /// <summary>What rewinding <paramref name="turn"/> would do now, file by file.</summary>
     public static RewindPlan Plan(CheckpointStore store, TurnCheckpoint turn)
     {
         var items = new List<RewindItem>();
@@ -61,14 +62,19 @@ public static class CheckpointRewind
             if (!readable) skipped ??= "it can't be read now";
             else if (now == file.Before) already = true;
             else if (file.IsLate || now != file.After) conflict = now is null ? "deleted since this turn" : "changed since this turn";
-            items.Add(new RewindItem(file, file.Before, conflict, skipped, already));
+            items.Add(new RewindItem(file, file.Before, conflict, skipped, already, now));
         }
         return new RewindPlan(turn, items);
     }
 
-    /// Put the files back. A conflict is rewound only with <paramref name="includeConflicts"/>. <paramref name="recorder"/>,
+    /// <summary>Why a file the person confirmed as safe wasn't written: it changed between the plan and the rewind.</summary>
+    public const string ChangedWhileDeciding = "it changed after you confirmed — left as it is";
+
+    /// <summary>Put the files back. A conflict is rewound only with <paramref name="includeConflicts"/>. Each file is looked at
+    /// again just before it is written: one that already holds its earlier content is left; a safe one that changed since the
+    /// plan isn't written (<see cref="ChangedWhileDeciding"/>); a conflict "Rewind All" included is written whatever it holds. <paramref name="recorder"/>,
     /// when given, records the rewind as a turn of its own. The turn is marked rewound (its record stays, for the diff and
-    /// for the rewind's own undo).
+    /// for the rewind's own undo).</summary>
     public static RewindResult Apply(CheckpointStore store, RewindPlan plan, bool includeConflicts, TurnRecorder? recorder = null,
                                      DateTimeOffset? at = null)
     {
@@ -79,6 +85,18 @@ public static class CheckpointRewind
             if (item.Skipped is not null || (item.Conflict is not null && !includeConflicts))
             {
                 result.Left.Add(item.Path);
+                continue;
+            }
+            var (current, readable) = Current(item.Path);
+            if (!readable)
+            {
+                result.Failed[item.Path] = "it can't be read now";
+                continue;
+            }
+            if (current == item.Restore) continue;
+            if (item.Conflict is null && current != item.Seen)
+            {
+                result.Failed[item.Path] = ChangedWhileDeciding;
                 continue;
             }
             recorder?.BeforeChange(item.Path, "rewind");
@@ -181,10 +199,17 @@ public static class CheckpointRewind
         var afterText = FileText.Decode(after)?.Text;
         if (beforeText is null || afterText is null)
             return $"Binary file: {AttachmentFormat.Bytes(before.LongLength)} → {AttachmentFormat.Bytes(after.LongLength)}.";
+        var (oldLines, newLines) = (LineDiff.Lines(beforeText).Length, LineDiff.Lines(afterText).Length);
+        if (Math.Max(oldLines, newLines) > MaxDiffLines)
+            return $"Too large to compare line by line ({oldLines.ToString("N0", System.Globalization.CultureInfo.InvariantCulture)} → " +
+                   $"{newLines.ToString("N0", System.Globalization.CultureInfo.InvariantCulture)} lines).";
         var diff = LineDiff.Unified(beforeText, afterText, file.Before is null ? "/dev/null" : "a/" + name,
             file.After is null && !file.IsLate ? "/dev/null" : "b/" + name);
         return diff.Length == 0 ? "No line changes." : diff;
     }
+
+    /// <summary>A file longer than this isn't compared line by line (the Mac's limit).</summary>
+    public const int MaxDiffLines = 20_000;
 
     /// <summary>A path shown relative to the project when it is inside it (forward slashes), else as it is.</summary>
     public static string Display(string path, string? root)
@@ -201,7 +226,7 @@ public static class CheckpointRewind
         }
     }
 
-    /// The hash of what is at <paramref name="path"/> now (null = no file), and whether it could be read.
+    /// <summary>The hash of what is at <paramref name="path"/> now (null = no file), and whether it could be read.</summary>
     private static (string? Hash, bool Readable) Current(string path)
     {
         if (Directory.Exists(path)) return (null, false);

@@ -76,7 +76,8 @@ public sealed class McpServersPage : UserControl
             McpState.Failed => "SystemFillColorCriticalBrush",
             _ => "TextFillColorSecondaryBrush",
         };
-        var state = Ui.Status("  " + status.Headline, brush);
+        // A failure's reason is on its own line below; beside the name it is just "Failed".
+        var state = Ui.Status("  " + (status.State == McpState.Failed ? "Failed" : status.Headline), brush);
         state.TextWrapping = TextWrapping.NoWrap;
         state.TextTrimming = TextTrimming.CharacterEllipsis;
         state.ToolTip = status.Error;
@@ -414,20 +415,36 @@ public sealed class McpImportWindow : Window
             {
                 var server = candidate.Server;
                 var known = candidate.IsKnown(existing);
-                var box = new CheckBox { IsChecked = !known, VerticalAlignment = VerticalAlignment.Top, Margin = new Thickness(0, 2, 10, 0) };
+                var box = new CheckBox { IsChecked = !known && candidate.Preselected, VerticalAlignment = VerticalAlignment.Top, Margin = new Thickness(0, 2, 10, 0) };
                 box.Click += (_, _) => UpdateCount();
                 var tags = new List<string>();
                 if (known) tags.Add("already in Vision");
-                var secrets = candidate.Env.Count + candidate.Headers.Count;
+                // Values written as ${NAME} are filled in at start, not kept.
+                var secrets = candidate.Env.Values.Concat(candidate.Headers.Values).Count(v => !v.Contains("${", StringComparison.Ordinal));
                 if (secrets > 0) tags.Add($"{secrets} value{(secrets == 1 ? "" : "s")} → Credential Manager");
+                if (candidate.FromRepository) tags.Add("project's files");
                 if (!server.Enabled) tags.Add("switched off there");
                 if (server.Project is { } project) tags.Add($"only in {System.IO.Path.GetFileName(project.TrimEnd('\\', '/'))}");
                 var name = Ui.Text(server.Name, 13, FontWeights.SemiBold);
-                var target = Ui.Text(server.Summary, 11.5, wrap: false);
-                target.SetResourceReference(TextBlock.FontFamilyProperty, "MonoFont");
+                // The whole command line (an argument with spaces in quotes), so what it runs can be read before importing.
+                var commandLine = server.Transport == McpTransportKind.Stdio
+                    ? string.Join(" ", new[] { server.Command ?? "" }.Concat(server.Args.Select(a => a.Contains(' ') ? $"\"{a}\"" : a)))
+                    : server.Url ?? "";
+                var target = new TextBox
+                {
+                    Text = commandLine + (server.Cwd is { } cwd ? $"\n(in {cwd})" : ""), IsReadOnly = true, TextWrapping = TextWrapping.Wrap,
+                    BorderThickness = new Thickness(0), Background = System.Windows.Media.Brushes.Transparent, FontSize = 11.5, Padding = new Thickness(0),
+                };
+                target.SetResourceReference(Control.FontFamilyProperty, "MonoFont");
+                target.SetResourceReference(Control.ForegroundProperty, "TextFillColorPrimaryBrush");
                 var detail = Ui.Secondary(string.Join(" · ", tags), 11.5);
                 var stack = Ui.Stack(name, target, tags.Count > 0 ? detail : null);
-                if (candidate.Caveat is { } caveat) stack.Children.Add(Ui.Status(caveat, "SystemFillColorCautionBrush"));
+                foreach (var warning in candidate.Warnings)
+                {
+                    var line = Ui.Status(warning, "SystemFillColorCautionBrush");
+                    line.Margin = new Thickness(0, 3, 0, 0);
+                    stack.Children.Add(line);
+                }
                 var row = new DockPanel();
                 DockPanel.SetDock(box, Dock.Left);
                 row.Children.Add(box);
@@ -451,10 +468,9 @@ public sealed class McpImportWindow : Window
     {
         var chosen = _rows.Where(r => r.Box.IsChecked == true).Select(r => r.Candidate).ToList();
         if (chosen.Count == 0) return;
-        var (added, updated) = McpImport.Import(_model.Host.McpServers, chosen);
-        Dialog.Info("MCP servers imported",
-            $"Added {added}{(updated > 0 ? $" and updated {updated}" : "")}. Their keys are in Windows Credential Manager now. " +
-            "Each one connects in a moment; Settings › MCP Servers shows how it went.");
+        var imported = new List<McpServerConfig>();
+        McpImport.Import(_model.Host.McpServers, chosen, imported);
+        Dialog.Info("MCP servers imported", McpImport.Summary(imported));
         Close();
     }
 }

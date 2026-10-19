@@ -81,7 +81,7 @@ public sealed class TurnCheckpoint
     /// <summary>"+12 −3" over every text file.</summary>
     [JsonIgnore] public string LineSummary => $"+{Changed.Sum(f => f.Added)} −{Changed.Sum(f => f.Removed)}";
 
-    /// The first line of <paramref name="prompt"/>, up to 80 characters — a turn's title.
+    /// <summary>The first line of <paramref name="prompt"/>, up to 80 characters — a turn's title.</summary>
     public static string TitleOf(string? prompt)
     {
         var line = (prompt ?? "").Replace("\r", "").Split('\n').Select(l => l.Trim()).FirstOrDefault(l => l.Length > 0) ?? "";

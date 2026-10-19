@@ -312,10 +312,27 @@ public static partial class McpVariables
     [GeneratedRegex(@"\$\{([A-Za-z_][A-Za-z0-9_]*)(?::-([^}]*))?\}")]
     private static partial Regex Pattern();
 
+    /// <summary>A variable's value: Vision's own environment, else (Windows) the user's environment variables in the registry —
+    /// the place a value set after Vision started (or in System Properties) lives. Windows has no login shell to ask.</summary>
+    public static string? Lookup(string name)
+    {
+        if (Environment.GetEnvironmentVariable(name) is { Length: > 0 } value) return value;
+        if (!OperatingSystem.IsWindows()) return null;
+        try
+        {
+            using var key = Microsoft.Win32.Registry.CurrentUser.OpenSubKey("Environment");
+            return key?.GetValue(name) as string;
+        }
+        catch (Exception ex) when (ex is System.Security.SecurityException or UnauthorizedAccessException or IOException)
+        {
+            return null;
+        }
+    }
+
     public static string Expand(string text, Func<string, string?>? lookup = null)
     {
         if (!text.Contains("${", StringComparison.Ordinal)) return text;
-        lookup ??= Environment.GetEnvironmentVariable;
+        lookup ??= Lookup;
         return Pattern().Replace(text, m =>
         {
             var value = lookup(m.Groups[1].Value);

@@ -56,7 +56,7 @@ public sealed class TurnRecorder
         }
     }
 
-    /// A tool is about to change <paramref name="path"/>: keep it as it is now, unless this turn already did.
+    /// <summary>A tool is about to change <paramref name="path"/>: keep it as it is now, unless this turn already did.</summary>
     public void BeforeChange(string path, string by)
     {
         string full;
@@ -92,8 +92,8 @@ public sealed class TurnRecorder
         return new ShellSnapshot { RepoRoot = root, Dirty = dirty };
     }
 
-    /// After a shell command: every tracked file whose status or content moved since <paramref name="before"/> is one it
-    /// changed (unless this turn already kept it). Returns the changes found, for the editor and the chat's file chips.
+    /// <summary>After a shell command: every tracked file whose status or content moved since <paramref name="before"/> is one it
+    /// changed (unless this turn already kept it). Returns the changes found, for the editor and the chat's file chips.</summary>
     public IReadOnlyList<FileChange> AfterShell(ShellSnapshot? before, string by)
     {
         var found = new List<FileChange>();
@@ -127,7 +127,13 @@ public sealed class TurnRecorder
                 // Clean before the command: what git has is what it was — or, when git has nothing, the command created it.
                 var relative = relativeOf.GetValueOrDefault(full) ?? Path.GetRelativePath(before.RepoRoot, full).Replace('\\', '/');
                 var content = untracked.Contains(full) ? null : GitFiles.IndexContent(before.RepoRoot, relative);
-                if (content is null && !untracked.Contains(full)) continue; // git couldn't say what it was: leave it alone
+                if (content is null && !untracked.Contains(full))
+                {
+                    // git couldn't say what it held: recorded, but never touched by a rewind.
+                    Add(new CheckpointFile { Path = full, Before = null, After = now, By = by, Skipped = GitCouldntSay });
+                    found.Add(new FileChange(full, now is null ? FileChangeKind.Deleted : FileChangeKind.Modified));
+                    continue;
+                }
                 if (content is null) was = null;
                 else if (content.LongLength > CheckpointStore.MaxFileBytes)
                 {
@@ -242,7 +248,7 @@ public sealed class TurnRecorder
         (file.Added, file.Removed) = LineDiff.Count(beforeText, afterText);
     }
 
-    /// What is at <paramref name="full"/> now: its hash once kept (null when there is no file), or why it can't be kept.
+    /// <summary>What is at <paramref name="full"/> now: its hash once kept (null when there is no file), or why it can't be kept.</summary>
     private (string? Hash, string? Skipped) Keep(string full)
     {
         var bytes = ReadOrNull(full);
@@ -252,6 +258,9 @@ public sealed class TurnRecorder
     }
 
     private static string TooLarge(long bytes) => $"too large to keep ({AttachmentFormat.Bytes(bytes)})";
+
+    /// <summary>A shell command changed a file git couldn't give the earlier content of (the Mac's words).</summary>
+    public const string GitCouldntSay = "git couldn't say what it held before";
 
     private static string? CurrentHash(string full) => ReadOrNull(full) is { } bytes ? CheckpointStore.Hash(bytes) : null;
 

@@ -71,8 +71,8 @@ public static class SensitivityPolicy
         route.Kind.ToString().Equals("guardian", StringComparison.OrdinalIgnoreCase)
         || route.BaseUrl.Contains(GuardianEndpoint.HarnessPath, StringComparison.OrdinalIgnoreCase);
 
-    /// How a Sensitive chat may use <paramref name="route"/>, with the shield switched on or off (Settings › AI Models ›
-    /// Sensitive data). A chat that isn't Sensitive may use every route — this is only asked for Sensitive ones.
+    /// <summary>How a Sensitive chat may use <paramref name="route"/>, with the shield switched on or off (Settings › AI Models ›
+    /// Sensitive data). A chat that isn't Sensitive may use every route — this is only asked for Sensitive ones.</summary>
     public static RouteAdmission Admission(ProviderProfile route, bool shieldOn)
     {
         var kind = ReadsFilesDirectly(route) ? "claudeCode"
@@ -105,7 +105,7 @@ public static class SensitivityPolicy
     public static string? RefusalMessage(ProviderProfile route, bool shieldOn) =>
         Admission(route, shieldOn).Refusal is { } reason ? "This chat is Sensitive. " + reason : null;
 
-    /// The line the chat header shows for a Sensitive chat on <paramref name="route"/>.
+    /// <summary>The line the chat header shows for a Sensitive chat on <paramref name="route"/>.</summary>
     public static string HeaderLine(ProviderProfile? route, bool shieldOn)
     {
         if (route is null) return "Sensitive — only private models, or others through the shield.";

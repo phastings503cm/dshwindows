@@ -302,6 +302,11 @@ public sealed partial class AgentHost
     public string? SensitiveRefusal(SessionVM vm) =>
         vm.Sensitive && ChatRoute(vm) is { } route ? SensitivityPolicy.RefusalMessage(route, ShieldOn) : null;
 
+    /// <summary>Why work outside a turn that sends the chat's whole conversation (/compact, the automatic summary, a skill written
+    /// from the chat) can't go to <paramref name="profile"/>: the chat's refusal, else the resolved route's — null when it may.</summary>
+    public string? ConversationRefusal(SessionVM vm, ProviderProfile profile) =>
+        !vm.Sensitive ? null : SensitiveRefusal(vm) ?? SensitivityPolicy.RefusalMessage(profile, ShieldOn);
+
     /// <summary>Whether a Sensitive chat may switch to <paramref name="route"/> (true for every route when it isn't Sensitive).</summary>
     public bool SensitivityAllows(ProviderProfile route, SessionVM? vm) => vm is not { Sensitive: true } || SensitivityPolicy.Admission(route, ShieldOn).IsAllowed;
 

@@ -43,6 +43,9 @@ public sealed class McpTool : IToolExecutor
         var remote = server.Transport != McpTransportKind.Stdio && !RoutePrivacy.IsPrivateAddress(server.Url);
         if (context.Sensitive && remote) return true;
         if (context.Policy.Preset == PermissionPreset.FullAccess) return false;
+        // Plan only changes nothing: every call asks, but a read-only tool on a server trusted with read-only tools (or all).
+        if (context.Policy.Preset == PermissionPreset.Plan)
+            return !((Info?.ReadOnly ?? true) && server.Trust is McpTrust.ReadOnly or McpTrust.Always);
         return server.Trust switch
         {
             McpTrust.Always => false,

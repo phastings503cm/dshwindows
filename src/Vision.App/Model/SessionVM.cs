@@ -167,11 +167,12 @@ public sealed partial class CheckpointEntryVM(string turnId, string storedHeadin
         ? t.Changed.Select(f => new CheckpointFileVM(f, t.Workspace)).ToList()
         : [];
 
-    /// <summary>"Rewound", "Its record is no longer kept", or nothing.</summary>
+    /// <summary>"Rewound", "Its record is no longer kept", what a rewind's own row undid ("Rewind of “…”"), or nothing.</summary>
     public string Status => Turn switch
     {
         null => "Its record is no longer kept",
         { IsRewound: true } => "Rewound",
+        { } t when t.Id.StartsWith("rewind-", StringComparison.Ordinal) => TextUtil.Prefix(t.Title, 70),
         _ => "",
     };
 
