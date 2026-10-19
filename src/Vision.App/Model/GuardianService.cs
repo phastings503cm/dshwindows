@@ -61,8 +61,9 @@ public sealed partial class GuardianService : ObservableObject
             }
         }
         GuardianProxyRefusals.Reported += OnProxyRefusal;
-        // Prompt history and the shared ETAs go to the signed-in account, whether or not a chat uses Guardian's models.
-        host.GuardianAccount = AccountEndpoint;
+        // Prompt history and the shared ETAs go to the signed-in account, whether or not a chat uses Guardian's models. (A
+        // test may make one without a host.)
+        if (host is not null) host.GuardianAccount = AccountEndpoint;
     }
 
     public bool IsSignedIn => Client is not null;
