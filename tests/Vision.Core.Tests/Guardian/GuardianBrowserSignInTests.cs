@@ -32,6 +32,8 @@ public sealed class GuardianBrowserSignInTests
         Assert.Equal("chal-lenge", query["code_challenge"]);
         Assert.Equal("S256", query["code_challenge_method"]);
         Assert.Equal("Vision for Windows on PAT-PC", query["device"]);
+        // Guardian's consent page reads it: "Sign in to Vision for Windows", and the sign-in is tagged as this app's.
+        Assert.Equal("vision-windows", query["client"]);
     }
 
     private static async Task<(HttpStatusCode Status, string Body)> Browse(string url)

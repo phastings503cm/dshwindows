@@ -9,7 +9,7 @@ namespace Vision.Core;
 //
 // RFC 8252 (native apps) + RFC 7636 (PKCE, S256): Vision listens on a loopback port of its own, opens
 //   <guardian>/app/connect/vision?redirect_uri=http://127.0.0.1:<port>/callback&state=…&code_challenge=…
-//                                 &code_challenge_method=S256&device=<this PC's name>
+//                                 &code_challenge_method=S256&device=<this PC's name>&client=vision-windows
 // in the person's browser, where Guardian signs them in however their org does (password, TOTP, Entra) and asks
 // which org to connect. Guardian redirects back to the loopback address with ?code=…&state=…; the code is good for
 // 60 s, once, and only with this app's verifier: POST /api/harness/connect/token {code, code_verifier, redirect_uri}.
@@ -38,10 +38,12 @@ public static class GuardianBrowserSignIn
     /// <summary>How long Vision waits for the person to finish in the browser.</summary>
     public static readonly TimeSpan DefaultTimeout = TimeSpan.FromMinutes(5);
 
-    /// <summary>The consent page's address.</summary>
+    /// <summary>The consent page's address. <c>client</c> names this app on the page ("Sign in to Vision for Windows") and
+    /// on the sign-in Guardian keeps (Profile › API keys › Connected apps), as the Mac's <c>client=vision-mac</c> does.</summary>
     public static string ConnectUrl(string address, string redirectUri, GuardianPkce pkce, string device) =>
         $"{address.TrimEnd('/')}/app/connect/vision?redirect_uri={Uri.EscapeDataString(redirectUri)}&state={Uri.EscapeDataString(pkce.State)}"
-        + $"&code_challenge={Uri.EscapeDataString(pkce.Challenge)}&code_challenge_method=S256&device={Uri.EscapeDataString(device)}";
+        + $"&code_challenge={Uri.EscapeDataString(pkce.Challenge)}&code_challenge_method=S256&device={Uri.EscapeDataString(device)}"
+        + $"&client={GuardianClient.ClientTag}";
 
     /// <summary>The whole browser sign-in: listen, open the page (<paramref name="openBrowser"/>), wait for the answer,
     /// and trade the code for a token on <paramref name="client"/>.</summary>
