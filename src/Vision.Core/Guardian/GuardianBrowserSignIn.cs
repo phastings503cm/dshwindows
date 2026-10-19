@@ -197,7 +197,8 @@ public sealed class GuardianLoopbackReceiver : IDisposable
         return parts.Length >= 2 && parts[0] == "GET" ? parts[1] : null;
     }
 
-    internal static Dictionary<string, string> ParseQuery(string target)
+    /// <summary>A request target's query, decoded ("/callback?code=a%2Bb" → code = "a+b").</summary>
+    public static Dictionary<string, string> ParseQuery(string target)
     {
         var result = new Dictionary<string, string>(StringComparer.Ordinal);
         var at = target.IndexOf('?');

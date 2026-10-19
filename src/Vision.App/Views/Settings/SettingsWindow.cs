@@ -7,8 +7,8 @@ using Vision.App.Views.Skills;
 
 namespace Vision.App.Views.Settings;
 
-/// <summary>Settings: AI models and the sensitive-data shield, permissions, Spark Swapper boxes, skills, plugins,
-/// editor and terminal.
+/// <summary>Settings: AI models and the sensitive-data shield, permissions, Spark Swapper boxes, Guardian, skills,
+/// plugins, editor and terminal.
 /// The wizard is the guided path; this is the direct one. Laid out like Windows 11 Settings: a
 /// navigation list on the left, the page on the right.</summary>
 public sealed class SettingsWindow : Window
@@ -25,6 +25,7 @@ public sealed class SettingsWindow : Window
         new(SettingsTab.General, "General", Icons.Settings),
         new(SettingsTab.Models, "AI Models", Icons.Robot),
         new(SettingsTab.Spark, "Model servers", Icons.Bolt),
+        new(SettingsTab.Guardian, "Guardian", Icons.Shield),
         new(SettingsTab.Skills, "Skills", Icons.Education),
         new(SettingsTab.Plugins, "Plugins", Icons.Puzzle),
         new(SettingsTab.Editor, "Editor & Terminal", Icons.Code),
@@ -101,9 +102,13 @@ public sealed class SettingsWindow : Window
             SettingsTab.Skills => new SkillsManagerPage(_model, TakeAction()),
             SettingsTab.Plugins => new PluginsPage(_model),
             SettingsTab.Editor => new EditorPage(_model),
+            SettingsTab.Guardian => new GuardianPage(_model),
             _ => new GeneralPage(_model),
         };
     }
+
+    /// <summary>For the self-test: the page on screen.</summary>
+    internal UserControl? CurrentPage => _page.Content as UserControl;
 
     private SkillsAction? TakeAction()
     {
