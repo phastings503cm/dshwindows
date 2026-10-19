@@ -84,6 +84,8 @@ public partial class App : Application
         ThemeService.Instance.Apply(selfTest?.Theme ?? config.Theme);
         var log = new ConversationLog();
         Model = new AppModel(config, log, Dispatcher);
+        // The screen edges glow while a chat uses the computer; Ctrl+Alt+. stops it from any app.
+        MachineGlowController.Install(Model, Dispatcher);
 
         var window = new MainWindow(Model);
         MainWindow = window;
