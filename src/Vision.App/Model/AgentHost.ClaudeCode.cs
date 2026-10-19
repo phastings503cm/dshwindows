@@ -141,20 +141,27 @@ public sealed partial class AgentHost
         var row = Log.Row(sessionId);
         var session = row?.ClaudeSession;
         var lastCost = row?.ClaudeCost;
-        string Seeded(string text)
+        // The chat before the new message — all of it, or only what came after `since` — as a recap in front of `text`.
+        string Seeded(string text, DateTimeOffset? since)
         {
-            var before = vm.Entries.TakeWhile(e => e.Id != userEntryId).ToList();
+            var before = vm.Entries.TakeWhile(e => e.Id != userEntryId).Where(e => since is not { } after || e.At > after).ToList();
             return ClaudeCodeRecap.Build(ReplayMessages(before)) is { } recap ? recap + "\n\n" + text : text;
         }
-        var prompt = modelText;
-        if (vm.Goal is not null) prompt += "\n\n" + ClaudeCodeGoalNote;
-        if (notes.Count > 0) prompt += "\n\n" + string.Join("\n", notes);
+        var body = modelText;
+        if (vm.Goal is not null) body += "\n\n" + ClaudeCodeGoalNote;
+        if (notes.Count > 0) body += "\n\n" + string.Join("\n", notes);
         var resume = session;
         string? fresh = null;
+        string prompt;
         if (resume is null)
         {
             fresh = Guid.NewGuid().ToString();
-            prompt = Seeded(prompt);
+            prompt = Seeded(body, since: null);
+        }
+        else
+        {
+            // Turns other models answered since Claude Code last spoke go along first (nothing when none happened).
+            prompt = Seeded(body, since: row?.ClaudeSyncedAt ?? DateTimeOffset.MinValue);
         }
         var unsupported = _claudeUnsupported.TryGetValue(launch.Display, out var known) ? known : _claudeUnsupported[launch.Display] = new HashSet<string>();
         var policy = new PermissionPolicy(vm.Preset, workspace);
@@ -204,10 +211,18 @@ public sealed partial class AgentHost
                 outcome = await Task.Run(() => ClaudeCodeRunner.RunAsync(launch, options, workspace, message, stream, Decide, ct, starter, Activity),
                     CancellationToken.None);
             }
+            catch (OperationCanceledException) when (!stream.Progressed)
+            {
+                // Stopped before Claude Code got anywhere: the message is kept, marked as not delivered (as on the Mac).
+                MarkUndelivered(vm, userEntryId);
+                throw;
+            }
             finally
             {
                 // Whatever happened, the session it opened is the one to carry on (a lost one is replaced on the next turn).
-                if (stream.SessionId is { } opened) Log.SetClaudeSession(sessionId, opened, stream.Result?.TotalCostUsd ?? (opened == session ? lastCost : null));
+                if (stream.SessionId is { } opened)
+                    Log.SetClaudeSession(sessionId, opened, stream.Result?.TotalCostUsd ?? (opened == session ? lastCost : null),
+                        stream.Progressed ? DateTimeOffset.Now : null);
                 // Switching this chat to another model later: it rebuilds its transcript from the rows, Claude Code's turns included.
                 _transcripts.Remove(sessionId);
             }
@@ -225,7 +240,7 @@ public sealed partial class AgentHost
                     lastCost = null;
                     resume = null;
                     fresh = Guid.NewGuid().ToString();
-                    prompt = Seeded(modelText + (vm.Goal is not null ? "\n\n" + ClaudeCodeGoalNote : "") + (notes.Count > 0 ? "\n\n" + string.Join("\n", notes) : ""));
+                    prompt = Seeded(body, since: null);
                     continue;
                 }
             }

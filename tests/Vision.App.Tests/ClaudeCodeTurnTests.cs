@@ -234,6 +234,35 @@ public sealed class ClaudeCodeTurnTests : IDisposable
     });
 
     [Fact]
+    public void BackOnClaudeCodeItHearsWhatOtherModelsAnsweredInBetween() => UiThread.Run(async () =>
+    {
+        var first = Reply("s-back", "Claude Code wrote the parser.");
+        var later = Reply("s-back", "Picked up where the Spark left off.");
+        var host = MakeHost(PermissionPreset.FullAccess, first, later);
+        var vm = ClaudeChat(host);
+        host.Send("write the parser", vm.Id);
+        await Finish(vm);
+        Assert.NotNull(host.Log.Row(vm.Id)!.ClaudeSyncedAt);
+
+        host.SetChatRoute(vm, Spark.RouteId);
+        host.Send("add a quick note to the README", vm.Id); // the Spark answers this one
+        await Finish(vm);
+        host.SetChatRoute(vm, Sonnet.RouteId);
+        host.Send("now wire it up", vm.Id);
+        await Finish(vm);
+
+        Assert.Equal("s-back", ArgAfter(later, "--resume"));
+        var prompt = PromptOf(later);
+        Assert.StartsWith(Vision.Core.ClaudeCodeRecap.Header, prompt);
+        Assert.Contains("Person: add a quick note to the README", prompt);
+        Assert.Contains("Earlier answer from the Spark.", prompt);
+        Assert.DoesNotContain("write the parser", prompt); // the session already has its own turn
+        Assert.EndsWith("now wire it up", prompt);
+        // ...and a turn right after a Claude Code one carries no recap.
+        Assert.Equal("write the parser", PromptOf(first));
+    });
+
+    [Fact]
     public void AClaudeCodeThatIsNotSignedInSaysHowToSignIn() => UiThread.Run(async () =>
     {
         var host = MakeHost(PermissionPreset.WorkspaceWrite, ScriptedClaudeProcess.Replay(ClaudeFixtures.Lines("not-signed-in.jsonl")));

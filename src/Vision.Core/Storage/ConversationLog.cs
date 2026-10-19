@@ -32,6 +32,9 @@ public sealed record LogSession
     /// <summary>What Claude Code last said that session had cost so far (its estimate adds up across turns), so a turn's
     /// own share can be shown.</summary>
     public double? ClaudeCost { get; set; }
+    /// <summary>When a turn last reached Claude Code in that session: turns other models answered after it go to Claude Code
+    /// as a recap with the next message. The same fields as Vision for macOS.</summary>
+    public DateTimeOffset? ClaudeSyncedAt { get; set; }
 }
 
 /// <summary>Per-session conversation store: one JSON file per session under
@@ -116,12 +119,16 @@ public sealed class ConversationLog
         Persist(id);
     }
 
-    /// <summary>Store the chat's Claude Code session and the cost it had reached (null session = start a new one next time).</summary>
-    public void SetClaudeSession(string id, string? session, double? cost)
+    /// <summary>Store the chat's Claude Code session, the cost it had reached, and — when a turn reached it — when
+    /// (<paramref name="syncedAt"/> null keeps the last one for the same session).</summary>
+    public void SetClaudeSession(string id, string? session, double? cost, DateTimeOffset? syncedAt = null)
     {
-        if (!_rows.TryGetValue(id, out var row) || (row.ClaudeSession == session && row.ClaudeCost == cost)) return;
+        if (!_rows.TryGetValue(id, out var row)) return;
+        var synced = syncedAt ?? (session == row.ClaudeSession ? row.ClaudeSyncedAt : null);
+        if (row.ClaudeSession == session && row.ClaudeCost == cost && row.ClaudeSyncedAt == synced) return;
         row.ClaudeSession = session;
         row.ClaudeCost = cost;
+        row.ClaudeSyncedAt = synced;
         Persist(id);
     }
 
