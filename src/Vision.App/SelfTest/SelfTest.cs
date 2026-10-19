@@ -217,6 +217,8 @@ public sealed partial class SelfTest
 
             await CaptureProviders(window, model);
 
+            await CaptureModels(window, model);
+
             await CaptureMachineGlow(window, model, chat);
 
             // What the composer says it will send for a PDF, a Markdown file, a Word file, a scan and a large paste.

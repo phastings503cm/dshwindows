@@ -14,6 +14,10 @@ public static class ProviderKinds
     public static IReadOnlyList<ProviderKind> All { get; } =
         [ProviderKind.OpenAICompat, ProviderKind.Ollama, ProviderKind.LmStudio, ProviderKind.OpenAI, ProviderKind.OpenRouter];
 
+    /// <summary>What the route editor's Kind offers: the manual kinds, and Anthropic's Messages API (set up by its plan guide,
+    /// editable here).</summary>
+    public static IReadOnlyList<ProviderKind> Editable { get; } = [.. All, ProviderKind.Anthropic];
+
     public static string Label(this ProviderKind kind) => kind switch
     {
         ProviderKind.Ollama => "Ollama",
@@ -21,6 +25,7 @@ public static class ProviderKinds
         ProviderKind.OpenAI => "OpenAI",
         ProviderKind.OpenRouter => "OpenRouter",
         ProviderKind.Bedrock => "Amazon Bedrock",
+        ProviderKind.Anthropic => "Anthropic API (key)",
         _ => "OpenAI-compatible server (vLLM, SGLang, llama.cpp, DGX Spark)",
     };
 }
@@ -49,7 +54,7 @@ public sealed class ModelsPage : UserControl
         _model = model;
         var page = new StackPanel { MaxWidth = 820 };
         page.Children.Add(Ui.Title("AI Models"));
-        var intro = Ui.Secondary("Any OpenAI-compatible server works: a Spark Swapper box, a local Ollama or LM Studio, vLLM or SGLang on your LAN, a subscription plan (GLM, Kimi, Qwen, OpenAI), or Amazon Bedrock with your AWS sign-in. API keys are kept in Windows Credential Manager, never in the settings file.");
+        var intro = Ui.Secondary("Any OpenAI-compatible server works: a Spark Swapper box, a local Ollama or LM Studio, vLLM or SGLang on your LAN, a subscription or API plan (GLM, Kimi, Qwen, OpenAI, DeepSeek), Anthropic's API with a key, or Amazon Bedrock with your AWS sign-in. Signed in to Guardian, your account's models are in every chat's model menu too. API keys are kept in Windows Credential Manager, never in the settings file.");
         intro.Margin = new Thickness(0, 6, 0, 8);
         page.Children.Add(intro);
         var add = Ui.Button("Add ▾", () => { }, accent: true);
@@ -60,6 +65,8 @@ public sealed class ModelsPage : UserControl
             menu.Items.Add(Menus.Item("Subscription plan…", () => model.ShowPlanGuide(), Icons.Key));
             menu.Items.Add(Menus.Item("Z.ai (GLM)…", () => Edit(new ProviderProfile(ProviderKind.OpenAICompat, ZaiEndpoint.Coding.RouteName(),
                 ZaiEndpoint.Coding.BaseUrl(), "glm-5.3") { ContextWindow = 1_000_000 }), Icons.Key));
+            menu.Items.Add(Menus.Item("DeepSeek API…", () => model.ShowPlanGuide(SubscriptionPlans.DeepSeek), Icons.Key));
+            menu.Items.Add(Menus.Item("Anthropic API (key)…", () => model.ShowPlanGuide(SubscriptionPlans.Anthropic), Icons.Key));
             menu.Items.Add(Menus.Item("Amazon Bedrock…", () => model.ShowBedrockGuide(), Icons.Cloud));
             menu.Items.Add(Menus.Item("Other OpenAI-compatible server…",
                 () => Edit(new ProviderProfile(ProviderKind.OpenAICompat, "New server", "http://127.0.0.1:8000/v1", "")), Icons.Add));
@@ -569,7 +576,7 @@ public sealed class ProviderEditorWindow : Window
         // A Bedrock route's kind, address and sign-in come from its guide; the rest can be tuned here.
         var bedrock = profile.Kind == ProviderKind.Bedrock;
         var zai = !bedrock && ZaiEndpoints.Of(profile.BaseUrl) is not null;
-        foreach (var kind in bedrock ? [ProviderKind.Bedrock] : ProviderKinds.All)
+        foreach (var kind in bedrock ? [ProviderKind.Bedrock] : ProviderKinds.Editable)
             _kind.Items.Add(new ComboBoxItem { Content = kind.Label(), Tag = kind, IsSelected = !zai && kind == profile.Kind });
         // Z.ai (GLM) is first-class: an OpenAI-compatible route, with its endpoints to pick from and its models listed.
         if (!bedrock) _kind.Items.Add(new ComboBoxItem { Content = "Z.ai (GLM)", Tag = ZaiKind, IsSelected = zai });
@@ -589,6 +596,14 @@ public sealed class ProviderEditorWindow : Window
         };
         _kind.SelectionChanged += (_, _) =>
         {
+            // Anthropic's API: its address and current model, unless the route already points at Anthropic (or a proxy for it).
+            if (SelectedKind == ProviderKind.Anthropic && _kind.SelectedItem is ComboBoxItem { Tag: ProviderKind.Anthropic }
+                && KnownProviders.Of(_url.Text) != KnownProvider.Anthropic && _original.Kind != ProviderKind.Anthropic)
+            {
+                _url.Text = AnthropicClient.DefaultBaseUrl;
+                if (_name.Text.Trim().Length == 0 || _name.Text.Trim() == "New server") _name.Text = "Anthropic API (key)";
+                if (_modelName.Text.Trim().Length == 0) _modelName.Text = "claude-opus-5-5";
+            }
             if (IsZai && ZaiEndpoints.Of(_url.Text) is null)
             {
                 _url.Text = ZaiEndpoint.Coding.BaseUrl();

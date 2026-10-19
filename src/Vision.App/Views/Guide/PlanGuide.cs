@@ -399,7 +399,7 @@ public sealed class PlanGuide : IWizardGuide
     {
         var plan = _plan!;
         if (_listed is not { Count: > 0 } listed) return plan.Models.Select(m => m.Id).ToList();
-        if (plan.Id == SubscriptionPlans.Zai)
+        if (plan.Id is SubscriptionPlans.Zai or SubscriptionPlans.DeepSeek or SubscriptionPlans.Anthropic)
         {
             // Its own presets first (the recommended one on top), then the rest of what the key can use.
             var chat = SubscriptionPlans.ChatModels(plan, listed);
@@ -587,6 +587,30 @@ public sealed class PlanGuide : IWizardGuide
         _checkError = page == PlanPage.Check ? ZaiDiagnosis.SwitchAdvice(ZaiEndpoint.General, ZaiEndpoint.Coding) : null;
         _worksOn = page == PlanPage.Check ? ZaiEndpoint.Coding.RawValue() : null;
         _chosen = _plan!.Recommended.Id;
+        Page = page;
+        _host.Render();
+    }
+
+    /// <summary>Plan <paramref name="planId"/> on <paramref name="page"/>, with <paramref name="key"/> pasted and, past the check,
+    /// <paramref name="listed"/> as what the key can use (for the self-test; no network).</summary>
+    internal void ShowPlanDemo(string planId, PlanPage page, string key, IReadOnlyList<string>? listed = null)
+    {
+        _demo = true;
+        _plan = SubscriptionPlans.Find(planId);
+        _region = _plan!.DefaultRegion.Id;
+        _keyBox.Password = key;
+        _checked = page > PlanPage.Check || (page == PlanPage.Check && listed is not null);
+        _checking = false;
+        _checkError = null;
+        _listed = listed;
+        _chosen = _plan.Recommended.Id;
+        _use = RouteUse.Primary;
+        if (page == PlanPage.Done)
+        {
+            _saved = true;
+            _route = _plan.Route(_region, _chosen);
+            _hello = $"Hello from {_chosen} — ready when you are.";
+        }
         Page = page;
         _host.Render();
     }

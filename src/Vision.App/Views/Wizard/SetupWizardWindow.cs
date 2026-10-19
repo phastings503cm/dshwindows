@@ -161,6 +161,16 @@ public sealed class SetupWizardWindow : Window, IGuideHost
         ShowGuide(new PlanGuide(_model, this, plan));
     }
 
+    /// <summary>DeepSeek's API, straight into its plan guide.</summary>
+    private Button DeepSeekChoice() => Choice(Icons.Key, "DeepSeek API — V4 Pro and V4.1 Flash with an API key",
+        "1M context, thinking on or off per chat, billed per token from your DeepSeek balance. Vision checks the key and lists the models it can use.",
+        false, () => StartPlanGuide(SubscriptionPlans.DeepSeek));
+
+    /// <summary>Anthropic's API with a key, straight into its plan guide.</summary>
+    private Button AnthropicChoice() => Choice(Icons.Key, "Anthropic API (key) — Claude Opus 5.5, Sonnet 5.5, Haiku 5.5",
+        "Claude directly from Anthropic with an API key from console.anthropic.com — thinking, pictures, PDFs and prompt caching included. (A Claude Pro or Max subscription is used through Claude Code, not here.)",
+        false, () => StartPlanGuide(SubscriptionPlans.Anthropic));
+
     /// <summary>Show "My Guardian account" in place of the normal steps.</summary>
     public void StartGuardianGuide()
     {
@@ -196,6 +206,13 @@ public sealed class SetupWizardWindow : Window, IGuideHost
     {
         if (_guide is not PlanGuide) StartPlanGuide();
         ((PlanGuide)_guide!).ShowDemo(page);
+    }
+
+    /// <summary>For the self-test: plan <paramref name="plan"/> on <paramref name="page"/> with a sample key (and model list).</summary>
+    internal void ShowPlanDemo(string plan, PlanPage page, string key, IReadOnlyList<string>? listed = null)
+    {
+        if (_guide is not PlanGuide) StartPlanGuide(plan);
+        ((PlanGuide)_guide!).ShowPlanDemo(plan, page, key, listed);
     }
 
     /// <summary>For the self-test: the Z.ai plan's endpoint picker and its key check, with sample state.</summary>
@@ -606,12 +623,14 @@ public sealed class SetupWizardWindow : Window, IGuideHost
         panel.Children.Add(Choice(Icons.Connect, "Connect my Spark Swapper (connection code)",
             "Your DGX Spark or Strix Halo already runs Spark Swapper? Paste the code from its Connect tab: the model, switching and the security certificate are set up in one go.",
             false, () => StartSwapperGuide()));
-        panel.Children.Add(Choice(Icons.Key, "A subscription or API plan — GLM, Kimi, Qwen, OpenAI",
-            "Use your Z.ai, Kimi, Alibaba Cloud or OpenAI plan. A guide shows where to get the key.",
+        panel.Children.Add(Choice(Icons.Key, "A subscription or API plan — GLM, Kimi, Qwen, OpenAI, DeepSeek, Anthropic",
+            "Use your Z.ai, Kimi, Alibaba Cloud, OpenAI, DeepSeek or Anthropic key. A guide shows where to get it.",
             false, () => StartPlanGuide()));
         panel.Children.Add(Choice(Icons.Key, "Z.ai (GLM) — GLM-5.3 with a Coding Plan or API key",
             "Pick the endpoint your key is for (Coding Plan, General API, or China). Vision checks the key, and says which endpoint it belongs to if it's on the wrong one.",
             false, () => StartPlanGuide(SubscriptionPlans.Zai)));
+        panel.Children.Add(DeepSeekChoice());
+        panel.Children.Add(AnthropicChoice());
         panel.Children.Add(Choice(Icons.Education, "I have a DGX Spark — walk me through everything (beginner)",
             "Step by step, with a picture for each: power it on, find it on your network, install Spark Swapper, and connect Vision. No terminal needed — it can even make a USB stick to reinstall it.",
             false, () => StartGuide(resume: false)));
@@ -677,12 +696,14 @@ public sealed class SetupWizardWindow : Window, IGuideHost
         panel.Children.Add(Choice(Icons.Connect, "My Spark Swapper (DGX Spark or Strix Halo)",
             "Paste the connection code from the Swapper's Connect tab. Sets up the model, switching, and the security certificate in one go.",
             false, () => StartSwapperGuide()));
-        panel.Children.Add(Choice(Icons.Key, "A subscription or API plan — GLM, Kimi, Qwen, OpenAI",
-            "Use your Z.ai, Kimi, Alibaba Cloud or OpenAI plan. A guide shows where to get the key.",
+        panel.Children.Add(Choice(Icons.Key, "A subscription or API plan — GLM, Kimi, Qwen, OpenAI, DeepSeek, Anthropic",
+            "Use your Z.ai, Kimi, Alibaba Cloud, OpenAI, DeepSeek or Anthropic key. A guide shows where to get it.",
             false, () => StartPlanGuide()));
         panel.Children.Add(Choice(Icons.Key, "Z.ai (GLM) — GLM-5.3 with a Coding Plan or API key",
             "Pick the endpoint your key is for (Coding Plan, General API, or China). Vision checks the key, and says which endpoint it belongs to if it's on the wrong one.",
             false, () => StartPlanGuide(SubscriptionPlans.Zai)));
+        panel.Children.Add(DeepSeekChoice());
+        panel.Children.Add(AnthropicChoice());
         foreach (var kind in ProviderKinds.All)
         {
             var (title, detail) = kind switch
