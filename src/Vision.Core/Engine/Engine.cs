@@ -230,6 +230,10 @@ public sealed class Engine
     public AgentCatalog? AgentTypes { get; init; }
     /// <summary>Answers repeated read-only calls without redoing (or re-sending) the work; null = no caching.</summary>
     public ToolCache? Cache { get; init; }
+    /// <summary>Where the running turn's checkpoint is (the host sets it per turn); null = file changes aren't recorded.</summary>
+    public CheckpointSlot? Checkpoints { get; init; }
+    /// <summary>The chat is marked Sensitive: its subagent tasks all count as sensitive.</summary>
+    public bool Sensitive { get; init; }
 
     public Engine(ILlmClient client, ToolRegistry registry, string systemPrompt, EngineConfig config,
                   string workspace, PermissionPolicy policy, PermissionGate permissionGate)
@@ -364,6 +368,8 @@ public sealed class Engine
             VisionEnabled = Config.VisionEnabled,
             Temperature = Config.Temperature,
             MaxOutputTokens = Config.MaxOutputTokens,
+            Checkpoint = Checkpoints?.Current,
+            Sensitive = Sensitive,
         };
 
         // Run one call's executor (after permission and vault checks) with the timeout that fits it.

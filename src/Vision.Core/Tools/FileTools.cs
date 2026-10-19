@@ -60,6 +60,7 @@ public sealed class WriteFileTool : IToolExecutor
             // Rewriting an existing file keeps its BOM and line endings.
             var format = existed && FileText.Read(path) is { } previous ? previous.Format : TextFileFormat.Default;
             if (content.Contains("\r\n", StringComparison.Ordinal)) format = format with { UsesCrlf = false };
+            context.Checkpoint?.BeforeChange(path, ToolName);
             FileText.Write(path, content, format);
             var change = new FileChange(path, existed ? FileChangeKind.Modified : FileChangeKind.Created);
             return Task.FromResult(new ToolResult($"Wrote {content.Length} characters to {Path.GetFileName(path)}.") { Files = [change] });
@@ -102,6 +103,7 @@ public sealed class EditTool : IToolExecutor
                 if (!File.Exists(path))
                 {
                     // New file from an edit: only the replacement text lands in it.
+                    context.Checkpoint?.BeforeChange(path, ToolName);
                     FileText.Write(path, newText, TextFileFormat.Default);
                     return Task.FromResult(new ToolResult($"Created {name} with the new block.")
                     {
@@ -134,6 +136,7 @@ public sealed class EditTool : IToolExecutor
                     var at = existing.IndexOf(needle, StringComparison.Ordinal);
                     updated = string.Concat(existing.AsSpan(0, at), replacement, existing.AsSpan(at + needle.Length));
                 }
+                context.Checkpoint?.BeforeChange(path, ToolName);
                 FileText.Write(path, updated, read.Format);
                 var n = replaceAll ? occurrences : 1;
                 return Task.FromResult(new ToolResult($"Edited {name}: replaced {n} occurrence{(n == 1 ? "" : "s")}.")

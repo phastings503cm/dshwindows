@@ -90,7 +90,8 @@ public sealed class AgentTool : IToolExecutor
         var typeName = JsonArgs.String(args, "agent_type");
         if (catalog.Find(typeName) is not { } definition)
             return $"Error: unknown agent_type '{typeName}'. Available: {catalog.Describe()}.";
-        var sensitive = JsonArgs.Bool(args, "sensitive", false);
+        // A Sensitive chat's subagents all are: they go only where the chat's data may go.
+        var sensitive = JsonArgs.Bool(args, "sensitive", false) || context.Sensitive;
         var step = StepArgument(args);
 
         if (JsonArgs.Bool(args, "run_in_background", false))
@@ -297,6 +298,9 @@ public sealed class AgentTool : IToolExecutor
         {
             Vault = context.Vault,
             VaultGrants = context.VaultGrants,
+            // Its edits belong to the turn that started it: they rewind with it.
+            Checkpoints = context.Checkpoint is { } turn ? new CheckpointSlot { Current = turn } : null,
+            Sensitive = context.Sensitive,
             // Same window the parent resolved — without this, a long subagent task runs uncompacted
             // until it hits the server's hard limit. A subagent's run is one user message followed
             // by many tool round-trips, so it opts into the assistant-boundary rule (which still
@@ -413,7 +417,7 @@ public sealed class DelegateTool : IToolExecutor
         if (array.Count > MaxTasks) return $"Error: at most {MaxTasks} tasks at once; split the rest into a second delegate call.";
 
         var catalog = context.AgentTypes ?? AgentCatalog.Default;
-        var allSensitive = JsonArgs.Bool(args, "sensitive", false);
+        var allSensitive = JsonArgs.Bool(args, "sensitive", false) || context.Sensitive;
         var tasks = new List<Task1>();
         var index = 0;
         foreach (var node in array)
@@ -427,7 +431,7 @@ public sealed class DelegateTool : IToolExecutor
                 return $"Error: task {index} has an unknown agent_type '{typeName}'. Available: {catalog.Describe()}.";
             var description = (JsonArgs.String(item, "description") ?? "").Trim();
             tasks.Add(new Task1(description.Length > 0 ? description : $"task {index}", prompt, definition,
-                JsonArgs.Bool(item, "sensitive", allSensitive), AgentTool.StepArgument(item)));
+                JsonArgs.Bool(item, "sensitive", allSensitive) || context.Sensitive, AgentTool.StepArgument(item)));
         }
 
         var parallel = Math.Clamp(JsonArgs.Int(args, "max_parallel", DefaultParallel), 1, MaxTasks);

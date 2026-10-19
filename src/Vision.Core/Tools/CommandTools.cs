@@ -32,10 +32,25 @@ public sealed class RunShellCommandTool : IToolExecutor
         var timeoutSec = Math.Clamp(JsonArgs.Int(args, "timeout", 120), 5, 600);
         var timeout = TimeSpan.FromSeconds(timeoutSec);
 
-        var result = await ShellRunner.RunAsync(command, context.Workspace, context.Shell, timeout,
-            cancellationToken: cancellationToken).ConfigureAwait(false);
-        var text = result.Output.Trim();
+        // What the command changes is found through git afterwards (its tracked files), so the turn can be rewound.
+        var snapshot = context.Checkpoint?.BeforeShell(context.Workspace);
+        IReadOnlyList<FileChange> changed = [];
+        ShellResult result;
+        try
+        {
+            result = await ShellRunner.RunAsync(command, context.Workspace, context.Shell, timeout,
+                cancellationToken: cancellationToken).ConfigureAwait(false);
+        }
+        finally
+        {
+            if (snapshot is not null) changed = context.Checkpoint!.AfterShell(snapshot, ToolName);
+        }
+        return new ToolResult(Describe(result, timeoutSec, timeout)) { Files = changed };
+    }
 
+    private static string Describe(ShellResult result, int timeoutSec, TimeSpan timeout)
+    {
+        var text = result.Output.Trim();
         if (result.TimedOut)
         {
             var idle = (int)ShellRunner.IdleLimit(timeout).TotalSeconds;
