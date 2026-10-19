@@ -104,6 +104,24 @@ public sealed class InputArbiterTests
     }
 
     [Fact]
+    public void FreshHooksStartFromWindowsLastInputTime()
+    {
+        // The hooks were just installed for a new session and have seen nothing; Windows says the last input was 0.5 s ago.
+        var quiet = new ArbiterTimings().PersonQuiet;
+        var seeded = PersonSeed.LastInput(lastInputTick: 1_000_000, nowTick: 1_000_500, _clock.GetUtcNow(), quiet);
+        Assert.Equal(_clock.GetUtcNow().AddMilliseconds(-500), seeded);
+        _person = seeded;
+        var arbiter = Make();
+        var first = arbiter.Enqueue("A", "a");
+        Assert.Equal(WaitReason.Person, Refuse(arbiter, first).Reason);
+        _clock.AdvanceSeconds(1.6);
+        Grant(arbiter, first);
+        // Input longer ago than the quiet time seeds nothing; GetTickCount's wrap is handled.
+        Assert.Null(PersonSeed.Age(1_000_000, 1_003_000, quiet));
+        Assert.Equal(TimeSpan.FromMilliseconds(300), PersonSeed.Age(uint.MaxValue - 99, 200, quiet));
+    }
+
+    [Fact]
     public void TwoStepsOfOneChatTakeTurns()
     {
         var arbiter = Make();

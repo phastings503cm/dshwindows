@@ -322,3 +322,22 @@ public sealed class InputLease : IDisposable
         if (Interlocked.Exchange(ref _released, 1) == 0) _arbiter.Release(_token);
     }
 }
+
+/// <summary>When the hooks that watch for the person are installed fresh (each machine session), they have seen nothing
+/// yet: the person may be mid-typing. Windows' own last-input time fills that gap, when it is recent enough to matter.
+/// (Vision's own SendInput only happens once the hooks run, and a session's hooks come down 2.5 s after its run ends —
+/// longer than the person-quiet time — so a recent tick is the person, or another program.)</summary>
+public static class PersonSeed
+{
+    /// <summary>How long ago the last input was, from GetLastInputInfo's tick and GetTickCount's now (both 32-bit
+    /// milliseconds that wrap every 49.7 days); null when it is older than <paramref name="window"/>.</summary>
+    public static TimeSpan? Age(uint lastInputTick, uint nowTick, TimeSpan window)
+    {
+        var age = TimeSpan.FromMilliseconds(unchecked(nowTick - lastInputTick));
+        return age < window ? age : null;
+    }
+
+    /// <summary>The person's last input as the arbiter reads it, or null when nothing recent happened.</summary>
+    public static DateTimeOffset? LastInput(uint lastInputTick, uint nowTick, DateTimeOffset now, TimeSpan window) =>
+        Age(lastInputTick, nowTick, window) is { } age ? now - age : null;
+}

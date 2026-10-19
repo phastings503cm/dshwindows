@@ -53,7 +53,20 @@ public sealed class PersonInput
             thread.Start();
             ready.Wait(TimeSpan.FromSeconds(5));
             _thread = thread;
+            Seed();
         }
+    }
+
+    /// <summary>Fresh hooks have seen nothing: start from Windows' last-input time when it is recent, so the first grant of
+    /// a session still waits for a person who is typing right now.</summary>
+    private void Seed()
+    {
+        var info = new Native.LASTINPUTINFO { cbSize = (uint)Marshal.SizeOf<Native.LASTINPUTINFO>() };
+        if (!Native.GetLastInputInfo(ref info)) return;
+        if (Vision.Core.PersonSeed.Age(info.dwTime, unchecked((uint)Environment.TickCount), MachineControl.Arbiter.Timings.PersonQuiet) is not { } age) return;
+        var at = Math.Max(1, Environment.TickCount64 - (long)age.TotalMilliseconds);
+        // A hook event that already arrived is newer: keep it.
+        if (Interlocked.Read(ref _lastHuman) < at) Interlocked.Exchange(ref _lastHuman, at);
     }
 
     /// <summary>Remove the hooks.</summary>
