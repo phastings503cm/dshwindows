@@ -21,7 +21,7 @@ namespace Vision.App;
 /// data folder and a demo project, fill a chat with every kind of transcript row, and render the main
 /// views and windows to PNGs. CI runs it on Windows as a smoke test of the whole UI (any exception
 /// fails the run); it also produces the screenshots for reviewing a change.</summary>
-public sealed class SelfTest
+public sealed partial class SelfTest
 {
     public required string Output { get; init; }
     public string? Theme { get; init; }
@@ -187,6 +187,9 @@ public sealed class SelfTest
             var vaultWindow = new VaultWindow(model.Host) { Owner = window };
             if (vault is not null) vaultWindow.SelectEntry(vault);
             await ShowAndCapture(vaultWindow, "vault");
+
+            // Last: a chat of 2,000 messages with a 10,214-line one, opened and measured.
+            await ProbeLongChat(window, model);
         }
         catch (Exception error)
         {
