@@ -278,7 +278,7 @@ public sealed class GuardianPage : UserControl
         {
             var row = new StackPanel { Margin = new Thickness(0, 4, 0, 8) };
             var head = new DockPanel();
-            var reset = Ui.Secondary(limit.ResetPhrase() ?? (limit.Window == "run" ? "Frees up as work finishes" : ""));
+            var reset = Ui.Secondary((limit.ResetPhrase() is { } resets ? char.ToUpperInvariant(resets[0]) + resets[1..] : limit.Window == "run" ? "Frees up as work finishes" : ""));
             DockPanel.SetDock(reset, Dock.Right);
             head.Children.Add(reset);
             head.Children.Add(Ui.Text($"{limit.Title}: {limit.Describe()}", 13.5));

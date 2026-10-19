@@ -178,7 +178,7 @@ public sealed class GuardianTransferTests
             });
             Assert.True(error.Permanent);
             Assert.Equal(403, error.StatusCode);
-            Assert.StartsWith("Guardian doesn't allow this yet: The model \"us.anthropic.claude-opus-5-5\" is not available", error.Message);
+            Assert.StartsWith("Your Guardian account doesn't allow this. The model \"us.anthropic.claude-opus-5-5\" is not available", error.Message);
             Assert.DoesNotContain("replied 403", error.Message);
             Assert.Equal("model_not_allowed", reported?.Reason);
             Assert.Equal("Bearer tok", handler.Requests[0].Headers["Authorization"]);

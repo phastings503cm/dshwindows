@@ -305,7 +305,8 @@ public sealed class GuardianClientTests
         var error = await Assert.ThrowsAsync<GuardianError>(() => client.MeAsync());
         Assert.Equal(GuardianErrorKind.Unauthorized, error.Kind);
         var text = GuardianRefusalText.For(error);
-        Assert.Equal("Sign in to Guardian again", text.Title);
+        Assert.Equal("Guardian sign-in needed", text.Title); // the Mac's words
+        Assert.Equal("Sign in again in Settings ▸ Guardian.", Assert.Single(text.Details));
         Assert.True(text.OffersSignIn);
         Assert.Equal("Your Guardian sign-in has ended or was revoked. Sign in again from Vision.", text.Message);
     }
@@ -319,9 +320,18 @@ public sealed class GuardianClientTests
         var error = await Assert.ThrowsAsync<GuardianError>(() => client.ProjectsAsync());
         Assert.Equal((GuardianErrorKind.Forbidden, "module_disabled", "files"), (error.Kind, error.Reason, error.Needed));
         var text = GuardianRefusalText.For(error);
-        Assert.Equal("Guardian doesn't allow this yet", text.Title);
+        Assert.Equal("Your Guardian account doesn't allow this", text.Title);
         Assert.StartsWith("My Files is not turned on for you", text.Message);
-        Assert.Equal("Missing: files — that module is switched off for you", text.Details[0]);
+        Assert.Equal("Missing: the “files” module is turned off for you. An admin of your Guardian organization can turn it on for you (Guardian ▸ Settings ▸ Members).",
+            text.Details[0]);
+        // The same words as the Mac for the other reasons; the two only Windows names keep their phrase.
+        Assert.Equal("Missing: the “chat.create” permission. An admin of your Guardian organization can grant it (Guardian ▸ Settings ▸ Members).",
+            GuardianRefusalText.For(GuardianError.FromResponse(403, """{"error":"forbidden","reason":"permission_missing","needed":"chat.create","message":"m"}""")).Details[0]);
+        var notMember = GuardianRefusalText.For(GuardianError.FromResponse(403, """{"error":"forbidden","reason":"org_not_member","message":"m"}"""));
+        Assert.Equal(("Not a member of that Guardian organization", "You aren't a member of that organization. Pick another one in Settings ▸ Guardian, or ask its admin to add you."),
+            (notMember.Title, notMember.Details[0]));
+        Assert.Equal("Missing: “opus” — that model isn't available to you in this organization. An admin of your Guardian organization can grant it.",
+            GuardianRefusalText.For(GuardianError.FromResponse(403, """{"error":"forbidden","reason":"model_not_allowed","needed":"opus","message":"m"}""")).Details[0]);
         Assert.False(text.OffersSignIn);
     }
 
@@ -341,11 +351,30 @@ public sealed class GuardianClientTests
         Assert.Equal(GuardianErrorKind.Limit, error.Kind);
         Assert.Equal("budget_exceeded", error.Code);
         Assert.Equal(TimeSpan.FromHours(1), error.RetryAfter);
-        var text = GuardianRefusalText.For(error);
-        Assert.Equal("You've reached your Guardian budget", text.Title);
-        Assert.Equal("Spend: $5.01 of $5.00 today", text.Details[0]);
-        Assert.StartsWith("Resets ", text.Details[1]);
+        var text = GuardianRefusalText.For(error, now: new DateTimeOffset(2026, 10, 19, 23, 50, 0, TimeSpan.Zero));
+        Assert.Equal("Guardian spend limit reached", text.Title); // the Mac's words
+        Assert.Matches(@"^Spend today: \$5\.01 of \$5\.00 — resets in 7 hours \(Tue \d{1,2}:00 (AM|PM)\)\.$", text.Details[0]);
+        Assert.Equal("Your Guardian organization's admin can raise the limit; otherwise it frees up when it resets.", text.Details[1]);
         Assert.Equal("Try again in 3600 s.", text.Details[2]);
+        // The chat's error row is the Mac's one line.
+        Assert.StartsWith("Guardian spend limit reached. You've used your $5.00 daily Vision budget. It resets at midnight. Spend today: $5.01 of $5.00 — resets in 7 hours",
+            text.OneLine());
+    }
+
+    [Theory]
+    [InlineData(20, "now")]
+    [InlineData(60, "in 1 minute")]
+    [InlineData(25 * 60, "in 25 minutes")]
+    [InlineData(3 * 3600 + 600, "in 3 hours")]
+    [InlineData(47 * 3600, "in 47 hours")]
+    [InlineData(4 * 86400, "in 4 days")]
+    public void AResetIsSaidTheWayTheMacSaysIt(int seconds, string words)
+    {
+        var now = new DateTimeOffset(2026, 10, 19, 12, 0, 0, TimeSpan.Zero);
+        var limit = new GuardianLimit("tokens", "week", 2_000_000, 2_000_000, "tokens", now.AddSeconds(seconds));
+        Assert.StartsWith($"resets {words} (", limit.ResetPhrase(now, TimeZoneInfo.Utc));
+        Assert.Equal("Tokens this week", limit.Heading);
+        Assert.Equal("2M of 2M tokens", limit.Usage);
     }
 
     [Fact]
@@ -360,9 +389,10 @@ public sealed class GuardianClientTests
         Assert.Equal((GuardianErrorKind.Limit, "rate_limited"), (error.Kind, error.Code));
         Assert.Equal("Guardian asks Vision to slow down for a moment.", error.Message);
         var text = GuardianRefusalText.For(error);
-        Assert.Equal("Guardian asks Vision to slow down", text.Title);
-        Assert.Equal("Requests: 0 requests left this run", text.Details[0]);
-        Assert.Equal("Try again in 5 s.", text.Details[1]);
+        Assert.Equal("Guardian is slowing this account down", text.Title);
+        Assert.Equal("Requests for this run: 0 requests left.", text.Details[0]);
+        Assert.Equal("Vision tries again after the reset.", text.Details[1]);
+        Assert.Equal("Try again in 5 s.", text.Details[2]);
     }
 
     [Fact]
@@ -373,8 +403,8 @@ public sealed class GuardianClientTests
             """);
         Assert.Equal((GuardianErrorKind.Limit, 409, "limit_reached"), (error.Kind, error.Status, error.Code));
         var text = GuardianRefusalText.For(error);
-        Assert.Equal("You've reached a Guardian limit", text.Title);
-        Assert.Equal("Storage: 4 GB of 4 GB in all", text.Details[0]);
+        Assert.Equal("Guardian storage limit reached", text.Title);
+        Assert.Equal("Storage: 4 GB of 4 GB.", text.Details[0]);
         // A plain conflict (a name taken) is not a limit.
         Assert.Equal(GuardianErrorKind.Conflict, GuardianError.FromResponse(409, """{"error":"name_taken","status":409,"message":"Taken"}""").Kind);
         Assert.Equal("1 of 30 requests this minute", new GuardianLimit("requests", "minute", 1, 30, null, null).Describe());

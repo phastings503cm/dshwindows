@@ -53,10 +53,61 @@ public sealed record GuardianLimit(string Kind, string Window, double? Used, dou
         return $"{amount} {WindowPhrase(Window)}".Trim();
     }
 
-    /// <summary>"Resets Mon 19 Oct, 00:00" in local time, or null.</summary>
-    public string? ResetPhrase(TimeZoneInfo? zone = null) => ResetsAt is { } at
-        ? "Resets " + TimeZoneInfo.ConvertTime(at, zone ?? TimeZoneInfo.Local).ToString("ddd d MMM, HH:mm", CultureInfo.InvariantCulture)
-        : null;
+    /// <summary>The dialog's name for the limit, as the Mac says it: "Spend today", "Tokens this week", "Requests for this
+    /// run", "Streams at once"; a limit with no window (a storage cap) is just its kind.</summary>
+    public string Heading
+    {
+        get
+        {
+            if (string.Equals(Unit, "streams", StringComparison.OrdinalIgnoreCase)) return "Streams at once";
+            var window = (Window ?? "").ToLowerInvariant() switch
+            {
+                "" or "total" => "",
+                "day" => "today",
+                "week" => "this week",
+                "month" => "this month",
+                "run" => "for this run",
+                "minute" => "this minute",
+                "hour" => "this hour",
+                var other => "per " + other,
+            };
+            return window.Length == 0 ? Title : $"{Title} {window}";
+        }
+    }
+
+    /// <summary>"$4.80 of $5.00", "1.2M of 2M tokens", "4 GB of 4 GB", "3 requests used", "0 requests left" — or null when
+    /// Guardian gave no numbers.</summary>
+    public string? Usage
+    {
+        get
+        {
+            var unit = UnitSuffix;
+            if (Used is { } used && Max is { } max) return $"{Amount(used)} of {Amount(max)}{unit}";
+            if (Used is { } onlyUsed) return $"{Amount(onlyUsed)}{unit} used";
+            if (ReportedRemaining is { } left) return $"{Amount(left)}{unit} left";
+            return null;
+        }
+    }
+
+    /// <summary>"resets in 3 hours (Mon 4:00 PM)", in local time (the Mac's words), or null.</summary>
+    public string? ResetPhrase(DateTimeOffset? now = null, TimeZoneInfo? zone = null)
+    {
+        if (ResetsAt is not { } at) return null;
+        var clock = TimeZoneInfo.ConvertTime(at, zone ?? TimeZoneInfo.Local).ToString("ddd h:mm tt", CultureInfo.InvariantCulture);
+        return $"resets {Relative(at - (now ?? DateTimeOffset.Now))} ({clock})";
+    }
+
+    /// <summary>"now", "in 5 minutes", "in 3 hours", "in 4 days" (the Mac's rounding).</summary>
+    internal static string Relative(TimeSpan span)
+    {
+        var seconds = span.TotalSeconds;
+        if (seconds <= 30) return "now";
+        var minutes = (int)Math.Round(seconds / 60, MidpointRounding.AwayFromZero);
+        if (minutes < 60) return $"in {Math.Max(1, minutes)} minute{(minutes == 1 ? "" : "s")}";
+        var hours = (int)Math.Round(seconds / 3600, MidpointRounding.AwayFromZero);
+        if (hours < 48) return $"in {hours} hour{(hours == 1 ? "" : "s")}";
+        return $"in {(int)Math.Round(seconds / 86400, MidpointRounding.AwayFromZero)} days";
+    }
 
     private bool IsMoney => Unit is { } u && (u.Equals("usd", StringComparison.OrdinalIgnoreCase) || u == "$") || (Unit is null && Kind == "spend");
 
@@ -308,43 +359,71 @@ public sealed class GuardianError : Exception
     }
 }
 
-/// <summary>A Guardian refusal put into a dialog's words: the title, Guardian's own sentence, and what is missing or when
-/// it resets. Vision for macOS shows the same words.</summary>
+/// <summary>A Guardian refusal put into a dialog's words: the title, Guardian's own sentence, and what is missing and who can
+/// grant it, or the limit, when it resets and who can raise it. The titles and lines are Vision for macOS's
+/// (GuardianProblem.title / detail), so both apps say the same thing; Windows adds a storage limit's title, the words for
+/// two more reasons and Guardian's Retry-After.</summary>
 public sealed record GuardianRefusalText(string Title, string Message, IReadOnlyList<string> Details, bool OffersSignIn)
 {
-    public static GuardianRefusalText For(GuardianError error)
+    public static GuardianRefusalText For(GuardianError error, DateTimeOffset? now = null)
     {
         var details = new List<string>();
         switch (error.Kind)
         {
             case GuardianErrorKind.Unauthorized:
-                return new("Sign in to Guardian again", error.Message, details, OffersSignIn: true);
+                details.Add("Sign in again in Settings ▸ Guardian.");
+                return new("Guardian sign-in needed", error.Message, details, OffersSignIn: true);
             case GuardianErrorKind.Forbidden:
-                if (error.Needed is { Length: > 0 } needed) details.Add($"Missing: {needed}" + (ReasonPhrase(error.Reason) is { } why ? $" — {why}" : ""));
-                else if (ReasonPhrase(error.Reason) is { } onlyWhy) details.Add(char.ToUpperInvariant(onlyWhy[0]) + onlyWhy[1..] + ".");
-                details.Add("Vision gets whatever your Guardian role allows; an owner or admin of your organization can grant the rest.");
-                return new(error.Reason == "org_not_member" ? "You aren't in that Guardian organization" : "Guardian doesn't allow this yet",
+            {
+                var what = error.Needed is { Length: > 0 } needed ? $"“{needed}”" : "access";
+                details.Add(error.Reason switch
+                {
+                    "module_disabled" => $"Missing: the {what} module is turned off for you. An admin of your Guardian organization can turn it on for you (Guardian ▸ Settings ▸ Members).",
+                    "permission_missing" => $"Missing: the {what} permission. An admin of your Guardian organization can grant it (Guardian ▸ Settings ▸ Members).",
+                    "scope_missing" => $"Missing: this sign-in doesn't carry the {what} scope. Sign out and sign in again in Settings ▸ Guardian; if it is still missing, an admin of your organization can grant it.",
+                    "org_not_member" => "You aren't a member of that organization. Pick another one in Settings ▸ Guardian, or ask its admin to add you.",
+                    _ => $"Missing: {what}" + (ReasonPhrase(error.Reason) is { } why ? $" — {why}" : error.Reason is { Length: > 0 } raw ? $" ({raw})" : "")
+                         + ". An admin of your Guardian organization can grant it.",
+                });
+                return new(error.Reason == "org_not_member" ? "Not a member of that Guardian organization" : "Your Guardian account doesn't allow this",
                     error.Message, details, OffersSignIn: false);
+            }
             case GuardianErrorKind.Limit:
+            {
+                var rateLimited = error.Code == "rate_limited";
                 if (error.Limit is { } limit)
                 {
-                    details.Add($"{limit.Title}: {limit.Describe()}");
-                    if (limit.ResetPhrase() is { } reset) details.Add(reset);
+                    var line = limit.Heading;
+                    if (limit.Usage is { } usage) line += ": " + usage;
+                    if (limit.ResetPhrase(now) is { } reset) line += " — " + reset;
+                    details.Add(line + ".");
+                    details.Add(rateLimited ? "Vision tries again after the reset."
+                        : "Your Guardian organization's admin can raise the limit; otherwise it frees up when it resets.");
+                }
+                else if (!rateLimited)
+                {
+                    details.Add("Your Guardian organization's admin can raise the limit.");
                 }
                 if (error.RetryAfter is { } wait) details.Add($"Try again in {Math.Max(1, (int)Math.Ceiling(wait.TotalSeconds))} s.");
-                var title = error.Code switch
+                var title = rateLimited ? "Guardian is slowing this account down" : error.Limit?.Kind.ToLowerInvariant() switch
                 {
-                    "budget_exceeded" => "You've reached your Guardian budget",
-                    "rate_limited" => "Guardian asks Vision to slow down",
-                    _ => "You've reached a Guardian limit",
+                    "spend" => "Guardian spend limit reached",
+                    "tokens" => "Guardian token limit reached",
+                    "requests" => "Guardian request limit reached",
+                    "storage" => "Guardian storage limit reached",
+                    _ => "Guardian limit reached",
                 };
                 return new(title, error.Message, details, OffersSignIn: false);
+            }
             default:
-                return new("Guardian", error.Message, details, OffersSignIn: false);
+                return new("Guardian refused the request", error.Message, details, OffersSignIn: false);
         }
     }
 
-    /// <summary>The reason code in words, or null for one this build doesn't know.</summary>
+    /// <summary>One line for a chat's error row (the Mac's oneLine): the title, Guardian's sentence, then the details.</summary>
+    public string OneLine() => string.Join(" ", new[] { Title + "." }.Concat(new[] { Message }.Where(m => !string.IsNullOrWhiteSpace(m))).Concat(Details));
+
+    /// <summary>The reason code in words, for the reasons the Mac's lines don't name, or null for one this build doesn't know.</summary>
     public static string? ReasonPhrase(string? reason) => reason switch
     {
         "module_disabled" => "that module is switched off for you",

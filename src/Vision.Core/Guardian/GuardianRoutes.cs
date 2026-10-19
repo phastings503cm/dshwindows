@@ -87,10 +87,8 @@ public static class GuardianProxyRefusals
     /// down (429 rate_limited) — a budget, a missing permission or a revoked sign-in can't be waited out.</summary>
     public static LlmException ToLlmException(GuardianError error, string body)
     {
-        var text = GuardianRefusalText.For(error);
-        var message = text.Details.Count == 0 || error.Kind == GuardianErrorKind.Forbidden && error.Needed is null
-            ? $"{text.Title}: {error.Message}"
-            : $"{text.Title}: {error.Message} ({text.Details[0]})";
+        // The Mac's one line: "Guardian spend limit reached. <Guardian's sentence> Spend today: $5.01 of $5.00 — resets …".
+        var message = GuardianRefusalText.For(error).OneLine();
         var retryable = error.Status == 429 && error.Code is null or "rate_limited";
         return LlmException.Rejected(error.Status, message, body, permanent: !retryable);
     }
