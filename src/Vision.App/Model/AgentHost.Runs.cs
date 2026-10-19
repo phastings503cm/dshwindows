@@ -597,9 +597,14 @@ public sealed partial class AgentHost
         var trimmed = text.Trim();
         if (trimmed.Length == 0 || Session(chatId) is not { } vm) return null;
         var task = Queue.Add(ChatTaskRules.TitleFor(trimmed), trimmed, atFront, vm.WorkspacePath, chatId, asPrompt: true);
-        var startsNow = !vm.Running && !_runs.ContainsKey(chatId) && !IsQueueRunning(chatId) && ChatTasksPaused(chatId) is null
-                        && Queue.NextTaskFor(chatId)?.Id == task.Id;
-        if (!startsNow) vm.Note(ChatTaskRules.AddedNotice(Queue.Position(task.Id) ?? 1, startsNow: false));
+        var position = Queue.Position(task.Id) ?? 1;
+        var next = Queue.NextTaskFor(chatId);
+        if (ChatTasksPaused(chatId) is not null)
+            vm.Note($"📋 Added to this chat's tasks (#{position}) — the list is paused; Resume (Ctrl+Shift+Q) carries on.");
+        else if (!IsQueueRunning(chatId) && next is { AsPrompt: false })
+            vm.Note($"📋 Added to this chat's tasks (#{position}) — after “{next.Title}”, which waits for Start (Ctrl+Shift+Q).");
+        else if (vm.Running || _runs.ContainsKey(chatId) || IsQueueRunning(chatId) || next?.Id != task.Id)
+            vm.Note(ChatTaskRules.AddedNotice(position, startsNow: false));
         PumpChatTasks(chatId);
         RaiseRunsChanged();
         return Queue.Find(task.Id) ?? task;
