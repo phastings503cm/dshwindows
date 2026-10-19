@@ -514,6 +514,8 @@ internal static class PointerRoutes
     public static async Task<RouteResult> TryAsync(InputRoute route, InputTarget target, MachineChat chat, PointerAction action,
                                                    (int Notches, bool Horizontal) scroll, CancellationToken cancellationToken)
     {
+        // The last line of defence: no route reaches Vision's own windows (the tools refuse before this).
+        if (TerminalGuard.IsHarness(target.Top)) return RouteResult.Stop(TerminalGuard.SelfClickRefusal());
         var point = target.Point;
         switch (route)
         {

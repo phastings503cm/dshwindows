@@ -346,6 +346,60 @@ public sealed partial class SelfTest
         {
             glow.Preview(null);
         }
+        await ProbeSelfClickGuard(owner);
+    }
+
+    /// <summary>The mouse tool, as a chat runs it inside this very app, refuses Vision's own windows: by element name (its
+    /// permission gate's Allow Once), by a point in its window, and focus_app (review of 10-19). Nothing is clicked.</summary>
+    private async Task ProbeSelfClickGuard(MainWindow owner)
+    {
+        try
+        {
+            var handle = new System.Windows.Interop.WindowInteropHelper(owner).Handle;
+            var chat = new MachineChat("selftest-guard", static () => "Self-click guard");
+            var tools = MachineTools.All(chat);
+            var context = new ToolContext
+            {
+                Workspace = Path.GetTempPath(),
+                Policy = new PermissionPolicy(PermissionPreset.FullAccess, Path.GetTempPath()),
+                Client = new NoModel(),
+                Registry = new ToolRegistry([]),
+            };
+            async Task<string> Run(string tool, string arguments) =>
+                (await tools.Single(t => t.Name == tool).ExecuteAsync(arguments, context, CancellationToken.None)).Output;
+            var id = handle.ToInt64().ToString(System.Globalization.CultureInfo.InvariantCulture);
+            var results = new[]
+            {
+                await Run("mouse", $$"""{"window":"{{id}}","element":"Allow Once"}"""),
+                await Run("mouse", $$"""{"window":"{{id}}","x":{{(int)owner.Left + 40}},"y":{{(int)owner.Top + 40}}}"""),
+                await Run("focus_app", $$"""{"app":{{JsonArgs.Quote(owner.Title)}}}"""),
+                await Run("keyboard", $$"""{"app":{{JsonArgs.Quote(owner.Title)}},"text":"x"}"""),
+            };
+            // Its machine session ends now, so the glow it lit is gone before the next captures.
+            MachineControl.Activity.Clear();
+            MachineGlowController.Current?.Refresh();
+            Note($"self-click guard: this process is Vision {TerminalGuard.SelfIsHarness}; " + string.Join(" | ", results.Select(r => TextUtil.Prefix(r, 60))));
+            if (!results.All(r => r.StartsWith("Error: not ", StringComparison.Ordinal)))
+                throw new InvalidOperationException("a machine tool did not refuse Vision's own window: " + string.Join(" | ", results));
+        }
+        catch (Exception error)
+        {
+            Fail("self-click guard", error);
+        }
+    }
+
+    /// <summary>A model client for tools that never call the model.</summary>
+    private sealed class NoModel : ILlmClient
+    {
+        public async IAsyncEnumerable<LlmStreamEvent> StreamAsync(LlmRequest request,
+            [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken cancellationToken = default)
+        {
+            await Task.CompletedTask;
+            yield break;
+        }
+
+        public Task<IReadOnlyList<string>> ListModelsAsync(CancellationToken cancellationToken = default) =>
+            Task.FromResult<IReadOnlyList<string>>([]);
     }
 
     /// <summary>The mean absolute difference per channel of two BGRX buffers of one size.</summary>

@@ -100,6 +100,23 @@ public static class TerminalGuard
         return (WindowServices.ImagePath(pid) ?? WindowServices.ProcessName(pid), className, pid);
     }
 
+    /// <summary>Whether this process is Vision itself (the app sets it at start-up; by default, when its executable has one of
+    /// Vision's names). A test host is not, so tests can drive windows of their own.</summary>
+    public static bool SelfIsHarness { get; set; } = HarnessExecutables.Contains(ExecutableName(Environment.ProcessPath));
+
+    /// <summary>Whether a window with these facts belongs to Vision — this very app, or another copy of it.</summary>
+    public static bool IsHarness(string? executablePath, int processId, bool selfIsHarness) =>
+        (processId != 0 && processId == Environment.ProcessId && selfIsHarness) || HarnessExecutables.Contains(ExecutableName(executablePath));
+
+    /// <summary>Whether the top-level window containing <paramref name="window"/> is Vision's own: no tool clicks or types
+    /// there (a click could press its own permission gate's Allow Once, or pick Full access).</summary>
+    public static bool IsHarness(IntPtr window) =>
+        Describe(window) is { } target && IsHarness(target.Path, target.ProcessId, SelfIsHarness);
+
+    /// <summary>The message the mouse tool returns for a click into Vision itself.</summary>
+    public static string SelfClickRefusal(string verb = "clicking in") =>
+        $"Error: not {verb} Vision: it is the app running you, and a click there could answer its own permission questions or change its settings. Ask the user to do it.";
+
     /// <summary>The message the keyboard tool returns when it refuses.</summary>
     public static string Refusal(string appName) =>
         $"Error: not typing into {appName}: keystrokes there run commands as you without the usual approval. Use run_shell_command or process_start (they ask before anything risky), or ask the user to type it.";

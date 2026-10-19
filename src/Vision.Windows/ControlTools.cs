@@ -32,10 +32,12 @@ internal static class ControlArgs
             : (null, $"Error: '{app}' is not running or has no window open (list_windows / process_list to check).");
     }
 
-    /// <summary>Find an element of <paramref name="top"/> by name or #id, with what the planner needs.</summary>
+    /// <summary>Find an element of <paramref name="top"/> by name or #id, with what the planner needs. Never in Vision's own
+    /// windows.</summary>
     public static async Task<(InputTarget? Target, string? Error)> Element(IntPtr top, string query, string appName,
                                                                          CancellationToken cancellationToken)
     {
+        if (TerminalGuard.IsHarness(top)) return (null, TerminalGuard.SelfClickRefusal("using"));
         var (finished, found) = await MtaThread.Run(() =>
         {
             if (UiaElements.Find(top, query, TimeSpan.FromSeconds(4)) is not { } named) return ((AutomationElement, ElementFacts, (int, int)?)?)null;
@@ -146,6 +148,8 @@ public sealed class MouseTool : IToolExecutor
         var elementName = JsonArgs.String(args, "element");
         var (window, windowError) = ControlArgs.Window(app, JsonArgs.String(args, "window"));
         if (windowError is not null) return windowError;
+        // Never Vision itself, even in the background and by element name: it could press its own gate's Allow Once.
+        if (window is not null && TerminalGuard.IsHarness(window.Handle)) return TerminalGuard.SelfClickRefusal();
         if (window is { Minimized: true }) return $"Error: {window.Label} is minimized: focus_app restores it first.";
         var screen = ScreenCapture.VirtualScreen();
         (int X, int Y)? to = null;
@@ -185,6 +189,8 @@ public sealed class MouseTool : IToolExecutor
             : clicks == 2 ? PointerAction.DoubleClick
             : PointerAction.Click;
 
+        if (TerminalGuard.IsHarness(target.Top) || (to is { } dropAt && TerminalGuard.IsHarness(InputTargets.TopAt(dropAt.X, dropAt.Y))))
+            return TerminalGuard.SelfClickRefusal(to is null ? "clicking in" : "dragging into");
         // Right and middle clicks paste the clipboard in most terminals.
         if (button != "left" && scroll is null)
         {
@@ -664,6 +670,7 @@ public sealed class FocusAppTool : IToolExecutor
         if (WindowServices.FindApp(app) is not { } hit) why = "no window of it is open";
         else
         {
+            if (TerminalGuard.IsHarness(hit.Handle)) return TerminalGuard.SelfClickRefusal("bringing forward");
             if (_chat.Refuse(hit.Handle, "bringing forward") is { } refusal) return refusal;
             InputLease lease;
             try

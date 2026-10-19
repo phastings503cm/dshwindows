@@ -137,6 +137,34 @@ public sealed class BackgroundInputTests(ITestOutputHelper output)
     }
 
     [Fact]
+    public async Task TheMouseRefusesVisionsOwnWindowsByNameAndByPoint()
+    {
+        // Run as Vision itself does (SelfIsHarness): this process's windows are Vision's. A chat must not press its own
+        // permission gate's "Allow Once", in the background or by element name, even while Vision is covered.
+        using var window = new TestWindow();
+        var chat = new MachineChat(Id("self"));
+        TerminalGuard.SelfIsHarness = true;
+        try
+        {
+            var byName = await Tools.Output(Tool(chat, "mouse"), $$"""{"app":{{Tools.Q(window.Title)}},"element":"#pressMe"}""");
+            Assert.Equal(TerminalGuard.SelfClickRefusal(), byName);
+            var (x, y) = window.ButtonCenter();
+            var byPoint = await Tools.Output(Tool(chat, "mouse"), $$"""{"x":{{x}},"y":{{y}},"window":{{Tools.Q(window.Title)}}}""");
+            Assert.Equal(TerminalGuard.SelfClickRefusal(), byPoint);
+            Assert.Equal(TerminalGuard.SelfClickRefusal("bringing forward"), await Tools.Output(Tool(chat, "focus_app"), $$"""{"app":{{Tools.Q(window.Title)}}}"""));
+            var (element, error) = await ControlArgs.Element(window.Handle, "#pressMe", "Vision", CancellationToken.None);
+            Assert.Null(element);
+            Assert.Equal(TerminalGuard.SelfClickRefusal("using"), error);
+            await Task.Delay(200);
+            Assert.Equal(0, window.Clicks);
+        }
+        finally
+        {
+            TerminalGuard.SelfIsHarness = false;
+        }
+    }
+
+    [Fact]
     public async Task AClickIntoAWpfFieldPicksItForTyping()
     {
         using var window = new TestWindow();

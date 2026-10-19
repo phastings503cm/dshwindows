@@ -20,6 +20,9 @@ public partial class App : Application
     protected override void OnStartup(StartupEventArgs e)
     {
         base.OnStartup(e);
+        // This process is Vision, whatever its executable is called (a renamed portable copy): no machine tool clicks or
+        // types into its own windows.
+        Vision.Windows.TerminalGuard.SelfIsHarness = true;
         DispatcherUnhandledException += OnDispatcherUnhandledException;
         AppDomain.CurrentDomain.UnhandledException += (_, args) => WriteCrashLog(args.ExceptionObject as Exception, "domain");
         TaskScheduler.UnobservedTaskException += (_, args) =>

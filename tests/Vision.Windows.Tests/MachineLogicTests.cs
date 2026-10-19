@@ -284,6 +284,20 @@ public sealed class TerminalGuardTests
     }
 
     [Fact]
+    public void TheMouseNeverClicksVisionItself()
+    {
+        // In the app (SelfIsHarness), any window of this process is Vision's: its gate's Allow Once, its preset menu.
+        Assert.True(TerminalGuard.IsHarness(@"C:\x\Vision-portable.exe", Environment.ProcessId, selfIsHarness: true));
+        // Another copy of Vision (or the old DSH) is Vision too, whoever runs it.
+        Assert.True(TerminalGuard.IsHarness(@"C:\Users\me\AppData\Local\Programs\Vision\Vision.exe", 4242_4242, selfIsHarness: false));
+        Assert.True(TerminalGuard.IsHarness(@"C:\Programs\DSH\DSH.exe", 4242_4242, selfIsHarness: false));
+        // A test host's own windows are not (tests drive windows of their own); other apps never are.
+        Assert.False(TerminalGuard.IsHarness(@"C:\x\testhost.exe", Environment.ProcessId, selfIsHarness: false));
+        Assert.False(TerminalGuard.IsHarness(@"C:\Windows\System32\notepad.exe", 4242_4242, selfIsHarness: true));
+        Assert.StartsWith("Error: not clicking in Vision:", TerminalGuard.SelfClickRefusal());
+    }
+
+    [Fact]
     public void PasteClicksOnlyCareAboutTerminals()
     {
         Assert.True(TerminalGuard.IsTerminal(@"C:\Windows\System32\cmd.exe", null));
