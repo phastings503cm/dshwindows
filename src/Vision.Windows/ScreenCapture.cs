@@ -38,6 +38,8 @@ internal static class ScreenCapture
         using var dpi = DpiScope.PerMonitor();
         var clipped = area.Intersect(VirtualScreen());
         if (clipped.IsEmpty) return null;
+        // The machine-in-use glow is left out of captures by Windows where it can be; elsewhere it steps aside.
+        using var shield = CaptureShield.Raise();
         var screen = Native.GetDC(IntPtr.Zero);
         if (screen == IntPtr.Zero) return null;
         try

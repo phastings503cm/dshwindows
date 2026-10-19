@@ -62,6 +62,14 @@ internal static class Native
             u = new InputUnion { mi = new MOUSEINPUT { dx = dx, dy = dy, dwFlags = flags } },
         };
 
+        /// <summary>A wheel turn: <paramref name="delta"/> in WHEEL_DELTA units (120 per notch), positive
+        /// away from the user (up) or to the right.</summary>
+        public static INPUT Wheel(int delta, bool horizontal) => new()
+        {
+            type = INPUT_MOUSE,
+            u = new InputUnion { mi = new MOUSEINPUT { mouseData = unchecked((uint)delta), dwFlags = horizontal ? MOUSEEVENTF_HWHEEL : MOUSEEVENTF_WHEEL } },
+        };
+
         public static INPUT Key(ushort vk, ushort scan, uint flags) => new()
         {
             type = INPUT_KEYBOARD,
@@ -108,6 +116,62 @@ internal static class Native
         [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 260)] public string szExeFile;
     }
 
+    [StructLayout(LayoutKind.Sequential)]
+    public struct GUITHREADINFO
+    {
+        public int cbSize;
+        public uint flags;
+        public IntPtr hwndActive;
+        public IntPtr hwndFocus;
+        public IntPtr hwndCapture;
+        public IntPtr hwndMenuOwner;
+        public IntPtr hwndMoveSize;
+        public IntPtr hwndCaret;
+        public RECT rcCaret;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    public struct MSG
+    {
+        public IntPtr hwnd;
+        public uint message;
+        public IntPtr wParam;
+        public IntPtr lParam;
+        public uint time;
+        public POINT pt;
+        public uint lPrivate;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    public struct MSLLHOOKSTRUCT
+    {
+        public POINT pt;
+        public uint mouseData;
+        public uint flags;
+        public uint time;
+        public IntPtr dwExtraInfo;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    public struct KBDLLHOOKSTRUCT
+    {
+        public uint vkCode;
+        public uint scanCode;
+        public uint flags;
+        public uint time;
+        public IntPtr dwExtraInfo;
+    }
+
+    [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
+    public struct MONITORINFOEX
+    {
+        public int cbSize;
+        public RECT rcMonitor;
+        public RECT rcWork;
+        public uint dwFlags;
+        [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 32)] public string szDevice;
+    }
+
     // MARK: - Constants
 
     public const uint INPUT_MOUSE = 0;
@@ -120,6 +184,8 @@ internal static class Native
     public const uint MOUSEEVENTF_RIGHTUP = 0x0010;
     public const uint MOUSEEVENTF_MIDDLEDOWN = 0x0020;
     public const uint MOUSEEVENTF_MIDDLEUP = 0x0040;
+    public const uint MOUSEEVENTF_WHEEL = 0x0800;
+    public const uint MOUSEEVENTF_HWHEEL = 0x1000;
     public const uint MOUSEEVENTF_VIRTUALDESK = 0x4000;
     public const uint MOUSEEVENTF_ABSOLUTE = 0x8000;
 
@@ -132,8 +198,70 @@ internal static class Native
 
     public const int GWL_STYLE = -16;
     public const int GWL_EXSTYLE = -20;
+    public const int WS_EX_TOPMOST = 0x00000008;
+    public const int WS_EX_TRANSPARENT = 0x00000020;
     public const int WS_EX_TOOLWINDOW = 0x00000080;
+    public const int WS_EX_LAYERED = 0x00080000;
     public const int WS_EX_NOACTIVATE = 0x08000000;
+
+    // Window messages.
+    public const uint WM_NULL = 0x0000;
+    public const uint WM_SETTEXT = 0x000C;
+    public const uint WM_GETTEXT = 0x000D;
+    public const uint WM_GETTEXTLENGTH = 0x000E;
+    public const uint WM_CLOSE = 0x0010;
+    public const uint WM_QUIT = 0x0012;
+    public const uint WM_KEYDOWN = 0x0100;
+    public const uint WM_KEYUP = 0x0101;
+    public const uint WM_CHAR = 0x0102;
+    public const uint WM_MOUSEMOVE = 0x0200;
+    public const uint WM_LBUTTONDOWN = 0x0201;
+    public const uint WM_LBUTTONUP = 0x0202;
+    public const uint WM_LBUTTONDBLCLK = 0x0203;
+    public const uint WM_RBUTTONDOWN = 0x0204;
+    public const uint WM_MOUSEWHEEL = 0x020A;
+    public const uint WM_MOUSEHWHEEL = 0x020E;
+    public const uint WM_HOTKEY = 0x0312;
+    public const uint WM_CUT = 0x0300;
+    public const uint WM_COPY = 0x0301;
+    public const uint WM_PASTE = 0x0302;
+    public const uint WM_UNDO = 0x0304;
+    public const uint EM_GETSEL = 0x00B0;
+    public const uint EM_SETSEL = 0x00B1;
+    public const uint BM_GETCHECK = 0x00F0;
+    public const int MK_LBUTTON = 0x0001;
+
+    public const uint SMTO_BLOCK = 0x0001;
+    public const uint SMTO_ABORTIFHUNG = 0x0002;
+
+    public const uint CWP_SKIPINVISIBLE = 0x0001;
+    public const uint CWP_SKIPTRANSPARENT = 0x0004;
+
+    // Low-level hooks.
+    public const int WH_KEYBOARD_LL = 13;
+    public const int WH_MOUSE_LL = 14;
+    public const uint LLMHF_INJECTED = 0x00000001;
+    public const uint LLMHF_LOWER_IL_INJECTED = 0x00000002;
+    public const uint LLKHF_LOWER_IL_INJECTED = 0x00000002;
+    public const uint LLKHF_INJECTED = 0x00000010;
+
+    // Capture exclusion, the stop key, overlay placement.
+    public const uint WDA_NONE = 0x00000000;
+    public const uint WDA_EXCLUDEFROMCAPTURE = 0x00000011;
+    public const int SM_REMOTESESSION = 0x1000;
+    public const uint MOD_ALT = 0x0001;
+    public const uint MOD_CONTROL = 0x0002;
+    public const uint MOD_NOREPEAT = 0x4000;
+    public const uint VK_OEM_PERIOD = 0xBE;
+    public static readonly IntPtr HWND_TOPMOST = new(-1);
+    public const uint SWP_NOSIZE = 0x0001;
+    public const uint SWP_NOMOVE = 0x0002;
+    public const uint SWP_NOACTIVATE = 0x0010;
+    public const uint SWP_SHOWWINDOW = 0x0040;
+    public const uint SWP_NOOWNERZORDER = 0x0200;
+
+    /// <summary>OBJID_CLIENT, for AccessibleObjectFromWindow.</summary>
+    public const int OBJID_CLIENT = unchecked((int)0xFFFFFFFC);
 
     public const uint GA_ROOT = 2;
     public const uint GA_ROOTOWNER = 3;
@@ -250,6 +378,87 @@ internal static class Native
     [DllImport("user32.dll")]
     public static extern bool PrintWindow(IntPtr hWnd, IntPtr hdc, uint flags);
 
+    [DllImport("user32.dll", SetLastError = true, EntryPoint = "PostMessageW")]
+    public static extern bool PostMessage(IntPtr hWnd, uint msg, IntPtr wParam, IntPtr lParam);
+
+    [DllImport("user32.dll", SetLastError = true, EntryPoint = "SendMessageTimeoutW")]
+    public static extern IntPtr SendMessageTimeout(IntPtr hWnd, uint msg, IntPtr wParam, IntPtr lParam, uint flags, uint timeout,
+                                                   out IntPtr result);
+
+    /// <summary>WM_SETTEXT: the system copies the string across processes.</summary>
+    [DllImport("user32.dll", SetLastError = true, CharSet = CharSet.Unicode, EntryPoint = "SendMessageTimeoutW")]
+    public static extern IntPtr SendMessageTimeoutText(IntPtr hWnd, uint msg, IntPtr wParam, string lParam, uint flags, uint timeout,
+                                                       out IntPtr result);
+
+    /// <summary>WM_GETTEXT into a buffer (copied back across processes by the system).</summary>
+    [DllImport("user32.dll", SetLastError = true, CharSet = CharSet.Unicode, EntryPoint = "SendMessageTimeoutW")]
+    public static extern IntPtr SendMessageTimeoutBuffer(IntPtr hWnd, uint msg, IntPtr wParam, [Out] char[] lParam, uint flags,
+                                                         uint timeout, out IntPtr result);
+
+    [DllImport("user32.dll", SetLastError = true)]
+    public static extern bool GetGUIThreadInfo(uint threadId, ref GUITHREADINFO info);
+
+    [DllImport("user32.dll")]
+    public static extern bool ScreenToClient(IntPtr hWnd, ref POINT point);
+
+    [DllImport("user32.dll")]
+    public static extern IntPtr RealChildWindowFromPoint(IntPtr parent, POINT clientPoint);
+
+    [DllImport("user32.dll")]
+    public static extern bool IsWindowEnabled(IntPtr hWnd);
+
+    [DllImport("user32.dll")]
+    public static extern bool IsWindowUnicode(IntPtr hWnd);
+
+    [DllImport("user32.dll", EntryPoint = "SetWindowLongW")]
+    public static extern int SetWindowLong(IntPtr hWnd, int index, int value);
+
+    [DllImport("user32.dll", SetLastError = true)]
+    public static extern bool SetWindowPos(IntPtr hWnd, IntPtr insertAfter, int x, int y, int width, int height, uint flags);
+
+    [DllImport("user32.dll", SetLastError = true)]
+    public static extern bool SetWindowDisplayAffinity(IntPtr hWnd, uint affinity);
+
+    [DllImport("user32.dll")]
+    public static extern bool GetWindowDisplayAffinity(IntPtr hWnd, out uint affinity);
+
+    [DllImport("user32.dll", SetLastError = true)]
+    public static extern bool RegisterHotKey(IntPtr hWnd, int id, uint modifiers, uint vk);
+
+    [DllImport("user32.dll")]
+    public static extern bool UnregisterHotKey(IntPtr hWnd, int id);
+
+    public delegate IntPtr HookProc(int code, IntPtr wParam, IntPtr lParam);
+
+    [DllImport("user32.dll", SetLastError = true, EntryPoint = "SetWindowsHookExW")]
+    public static extern IntPtr SetWindowsHookEx(int hook, HookProc callback, IntPtr module, uint threadId);
+
+    [DllImport("user32.dll")]
+    public static extern bool UnhookWindowsHookEx(IntPtr hook);
+
+    [DllImport("user32.dll")]
+    public static extern IntPtr CallNextHookEx(IntPtr hook, int code, IntPtr wParam, IntPtr lParam);
+
+    [DllImport("user32.dll", EntryPoint = "GetMessageW")]
+    public static extern int GetMessage(out MSG msg, IntPtr hWnd, uint min, uint max);
+
+    [DllImport("user32.dll")]
+    public static extern bool TranslateMessage(ref MSG msg);
+
+    [DllImport("user32.dll", EntryPoint = "DispatchMessageW")]
+    public static extern IntPtr DispatchMessage(ref MSG msg);
+
+    [DllImport("user32.dll", SetLastError = true, EntryPoint = "PostThreadMessageW")]
+    public static extern bool PostThreadMessage(uint threadId, uint msg, IntPtr wParam, IntPtr lParam);
+
+    public delegate bool MonitorEnumProc(IntPtr monitor, IntPtr hdc, ref RECT rect, IntPtr data);
+
+    [DllImport("user32.dll")]
+    public static extern bool EnumDisplayMonitors(IntPtr hdc, IntPtr clip, MonitorEnumProc callback, IntPtr data);
+
+    [DllImport("user32.dll", CharSet = CharSet.Unicode, EntryPoint = "GetMonitorInfoW")]
+    public static extern bool GetMonitorInfo(IntPtr monitor, ref MONITORINFOEX info);
+
     // MARK: - gdi32
 
     [DllImport("gdi32.dll")]
@@ -292,6 +501,18 @@ internal static class Native
 
     [DllImport("kernel32.dll")]
     public static extern uint GetCurrentThreadId();
+
+    [DllImport("kernel32.dll", CharSet = CharSet.Unicode, EntryPoint = "GetModuleHandleW")]
+    public static extern IntPtr GetModuleHandle(string? name);
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    public static extern bool GetProcessTimes(SafeProcessHandle process, out long creation, out long exit, out long kernel, out long user);
+
+    // MARK: - oleacc (MSAA)
+
+    [DllImport("oleacc.dll")]
+    public static extern int AccessibleObjectFromWindow(IntPtr hWnd, int objectId, ref Guid iid,
+                                                        [MarshalAs(UnmanagedType.IUnknown)] out object? accessible);
 
     [DllImport("kernel32.dll", SetLastError = true)]
     public static extern IntPtr CreateToolhelp32Snapshot(uint flags, uint processId);

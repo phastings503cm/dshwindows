@@ -423,10 +423,24 @@ public sealed class DesktopTests
         // Only click when the button is really what is under that point.
         var under = WindowServices.OnScreenWindows(includeChrome: true).FirstOrDefault(w => w.Bounds.Contains(x, y));
         if (under?.Handle != window.Handle) return;
+        Native.GetCursorPos(out var before);
+        // By default the button is pressed through UI Automation: the cursor stays where it was.
         var click = await Tools.Output(Tools.Named("mouse"), $$"""{"x":{{x}},"y":{{y}}}""");
-        Assert.Equal($"Clicked left at ({x},{y}). Screenshot to verify.", click);
+        Assert.StartsWith("Pressed Button \u201CPress me\u201D in ", click);
+        Assert.EndsWith("with UI Automation Invoke (in the background — the real mouse did not move). Screenshot to verify.", click);
         var clock = Stopwatch.StartNew();
         while (window.Clicks == 0 && clock.Elapsed < TimeSpan.FromSeconds(3)) await Task.Delay(50);
         Assert.Equal(1, window.Clicks);
+        Native.GetCursorPos(out var after);
+        Assert.Equal((before.X, before.Y), (after.X, after.Y));
+
+        // mode real: the real mouse, as before — and the cursor comes back afterwards.
+        var real = await Tools.Output(Tools.Named("mouse"), $$"""{"x":{{x}},"y":{{y}},"mode":"real"}""");
+        Assert.Equal($"Clicked left at ({x},{y}). Screenshot to verify.", real);
+        clock.Restart();
+        while (window.Clicks < 2 && clock.Elapsed < TimeSpan.FromSeconds(3)) await Task.Delay(50);
+        Assert.Equal(2, window.Clicks);
+        Native.GetCursorPos(out var restored);
+        Assert.Equal((before.X, before.Y), (restored.X, restored.Y));
     }
 }
