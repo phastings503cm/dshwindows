@@ -113,9 +113,11 @@ public sealed record ChatCandidate
     public string? Project { get; init; }
     /// <summary>Where it was read from (a file, an export, Guardian's address).</summary>
     public string Location { get; init; } = "";
-    /// <summary>A short remark for the preview: "Scheduled run", "Shared by Ada", "3 subagent transcripts left out".</summary>
+    /// <summary>A short remark for the preview: "Cron run", "Scripted run", "Shared with you by Ada", "3 subagent transcripts left
+    /// out".</summary>
     public string? Note { get; init; }
-    /// <summary>A scheduled or automated run (OpenClaw cron): listed, but not ticked for you.</summary>
+    /// <summary>Work nobody typed (an OpenClaw cron run, a scripted Claude Code or Codex session): listed behind "Show scheduled
+    /// and scripted runs", and not ticked for you.</summary>
     public bool Automated { get; init; }
     /// <summary>Someone else's chat shared with the person (Guardian): listed, but not ticked for you.</summary>
     public bool Shared { get; init; }
@@ -148,6 +150,10 @@ public sealed record ImportedChat
     public string? KeepId { get; init; }
     /// <summary>What the conversion left out, said plainly (subagent transcripts, images).</summary>
     public IReadOnlyList<string> Notes { get; init; } = [];
+    /// <summary>Subagents it ran whose own transcripts stayed where they were (Claude Code).</summary>
+    public int Subagents { get; init; }
+    /// <summary>Work nobody typed: an OpenClaw cron run, a scripted (headless) Claude Code or Codex session.</summary>
+    public bool Automated { get; init; }
 
     /// <summary>User and assistant messages.</summary>
     public int Messages => Rows.Count(r => r.Kind is "user" or "assistant");
@@ -164,6 +170,7 @@ public sealed record ImportedChat
         Project = Project,
         Location = location,
         Note = Notes.Count > 0 ? Notes[0] : null,
+        Automated = Automated,
         Load = load ?? (_ => Task.FromResult<ImportedChat?>(this)),
     };
 }

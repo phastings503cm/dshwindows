@@ -1,102 +1,129 @@
 using System.Globalization;
-using System.Text;
 using System.Text.Json.Nodes;
 
 namespace Vision.Core;
 
-/// <summary>A chat written out: Markdown to read or share, or JSON to bring into Vision again (on this PC, another one, or
-/// the Mac — it is the transcript shape both harnesses keep in Guardian, with a few added fields the readers ignore).</summary>
+/// <summary>A chat written out — in the same shapes as Vision for macOS: Markdown to read or share, or JSON
+/// (<c>"format":"vision-chat"</c>, version 1) that either harness imports again.</summary>
 public static class ChatExport
 {
     /// <summary>The format's name in the JSON (<c>"format"</c>), and its version.</summary>
     public const string Format = "vision-chat";
     public const int FormatVersion = 1;
 
-    /// <summary>Tool output in Markdown stops after this many characters.</summary>
-    public const int MarkdownToolOutput = 4_000;
-
-    /// <summary>The chat as JSON: <c>{format, version, id, title, cwd, rows:[{kind, text, toolName, argSummary, output, isError,
-    /// at}], harness, exportedAt, imported?}</c> — <c>at</c> in Apple reference-date seconds, as Guardian keeps it.</summary>
+    /// <summary>The chat as JSON, keys sorted: <c>{cwd, createdAt, exportedAt, format, harness, id, rows:[{argSummary, at, isError,
+    /// kind, output, text, toolName}], source, sourceId, title, updatedAt, version}</c> — times as ISO-8601 with milliseconds,
+    /// absent fields left out, <c>source</c>/<c>sourceId</c> only for an imported chat.</summary>
     public static string Json(LogSession session, IEnumerable<LogItemRow> rows, DateTimeOffset? exportedAt = null)
     {
-        var chat = JsonNode.Parse(GuardianChats.ToPayload(session.Id, session.Title, session.Cwd, rows))!.AsObject();
-        var ordered = new JsonObject { ["format"] = Format, ["version"] = FormatVersion };
-        foreach (var (key, value) in chat.ToList())
+        var list = rows.Where(r => Kinds.Contains(r.Kind)).ToList();
+        var items = new JsonArray();
+        foreach (var row in list)
         {
-            chat.Remove(key);
-            ordered[key] = value;
+            var item = new JsonObject();
+            if (row.ArgSummary is { } args) item["argSummary"] = args;
+            item["at"] = GuardianClient.Iso(row.At);
+            item["isError"] = row.IsError;
+            item["kind"] = row.Kind;
+            if (row.Output is { } output) item["output"] = output;
+            if (row.Text is { } text) item["text"] = text;
+            if (row.ToolName is { } tool) item["toolName"] = tool;
+            items.Add(item);
         }
-        ordered["exportedAt"] = GuardianClient.Iso(exportedAt ?? DateTimeOffset.Now);
-        if (session.Imported is { } origin)
+        var chat = new JsonObject();
+        if (session.Cwd is { Length: > 0 } cwd) chat["cwd"] = cwd;
+        if (list.Count > 0) chat["createdAt"] = GuardianClient.Iso(list[0].At);
+        chat["exportedAt"] = GuardianClient.Iso(exportedAt ?? DateTimeOffset.Now);
+        chat["format"] = Format;
+        chat["harness"] = GuardianClient.Source;
+        chat["id"] = session.Id;
+        chat["rows"] = items;
+        if (session.Imported is { Source.Length: > 0, Id.Length: > 0 } origin)
         {
-            var from = new JsonObject { ["source"] = origin.Source, ["id"] = origin.Id };
-            if (origin.Project is { } project) from["project"] = project;
-            if (origin.Model is { } model) from["model"] = model;
-            if (origin.StartedAt is { } started) from["startedAt"] = GuardianClient.Iso(started);
-            from["importedAt"] = GuardianClient.Iso(origin.ImportedAt);
-            ordered["imported"] = from;
+            chat["source"] = origin.Source;
+            chat["sourceId"] = origin.Id;
         }
-        return ordered.ToJsonString(new System.Text.Json.JsonSerializerOptions { WriteIndented = true });
+        chat["title"] = session.Title;
+        chat["updatedAt"] = GuardianClient.Iso(session.UpdatedAt);
+        chat["version"] = FormatVersion;
+        return chat.ToJsonString(new System.Text.Json.JsonSerializerOptions { WriteIndented = true, Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping });
     }
 
-    /// <summary>The chat as Markdown: a title, where it came from, then each message under "You" or "Assistant" with its time;
-    /// tool calls as one line each with their output folded in a code block; notices as quotes.</summary>
-    public static string Markdown(LogSession session, IEnumerable<LogItemRow> rows)
+    /// <summary>The kinds a chat file holds (a plan row carries no text in the log, so it is left out).</summary>
+    private static readonly HashSet<string> Kinds = new(StringComparer.Ordinal) { "user", "assistant", "tool", "notice", "error", "compaction" };
+
+    /// <summary>The chat as Markdown: a title; when it was exported, where it came from, its folder and its span; then each row
+    /// — "**You** · time", "**Assistant** · time", "**Tool: name** `args` → result", its output folded in a details block,
+    /// notices quoted, errors and summaries headed.</summary>
+    public static string Markdown(LogSession session, IEnumerable<LogItemRow> rows, DateTimeOffset? exportedAt = null)
     {
-        var text = new StringBuilder();
-        text.Append("# ").Append(session.Title.Trim().Length == 0 ? "Chat" : session.Title.Trim()).Append("\n\n");
-        var facts = new List<string>();
-        if (session.Imported is { } origin)
-            facts.Add($"Imported from {(ChatSources.FromRaw(origin.Source) ?? ChatSource.Vision).Label()}" + (origin.Project is { } p ? $" ({p})" : ""));
-        if (session.Cwd is { Length: > 0 } cwd) facts.Add($"Project: {cwd}");
-        facts.Add("Exported from Vision " + Stamp(DateTimeOffset.Now));
-        text.Append('_').Append(string.Join(" · ", facts)).Append("_\n\n");
-        foreach (var row in rows)
+        var list = rows.Where(r => Kinds.Contains(r.Kind)).ToList();
+        var lines = new List<string> { "# " + session.Title, "", "- Exported from Vision on " + Stamp(exportedAt ?? DateTimeOffset.Now) };
+        if (session.Imported is { Source.Length: > 0 } origin)
+            lines.Add($"- Imported from {(ChatSources.FromRaw(origin.Source) ?? ChatSource.Vision).Label()}" + (origin.Id.Length > 0 ? $" ({origin.Id})" : ""));
+        if (session.Cwd is { Length: > 0 } cwd) lines.Add("- Folder: " + cwd);
+        var messages = list.Count(r => r.Kind is "user" or "assistant");
+        if (list.Count > 0) lines.Add($"- {messages} message{(messages == 1 ? "" : "s")}, {Stamp(list[0].At)} – {Stamp(list[^1].At)}");
+        lines.AddRange(["", "---", ""]);
+        foreach (var row in list)
         {
             switch (row.Kind)
             {
                 case "user":
-                    text.Append("## You · ").Append(Stamp(row.At)).Append("\n\n").Append(row.Text?.TrimEnd()).Append("\n\n");
+                    lines.AddRange([$"**You** · {Stamp(row.At)}", "", row.Text ?? "", ""]);
                     break;
                 case "assistant":
-                    text.Append("## Assistant · ").Append(Stamp(row.At)).Append("\n\n").Append(row.Text?.TrimEnd()).Append("\n\n");
+                    lines.AddRange([$"**Assistant** · {Stamp(row.At)}", "", row.Text ?? "", ""]);
                     break;
                 case "tool":
-                    text.Append("**Tool** `").Append(Code(row.ToolName ?? "tool")).Append('`');
-                    if (row.ArgSummary is { Length: > 0 } args) text.Append(" `").Append(Code(args)).Append('`');
-                    if (row.Text is { Length: > 0 } summary) text.Append(" → ").Append(summary);
-                    else if (row.IsError) text.Append(" → failed");
-                    text.Append("\n\n");
+                    var args = string.IsNullOrEmpty(row.ArgSummary) ? "" : $" `{row.ArgSummary.Replace('`', '\'')}`";
+                    var result = row.Text is null ? "" : $" → {row.Text}";
+                    lines.AddRange([$"**Tool: {row.ToolName ?? "tool"}**{args}{result}{(row.IsError ? " (failed)" : "")}", ""]);
                     if (row.Output is { Length: > 0 } output)
                     {
-                        var shown = output.Length > MarkdownToolOutput ? TextUtil.Prefix(output, MarkdownToolOutput) + $"\n… ({output.Length - MarkdownToolOutput:N0} more characters)" : output;
-                        var fence = shown.Contains("```", StringComparison.Ordinal) ? "````" : "```";
-                        text.Append(fence).Append('\n').Append(shown.TrimEnd()).Append('\n').Append(fence).Append("\n\n");
+                        var clipped = ChatRowBuilder.Cap(output, ChatRowBuilder.MaxToolOutput);
+                        var fence = Fence(clipped);
+                        lines.AddRange(["<details><summary>Output</summary>", "", fence + "text", clipped, fence, "", "</details>", ""]);
                     }
                     break;
                 case "notice":
+                    lines.AddRange((row.Text ?? "").Split('\n').Select(l => "> " + l));
+                    lines.Add("");
+                    break;
                 case "error":
-                    text.Append("> ").Append((row.Kind == "error" ? "Error: " : "") + (row.Text ?? "").Trim().Replace("\n", "\n> ")).Append("\n\n");
+                    lines.AddRange([$"**Error** · {Stamp(row.At)}", "", row.Text ?? "", ""]);
                     break;
                 case "compaction":
-                    text.Append("---\n\n*Earlier messages were compacted into this summary:*\n\n").Append(row.Text?.Trim()).Append("\n\n---\n\n");
+                    lines.AddRange([$"**Earlier conversation, summarized** · {Stamp(row.At)}", "", row.Text ?? "", ""]);
                     break;
             }
         }
-        return text.ToString().TrimEnd() + "\n";
+        return string.Join("\n", lines);
     }
 
-    private static string Stamp(DateTimeOffset at) => at.ToLocalTime().ToString("d MMM yyyy, HH:mm", CultureInfo.InvariantCulture);
+    /// <summary>"2026-10-19 14:02", local time.</summary>
+    private static string Stamp(DateTimeOffset at) => at.ToLocalTime().ToString("yyyy-MM-dd HH:mm", CultureInfo.InvariantCulture);
 
-    private static string Code(string text) => text.Replace('`', '\'').Replace('\n', ' ');
+    /// <summary>A code fence no run of backticks in <paramref name="text"/> closes early.</summary>
+    internal static string Fence(string text)
+    {
+        int longest = 0, run = 0;
+        foreach (var c in text)
+        {
+            run = c == '`' ? run + 1 : 0;
+            longest = Math.Max(longest, run);
+        }
+        return new string('`', Math.Max(3, longest + 1));
+    }
 
-    /// <summary>A file name for the chat: its title with characters Windows refuses taken out.</summary>
+    /// <summary>A file name for the chat: its title without path separators or characters Windows and Finder refuse, at most 80
+    /// long ("Chat" when nothing is left).</summary>
     public static string FileName(LogSession session, string extension)
     {
-        var name = new string(session.Title.Select(c => Path.GetInvalidFileNameChars().Contains(c) || c is '<' or '>' or ':' or '"' or '/' or '\\' or '|' or '?' or '*' ? ' ' : c).ToArray());
-        name = string.Join(" ", name.Split(' ', StringSplitOptions.RemoveEmptyEntries)).Trim('.', ' ');
+        var banned = "/\\:*?\"<>|\n\r\t";
+        var name = new string(session.Title.Select(c => banned.Contains(c) ? ' ' : c).ToArray()).Trim(' ', '.');
+        if (name.Length > 80) name = TextUtil.Prefix(name, 80).Trim();
         if (name.Length == 0) name = "Chat";
-        if (name.Length > 80) name = name[..80].TrimEnd();
         return name + extension;
     }
 }

@@ -10,12 +10,14 @@ namespace Vision.Core;
 /// compaction summaries — each at the time the source recorded.</summary>
 internal sealed partial class ChatRowBuilder
 {
-    /// <summary>A tool's output is kept up to this many characters (the rest is noted, not imported).</summary>
-    public const int MaxToolOutput = 64_000;
+    /// <summary>A tool's output is kept up to this many characters (the rest is noted, not imported) — Vision for macOS's
+    /// limit too.</summary>
+    public const int MaxToolOutput = 20_000;
     /// <summary>One message is kept up to this many characters.</summary>
     public const int MaxMessage = 1_000_000;
-    public const int MaxArgSummary = 300;
-    public const int MaxResultSummary = 160;
+    /// <summary>A tool row's "called with" and "result" lines.</summary>
+    public const int MaxArgSummary = 200;
+    public const int MaxResultSummary = 200;
 
     private readonly List<LogItemRow> _rows = [];
     private readonly Dictionary<string, int> _toolsById = new(StringComparer.Ordinal);
@@ -209,7 +211,7 @@ internal sealed partial class ChatRowBuilder
     {
         if (text.Length <= max) return text;
         var kept = TextUtil.Prefix(text, max);
-        return kept + $"\n…[{(text.Length - kept.Length).ToString("N0", CultureInfo.InvariantCulture)} more characters were not imported]";
+        return kept + $"\n… [{(text.Length - kept.Length).ToString(CultureInfo.InvariantCulture)} more characters not imported]";
     }
 
     /// <summary>An ISO-8601 time, epoch seconds or epoch milliseconds.</summary>

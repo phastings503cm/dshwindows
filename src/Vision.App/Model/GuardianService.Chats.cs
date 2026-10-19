@@ -15,7 +15,7 @@ public sealed partial class GuardianService
         }
         var log = _host.Log;
         if (log.Session(chatId) is not { } chat) return false;
-        var payload = GuardianChats.ToPayload(chat.Id, chat.Title, chat.Cwd, log.LoadItems(chat.Id));
+        var payload = GuardianChats.ToPayload(chat.Id, chat.Title, chat.Cwd, log.LoadItems(chat.Id), chat.Imported);
         if (System.Text.Encoding.UTF8.GetByteCount(payload) > MaxChatBytes)
         {
             Status = "That chat is over 25 MB, the most Guardian keeps for one chat — export it as JSON instead.";
@@ -24,7 +24,7 @@ public sealed partial class GuardianService
         return await Run(async () =>
         {
             await client.PutChatAsync(chat.Id, chat.Title, chat.UpdatedAt, payload).ConfigureAwait(true);
-            Status = $"Sent “{chat.Title}” to Guardian. Import chats on another computer brings it back.";
+            Status = $"Sent “{chat.Title}” to Guardian.";
             return true;
         }).ConfigureAwait(true);
     }

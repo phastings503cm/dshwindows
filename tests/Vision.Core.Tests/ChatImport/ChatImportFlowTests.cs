@@ -162,7 +162,8 @@ public sealed class ChatImportFlowTests
             Assert.Equal(DateTimeOffset.Parse("2026-10-19T12:00:00Z"), session.Imported.ImportedAt);
             var rows = store.LoadItems(id);
             Assert.Equal(["notice", "user", "tool", "assistant"], rows.Select(r => r.Kind).ToArray());
-            Assert.StartsWith("Imported from Claude Code · 2 messages · started ", rows[0].Text);
+            Assert.StartsWith("Imported from Claude Code on Oct 19, 2026: 2 messages, ", rows[0].Text);
+            Assert.EndsWith($", in {temp.Path}. Any model can carry on from here: earlier tool calls are shown as cards and reach the model as a written summary.", rows[0].Text);
             Assert.Equal(DateTimeOffset.Parse("2026-10-01T09:10:00Z"), rows[2].At);
             Assert.Equal("a\nb", rows[2].Output);
             Assert.All(rows, r => Assert.Equal(id, r.SessionId));
@@ -179,7 +180,7 @@ public sealed class ChatImportFlowTests
         var id = ChatImporter.Write(log, Sample(project: "/nowhere/on/this/pc"))!;
 
         Assert.Null(log.Session(id)!.Cwd);
-        Assert.Contains("in /nowhere/on/this/pc (not on this PC)", log.LoadItems(id)[0].Text);
+        Assert.Contains(", in /nowhere/on/this/pc (not on this computer, so it continues without a project).", log.LoadItems(id)[0].Text);
         Assert.Equal("/nowhere/on/this/pc", log.Session(id)!.Imported!.Project);
     }
 
@@ -285,16 +286,18 @@ public sealed class ChatImportFlowTests
 
         var markdown = ChatExport.Markdown(session, rows);
 
-        Assert.StartsWith("# Login bug fix\n\n_Imported from Claude Code · Exported from Vision ", markdown);
-        Assert.Contains("## You · ", markdown);
+        Assert.StartsWith("# Login bug fix\n\n- Exported from Vision on ", markdown);
+        Assert.Contains("\n- Imported from Claude Code (s-1)\n- 2 messages, ", markdown);
+        Assert.Contains("\n---\n\n> Imported from Claude Code on ", markdown);
+        Assert.Contains("**You** · ", markdown);
         Assert.Contains("\n\nfix it\n\n", markdown);
-        Assert.Contains("**Tool** `Bash` `ls` → ok\n\n```\na\nb\n```", markdown);
-        Assert.Contains("## Assistant · ", markdown);
-        Assert.Contains("> Imported from Claude Code", markdown);
+        Assert.Contains("**Tool: Bash** `ls` → ok\n\n<details><summary>Output</summary>\n\n```text\na\nb\n```\n\n</details>", markdown);
+        Assert.Contains("**Assistant** · ", markdown);
+        Assert.Equal("````", ChatExport.Fence("a ``` b")); // a fence the text can't close
     }
 
     [Fact]
-    public void JsonExportCarriesTheRowsTheOriginAndImportsAgain()
+    public void JsonExportIsTheMacsShapeAndImportsAgainKeepingTheOrigin()
     {
         using var temp = new TempDirectory();
         var (session, rows) = Exportable(temp);
@@ -303,23 +306,49 @@ public sealed class ChatImportFlowTests
 
         using var doc = JsonDocument.Parse(json);
         var root = doc.RootElement;
+        Assert.Equal(["createdAt", "exportedAt", "format", "harness", "id", "rows", "source", "sourceId", "title", "updatedAt", "version"],
+            root.EnumerateObject().Select(p => p.Name).ToArray()); // sorted, as the Mac writes them; no cwd here
         Assert.Equal("vision-chat", root.GetProperty("format").GetString());
         Assert.Equal(1, root.GetProperty("version").GetInt32());
         Assert.Equal("vision-windows", root.GetProperty("harness").GetString());
         Assert.Equal("2026-10-19T13:00:00.000Z", root.GetProperty("exportedAt").GetString());
-        Assert.Equal("claude-code", root.GetProperty("imported").GetProperty("source").GetString());
-        Assert.Equal(4, root.GetProperty("rows").GetArrayLength());
-        // Apple reference-date seconds, as Guardian keeps a chat (2026-10-01T09:10:00Z).
-        Assert.Equal(812538600, root.GetProperty("rows")[2].GetProperty("at").GetDouble());
+        Assert.Equal("2026-10-01T09:30:00.000Z", root.GetProperty("updatedAt").GetString());
+        Assert.Equal("claude-code", root.GetProperty("source").GetString());
+        Assert.Equal("s-1", root.GetProperty("sourceId").GetString());
+        var tool = root.GetProperty("rows")[2];
+        Assert.Equal(["argSummary", "at", "isError", "kind", "output", "text", "toolName"], tool.EnumerateObject().Select(p => p.Name).ToArray());
+        Assert.Equal("2026-10-01T09:10:00.000Z", tool.GetProperty("at").GetString());
+
         using var stream = new MemoryStream(System.Text.Encoding.UTF8.GetBytes(json));
         var back = Assert.Single(ChatExportFiles.ReadJson(stream, "x.json", default).Item1);
         Assert.Equal(rows.Select(r => (r.Kind, r.Text, r.ToolName, r.ArgSummary, r.Output, r.At)),
             back.Rows.Select(r => (r.Kind, r.Text, r.ToolName, r.ArgSummary, r.Output, r.At)));
-        Assert.Equal(["Originally from Claude Code"], back.Notes);
+        // Where it really came from travels with it: on another PC the same Claude Code session is one chat.
+        Assert.Equal(ChatSource.ClaudeCode, back.Source);
+        Assert.Equal("s-1", back.SourceId);
+        Assert.Equal(session.Id, back.KeepId);
+        var there = new ConversationLog(temp["there"]);
+        Assert.Equal(session.Id, ChatImporter.Write(there, back));
+        Assert.Contains("claude-code:s-1", ChatImporter.ImportedKeys(there));
+        Assert.Equal(rows.Count, there.LoadItems(session.Id).Count); // no second notice on top
+        Assert.Null(ChatImporter.Write(there, Sample("s-1")));
+    }
+
+    [Fact]
+    public void AnImportedChatSentToGuardianSaysWhereItCameFrom()
+    {
+        using var temp = new TempDirectory();
+        var (session, rows) = Exportable(temp);
+
+        using var doc = JsonDocument.Parse(Vision.Core.GuardianChats.ToPayload(session.Id, session.Title, session.Cwd, rows, session.Imported));
+
+        Assert.Equal("claude-code", doc.RootElement.GetProperty("source").GetString());
+        Assert.Equal("s-1", doc.RootElement.GetProperty("sourceId").GetString());
+        Assert.Equal(812538600, doc.RootElement.GetProperty("rows")[2].GetProperty("at").GetDouble()); // Apple reference seconds
     }
 
     [Theory]
-    [InlineData("Fix: the <login> bug?", "Fix the login bug.md")]
+    [InlineData("Fix: the <login> bug?", "Fix  the  login  bug.md")] // as Vision for macOS names it
     [InlineData("   ", "Chat.md")]
     public void ExportFileNamesAreSafe(string title, string expected) =>
         Assert.Equal(expected, ChatExport.FileName(new LogSession { Id = "x", Title = title }, ".md"));

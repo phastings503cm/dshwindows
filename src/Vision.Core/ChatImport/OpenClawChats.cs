@@ -245,7 +245,7 @@ public static class OpenClawChats
         var notes = new List<string>();
         if (images > 0) notes.Add(images == 1 ? "1 image not imported" : $"{images} images not imported");
         var automated = IsAutomated(key, title);
-        if (automated) notes.Insert(0, "Scheduled run");
+        if (automated) notes.Insert(0, "Cron run");
         return new ImportedChat
         {
             Source = ChatSource.OpenClaw,
@@ -258,6 +258,7 @@ public static class OpenClawChats
             UpdatedAt = rows.Last ?? fallbackTime,
             From = from,
             Notes = notes,
+            Automated = automated,
         };
     }
 

@@ -26,7 +26,8 @@ public sealed class ChatImportWindow : Window
     private readonly TextBlock _status = Ui.Secondary("");
     private readonly Spinner _spinner = new() { Width = 14, Height = 14, Margin = new Thickness(0, 0, 8, 0), Visibility = Visibility.Collapsed };
     private readonly WrapPanel _chips = new();
-    private readonly TextBox _filter = Ui.Field(placeholder: "Filter by title or folder", width: 280);
+    private readonly TextBox _filter = Ui.Field(placeholder: "Filter by title, folder or source", width: 280);
+    private readonly TextBlock _counts = Ui.Secondary("");
     private readonly CheckBox _automated = new() { VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(14, 0, 0, 0) };
     private readonly ItemsControl _list = new();
     private readonly TextBlock _empty = Ui.Secondary("");
@@ -59,7 +60,7 @@ public sealed class ChatImportWindow : Window
         _model = model;
         _locations = locations ?? ChatImportLocations.Standard;
         _useGuardian = useGuardian;
-        Title = "Import chats";
+        Title = "Import Chats";
         Width = 940;
         Height = 760;
         MinWidth = 680;
@@ -73,13 +74,14 @@ public sealed class ChatImportWindow : Window
         _status.MaxWidth = 460;
 
         var header = new StackPanel { Margin = new Thickness(24, 20, 24, 6) };
-        header.Children.Add(Ui.Title("Import chats"));
-        var intro = Ui.Secondary("Bring your conversations from Claude Code, Codex, OpenClaw, Claude.ai, ChatGPT and Guardian into Vision, as chats you can carry on with any model. " +
-                                 "Nothing is changed where they are read from, and nothing leaves this PC except the calls to Guardian.");
+        header.Children.Add(Ui.Title("Import Chats"));
+        // The Mac's sheet says the same, with "this Mac".
+        var intro = Ui.Secondary("Bring conversations from other AI tools into Vision as chats you can carry on with any model. " +
+                                 "Reading them changes nothing, and nothing leaves this PC except calls to your signed-in Guardian.");
         intro.Margin = new Thickness(0, 6, 0, 10);
         header.Children.Add(intro);
-        var add = Ui.Button("Add an export or file…", AddFiles);
-        add.ToolTip = "A Claude.ai or ChatGPT data export (.zip or conversations.json), a Claude Code, Codex or OpenClaw session (.jsonl), or a chat exported from Vision (.json).";
+        var add = Ui.Button("Add Export File…", AddFiles);
+        add.ToolTip = "A Claude.ai or ChatGPT data export (.zip or conversations.json), or a Vision chat (.json) — or one Claude Code, Codex or OpenClaw session (.jsonl).";
         var chipsRow = new DockPanel();
         DockPanel.SetDock(add, Dock.Right);
         add.VerticalAlignment = VerticalAlignment.Top;
@@ -88,12 +90,14 @@ public sealed class ChatImportWindow : Window
         header.Children.Add(chipsRow);
 
         var links = Ui.Stack(Orientation.Horizontal,
-            Ui.LinkButton("New", SelectNew), Ui.LinkButton("All shown", () => SelectShown(true)), Ui.LinkButton("None", () => SelectShown(false)),
-            Ui.LinkButton("Look again", () => _ = ScanAsync()));
+            Ui.LinkButton("Select New", SelectNew), Ui.LinkButton("Select All Shown", () => SelectShown(true)), Ui.LinkButton("Select None", () => SelectShown(false)),
+            Ui.LinkButton("Look Again", () => _ = ScanAsync()));
         var tools = new DockPanel { Margin = new Thickness(24, 4, 24, 6) };
         DockPanel.SetDock(links, Dock.Right);
         tools.Children.Add(links);
-        tools.Children.Add(Ui.Stack(Orientation.Horizontal, _filter, _automated));
+        _counts.VerticalAlignment = VerticalAlignment.Center;
+        _counts.Margin = new Thickness(14, 0, 0, 0);
+        tools.Children.Add(Ui.Stack(Orientation.Horizontal, _filter, _automated, _counts));
         _filter.TextChanged += (_, _) => Render();
         _automated.Click += (_, _) => Render();
         DockPanel.SetDock(tools, Dock.Top);
@@ -236,7 +240,7 @@ public sealed class ChatImportWindow : Window
                 UpdatedAt = chat.UpdatedAt,
                 Location = client.Address,
                 Shared = chat.SharedWithMe,
-                Note = chat.SharedWithMe ? chat.OwnerName is { } owner ? $"Shared by {owner}" : "Shared with you" : null,
+                Note = chat.Remark,
                 Load = t => GuardianChatImport.ReadAsync(client, chat, t),
             }));
             var saved = await client.ChatsAsync(token);
@@ -354,7 +358,7 @@ public sealed class ChatImportWindow : Window
             HorizontalContentAlignment = HorizontalAlignment.Stretch,
             ToolTip = chat.Location,
         };
-        if (chat.Status != ChatImportStatus.New) box.ToolTip = "Already in Vision — importing again brings only new chats.";
+        if (chat.Status != ChatImportStatus.New) box.ToolTip = "Imported already — importing again brings only new chats.";
         box.Click += (_, _) => RefreshChrome();
         var element = new Border { Child = box, Padding = new Thickness(0, 5, 0, 5) };
         return new Row { Chat = chat, Box = box, Meta = meta, Element = element };
@@ -370,8 +374,9 @@ public sealed class ChatImportWindow : Window
             chat.Messages is { } n ? Words(n, "message", "messages") : "counting messages…",
         };
         if (chat.Project is { Length: > 0 } project) parts.Add(project);
-        if (chat.Note is { Length: > 0 } note && note != "Saved in Guardian from Vision") parts.Add(note);
-        if (chat.Status == ChatImportStatus.Imported) parts.Add("Already in Vision");
+        if (chat.Note is { Length: > 0 } note && note is not ("Saved in Guardian from Vision" or "Cron run" or "Scripted run")) parts.Add(note);
+        if (chat.Automated) parts.Add("Scheduled");
+        if (chat.Status == ChatImportStatus.Imported) parts.Add("Imported");
         return string.Join(" · ", parts);
     }
 
@@ -385,7 +390,8 @@ public sealed class ChatImportWindow : Window
         if (row.Chat.Automated && _automated.IsChecked != true) return false;
         var text = _filter.Text.Trim();
         return text.Length == 0 || row.Chat.Title.Contains(text, StringComparison.CurrentCultureIgnoreCase)
-               || row.Chat.Project?.Contains(text, StringComparison.CurrentCultureIgnoreCase) == true;
+               || row.Chat.Project?.Contains(text, StringComparison.CurrentCultureIgnoreCase) == true
+               || row.Chat.Source.Label().Contains(text, StringComparison.CurrentCultureIgnoreCase);
     }
 
     private void Render()
@@ -393,11 +399,12 @@ public sealed class ChatImportWindow : Window
         var shown = _rows.Where(Visible).Select(r => r.Element).ToList();
         _list.ItemsSource = shown;
         var automated = _rows.Count(r => r.Chat.Automated && (_source is null || r.Chat.Source == _source));
-        _automated.Content = $"Show scheduled runs ({automated.ToString("N0", CultureInfo.InvariantCulture)})";
+        _automated.Content = $"Show scheduled and scripted runs ({automated.ToString("N0", CultureInfo.InvariantCulture)})";
+        _counts.Text = _rows.Count == 0 ? "" : $"{shown.Count.ToString("N0", CultureInfo.InvariantCulture)} shown · {_rows.Count(r => r.Ticked).ToString("N0", CultureInfo.InvariantCulture)} ticked";
         _automated.Visibility = automated > 0 ? Visibility.Visible : Visibility.Collapsed;
         _empty.Text = _busy && _rows.Count == 0 ? ""
-            : _rows.Count == 0 ? "No chats found. Claude Code, Codex and OpenClaw keep theirs in your profile folder; for Claude.ai or ChatGPT, export your data there (Settings › Data controls) and add the .zip here."
-            : shown.Count == 0 ? "Nothing matches." : "";
+            : _rows.Count == 0 ? "No chats found yet. Add an export file, or sign in to Guardian."
+            : shown.Count == 0 ? "No chats match." : "";
         _empty.Visibility = _empty.Text.Length > 0 ? Visibility.Visible : Visibility.Collapsed;
         RenderChips();
         RefreshChrome();
@@ -442,6 +449,7 @@ public sealed class ChatImportWindow : Window
     private void RefreshChrome()
     {
         var ticked = _rows.Count(r => r.Ticked);
+        if (_rows.Count > 0) _counts.Text = $"{_rows.Count(Visible).ToString("N0", CultureInfo.InvariantCulture)} shown · {ticked.ToString("N0", CultureInfo.InvariantCulture)} ticked";
         _import.Content = ticked == 0 ? "Import" : $"Import {Words(ticked, "Chat", "Chats")}";
         _import.IsEnabled = ticked > 0 && !_busy;
     }

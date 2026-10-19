@@ -309,7 +309,8 @@ public sealed class GuardianClient
                 ? new GuardianWebChat(id, GuardianJson.Text(c["title"]) is { Length: > 0 } title ? title : "Untitled chat", GuardianJson.Date(c["createdAt"]),
                     GuardianJson.Date(c["updatedAt"]) ?? GuardianJson.Date(c["createdAt"]) ?? DateTimeOffset.MinValue, GuardianJson.Text(c["modelId"]),
                     GuardianJson.Bool(c["sharedWithMe"]) == true,
-                    GuardianJson.Text(c["owner"]?["name"]) ?? GuardianJson.Text(c["owner"]?["email"]))
+                    GuardianJson.Text(c["owner"]?["name"]) ?? GuardianJson.Text(c["owner"]?["email"]),
+                    GuardianJson.Text(c["person"]?["displayName"]))
                 : null)
             .OfType<GuardianWebChat>()
             .OrderByDescending(c => c.UpdatedAt)

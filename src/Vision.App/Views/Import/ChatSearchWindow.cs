@@ -59,9 +59,12 @@ public sealed class ChatSearchWindow : Window
         bar.Children.Add(_query);
         header.Children.Add(bar);
 
-        _source.Items.Add(new ComboBoxItem { Content = "All sources", Tag = null, IsSelected = true });
-        foreach (var source in ChatSources.All)
-            _source.Items.Add(new ComboBoxItem { Content = source == ChatSource.Vision ? "Started in Vision" : source.Label(), Tag = source });
+        // The Mac's "Look in" choices.
+        _source.ToolTip = "Look in every chat, or only those from one place";
+        _source.Items.Add(new ComboBoxItem { Content = "All chats", Tag = null, IsSelected = true });
+        _source.Items.Add(new ComboBoxItem { Content = "Made in Vision", Tag = ChatSource.Vision });
+        foreach (var source in ChatSources.All.Where(s => s != ChatSource.Vision))
+            _source.Items.Add(new ComboBoxItem { Content = "From " + source.Label(), Tag = source });
         _source.SelectionChanged += (_, _) => Schedule();
 
         _results.Margin = new Thickness(24, 0, 24, 12);
@@ -145,7 +148,7 @@ public sealed class ChatSearchWindow : Window
         }
         foreach (var result in results) _results.Children.Add(Card(result));
         var matches = results.Sum(r => r.MatchCount);
-        _status.Text = results.Count == 0 ? "No chat has all of those words." : $"{Words(results.Count, "chat", "chats")}, {Words(matches, "matching message", "matching messages")}" +
+        _status.Text = results.Count == 0 ? "No chat holds every word." : $"{Words(results.Count, "chat", "chats")}, {Words(matches, "matching message", "matching messages")}" +
                                                                               (results.Count >= 200 ? " (the first 200 chats)." : ".");
     }
 
@@ -159,9 +162,9 @@ public sealed class ChatSearchWindow : Window
         panel.Children.Add(title);
         var facts = new List<string>
         {
-            result.Source == ChatSource.Vision ? "Vision" : "From " + result.Source.Label(),
+            result.Source == ChatSource.Vision ? "Made in Vision" : "Imported from " + result.Source.Label(),
             result.Session.UpdatedAt.ToLocalTime().ToString("d MMM yyyy, HH:mm", CultureInfo.InvariantCulture),
-            result.MatchCount == 0 ? "title" : Words(result.MatchCount, "match", "matches"),
+            result.MatchCount == 0 ? "title" : result.MatchCount == 1 ? "1 place in this chat matches" : $"{result.MatchCount.ToString("N0", CultureInfo.InvariantCulture)} places in this chat match",
         };
         if (result.Session.Cwd is { Length: > 0 } cwd) facts.Add(cwd);
         var meta = Ui.Secondary(string.Join(" · ", facts));

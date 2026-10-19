@@ -29,10 +29,10 @@
                         <Separator />
                         <MenuItem Header="_Import Chats…" Click="ImportChats_Click" />
                         <MenuItem Header="Ex_port Chat">
-                            <MenuItem Header="As _Markdown…" Click="ExportChatMarkdown_Click" />
-                            <MenuItem Header="As _JSON…" Click="ExportChatJson_Click" />
-                            <MenuItem Header="Send to _Guardian" Click="SendChatToGuardian_Click" />
+                            <MenuItem Header="Export as _Markdown…" Click="ExportChatMarkdown_Click" />
+                            <MenuItem Header="Export as _JSON…" Click="ExportChatJson_Click" />
                         </MenuItem>
+                        <MenuItem Header="Send Chat to _Guardian" Click="SendChatToGuardian_Click" />
                         <MenuItem Header="Searc_h All Chats…" InputGestureText="Ctrl+Alt+F" Click="SearchChats_Click" />
                         <Separator />
                         <MenuItem Header="New _Terminal" InputGestureText="Ctrl+Shift+`" Click="NewTerminal_Click" IsEnabled="{Binding Project, Converter={StaticResource NotNull}}" />

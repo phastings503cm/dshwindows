@@ -98,7 +98,7 @@ public static class ClaudeCodeChats
 
         // Pass 2: the rows, in file order.
         var rows = new ChatRowBuilder(modified, summaryOnly);
-        string? cwd = null, model = null, version = null;
+        string? cwd = null, model = null, version = null, entrypoint = null;
         DateTimeOffset? started = null;
         var images = 0;
         JsonLines.Read(path, (e, line) =>
@@ -108,6 +108,7 @@ public static class ClaudeCodeChats
             started ??= at;
             if (e.Str("cwd") is { Length: > 0 } where) cwd = where;
             version ??= e.Str("version");
+            entrypoint ??= e.Str("entrypoint");
             switch (e.Str("type"))
             {
                 case "user":
@@ -123,6 +124,9 @@ public static class ClaudeCodeChats
         if (rows.Messages == 0) return null;
 
         var notes = new List<string>();
+        // A headless run (claude -p, the Agent SDK's CLI) is work nobody typed.
+        var scripted = entrypoint?.StartsWith("sdk", StringComparison.Ordinal) == true;
+        if (scripted) notes.Add("Scripted run");
         var subagents = SubagentCount(path);
         if (subagents > 0) notes.Add(subagents == 1 ? "1 subagent transcript left out (its result is in the chat)" : $"{subagents} subagent transcripts left out (their results are in the chat)");
         if (images > 0) notes.Add(images == 1 ? "1 image not imported" : $"{images} images not imported");
@@ -141,6 +145,8 @@ public static class ClaudeCodeChats
             UpdatedAt = rows.Last ?? modified,
             From = path,
             Notes = notes,
+            Subagents = subagents,
+            Automated = scripted,
         };
     }
 

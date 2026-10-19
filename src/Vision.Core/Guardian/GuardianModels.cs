@@ -205,7 +205,12 @@ public sealed record GuardianChatSummary(string Id, string Title, DateTimeOffset
 
 /// <summary>One of the person's chats in Guardian itself (GET /api/chats): their own, or one shared with them.</summary>
 public sealed record GuardianWebChat(string Id, string Title, DateTimeOffset? CreatedAt, DateTimeOffset UpdatedAt, string? ModelId,
-                                     bool SharedWithMe = false, string? OwnerName = null);
+                                     bool SharedWithMe = false, string? OwnerName = null, string? PersonName = null)
+{
+    /// <summary>The preview's remark: "Shared with you by Ada", or "With Al Goritham" for a chat with an AI staff member (the
+    /// words Vision for macOS uses).</summary>
+    public string? Remark => SharedWithMe ? $"Shared with you by {OwnerName ?? "someone"}" : PersonName is { } person ? $"With {person}" : null;
+}
 
 /// <summary>One page of a Guardian chat's transcript, oldest message first; <see cref="Before"/> asks for the page older than it.</summary>
 public sealed record GuardianChatPage(IReadOnlyList<JsonObject> Messages, bool HasMore, string? Before, int? OlderCount);

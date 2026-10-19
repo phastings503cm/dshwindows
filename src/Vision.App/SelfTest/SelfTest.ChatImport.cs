@@ -84,7 +84,7 @@ public sealed partial class SelfTest
         var mine = Chat("g-1", "Quarterly numbers for the board", monday, "Pull Q3 revenue by clinic.", "Q3 revenue was up 4% on Q2; the table is below.");
         var theirs = Chat("g-2", "Login page outage notes", monday.AddDays(-1), "What broke the login page?", "A certificate expired at 02:00.");
         yield return mine.ToCandidate("https://guardian.503cm.com");
-        yield return theirs.ToCandidate("https://guardian.503cm.com") with { Shared = true, Note = "Shared by Riley" };
+        yield return theirs.ToCandidate("https://guardian.503cm.com") with { Shared = true, Note = "Shared with you by Riley" };
     }
 
     /// <summary>A profile with Claude Code, Codex and OpenClaw chats in their real shapes (the content is invented).</summary>

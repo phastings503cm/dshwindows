@@ -74,6 +74,7 @@ public static class CodexChats
 
         var rows = new ChatRowBuilder(modified, summaryOnly);
         string? id = null, cwd = null, model = null;
+        var scripted = false;
         DateTimeOffset? started = null;
         JsonLines.Read(path, (e, line) =>
         {
@@ -97,6 +98,8 @@ public static class CodexChats
             switch (type)
             {
                 case "session_meta":
+                    // codex exec: a scripted run nobody typed into.
+                    if (payload.Str("originator")?.Contains("exec", StringComparison.Ordinal) == true || payload.Str("source") == "exec") scripted = true;
                     id ??= payload.Str("id");
                     cwd ??= payload.Str("cwd");
                     started ??= ChatRowBuilder.Time(payload.Get("timestamp")) ?? at;
@@ -134,6 +137,8 @@ public static class CodexChats
             StartedAt = started ?? rows.First,
             UpdatedAt = rows.Last ?? modified,
             From = path,
+            Notes = scripted ? ["Scripted run"] : [],
+            Automated = scripted,
         };
     }
 

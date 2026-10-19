@@ -486,7 +486,7 @@ public sealed partial class GuardianService : ObservableObject
             int sent = 0, tooBig = 0;
             foreach (var chat in chats)
             {
-                var payload = GuardianChats.ToPayload(chat.Id, chat.Title, chat.Cwd, log.LoadItems(chat.Id));
+                var payload = GuardianChats.ToPayload(chat.Id, chat.Title, chat.Cwd, log.LoadItems(chat.Id), chat.Imported);
                 if (System.Text.Encoding.UTF8.GetByteCount(payload) > MaxChatBytes)
                 {
                     tooBig++;

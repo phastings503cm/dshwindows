@@ -198,7 +198,7 @@ public sealed class ChatReaderTests
         var cron = found[0];
         Assert.True(cron.Automated);
         Assert.False(cron.SelectedByDefault);
-        Assert.Equal("Scheduled run", cron.Note);
+        Assert.Equal("Cron run", cron.Note); // the Mac's word
         var chat = found[1].Load!(default).GetAwaiter().GetResult()!;
         Assert.Equal(["user: How many tickets are open?", "assistant: Twelve are open."], chat.Rows.Select(Line).ToArray());
         Assert.Equal(@"C:\code\desk", chat.Project);
@@ -320,7 +320,7 @@ public sealed class ChatReaderTests
 
         var output = rows.Rows[0].Output!;
         Assert.StartsWith(new string('x', ChatRowBuilder.MaxToolOutput), output);
-        Assert.EndsWith("[10 more characters were not imported]", output);
+        Assert.EndsWith("\n… [10 more characters not imported]", output); // Vision for macOS's words
     }
 }
 

@@ -88,7 +88,7 @@ public static class GuardianChatImport
             StartedAt = chat.CreatedAt ?? rows.First,
             UpdatedAt = rows.Last ?? chat.UpdatedAt,
             From = from,
-            Notes = chat.SharedWithMe ? [chat.OwnerName is { } owner ? $"Shared by {owner}" : "Shared with you"] : [],
+            Notes = chat.Remark is { } remark ? [remark] : [],
         };
     }
 
@@ -99,23 +99,11 @@ public static class GuardianChatImport
         return ChatRowBuilder.Arguments(doc.RootElement);
     }
 
-    /// <summary>A Vision chat saved in Guardian (POST /api/harness/chats/:id by either harness), keeping its id.</summary>
+    /// <summary>A Vision chat saved in Guardian (POST /api/harness/chats/:id by either harness), keeping its id (and, for one
+    /// Vision had imported, where it really came from).</summary>
     public static async Task<ImportedChat?> ReadSavedAsync(GuardianClient client, GuardianChatSummary summary, CancellationToken cancellationToken = default)
     {
         var payload = await client.ChatAsync(summary.Id, cancellationToken).ConfigureAwait(false);
-        if (GuardianChats.FromPayload(payload, summary.Id) is not { } chat || chat.Rows.Count == 0) return null;
-        var rows = chat.Rows.Select((r, i) => r with { SessionId = "", Seq = i }).ToList();
-        return new ImportedChat
-        {
-            Source = ChatSource.Vision,
-            SourceId = chat.Id,
-            KeepId = chat.Id,
-            Title = chat.Title,
-            Rows = rows,
-            Project = chat.Cwd,
-            StartedAt = rows[0].At,
-            UpdatedAt = summary.UpdatedAt > DateTimeOffset.MinValue ? summary.UpdatedAt : rows.Max(r => r.At),
-            From = client.Address,
-        };
+        return ChatExportFiles.VisionChat(payload, client.Address, summary.Id, summary.UpdatedAt > DateTimeOffset.MinValue ? summary.UpdatedAt : null);
     }
 }

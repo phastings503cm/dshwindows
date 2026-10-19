@@ -270,26 +270,32 @@ public static class ChatExportFiles
 
     // MARK: - Vision
 
-    /// <summary>A chat in the shape both Vision harnesses export and keep in Guardian ({id, title, cwd, rows}).</summary>
-    internal static ImportedChat? VisionChat(JsonElement chat, string from)
+    /// <summary>A chat in the shape both Vision harnesses export and keep in Guardian ({id, title, cwd, rows}, times as ISO text
+    /// or Apple reference-date seconds). It keeps its id; one Vision imported keeps where it really came from
+    /// (<c>source</c> + <c>sourceId</c>), so the same Claude Code session imported on two computers is one chat.</summary>
+    internal static ImportedChat? VisionChat(JsonElement chat, string from) => VisionChat(chat.GetRawText(), from);
+
+    internal static ImportedChat? VisionChat(string json, string from, string? fallbackId = null, DateTimeOffset? updated = null)
     {
-        if (GuardianChats.FromPayload(chat.GetRawText()) is not { } transcript || transcript.Rows.Count == 0) return null;
-        var origin = chat.Get("imported");
+        if (GuardianChats.FromPayload(json, fallbackId) is not { } transcript || transcript.Rows.Count == 0) return null;
+        using var doc = JsonDocument.Parse(json);
+        var root = doc.RootElement;
+        var origin = ChatSources.FromRaw(root.Str("source"));
+        var originId = root.Str("sourceId");
+        var source = origin is { } known && known != ChatSource.Vision && !string.IsNullOrEmpty(originId) ? known : ChatSource.Vision;
         var rows = transcript.Rows.Select((r, i) => r with { SessionId = "", Seq = i }).ToList();
         return new ImportedChat
         {
-            Source = ChatSource.Vision,
-            SourceId = transcript.Id,
+            Source = source,
+            SourceId = source == ChatSource.Vision ? transcript.Id : originId!,
             KeepId = transcript.Id,
             Title = transcript.Title,
             Rows = rows,
             Project = transcript.Cwd,
-            StartedAt = rows[0].At,
-            UpdatedAt = rows.Max(r => r.At),
+            StartedAt = ChatRowBuilder.Time(root.Get("createdAt")) ?? rows[0].At,
+            UpdatedAt = ChatRowBuilder.Time(root.Get("updatedAt")) ?? updated ?? rows.Max(r => r.At),
             From = from,
-            Notes = origin.Str("source") is { } source && ChatSources.FromRaw(source) is { } was && was != ChatSource.Vision
-                ? [$"Originally from {was.Label()}"]
-                : [],
+            Notes = source != ChatSource.Vision ? [$"Originally from {source.Label()}"] : [],
         };
     }
 }

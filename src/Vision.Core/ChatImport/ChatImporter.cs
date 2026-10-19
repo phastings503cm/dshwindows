@@ -81,8 +81,7 @@ public static class ChatImportScanner
                         var candidate = Summarize(key, stamp, cache, store.Path,
                             () => OpenClawChats.ReadSqlite(store.Path, session, summaryOnly: true, cancellationToken),
                             token => OpenClawChats.ReadSqlite(store.Path, session, false, token));
-                        if (candidate is not null && seen.Add(candidate.SourceId))
-                            found.Add(candidate with { Automated = OpenClawChats.IsAutomated(session.Key, session.DisplayName) });
+                        if (candidate is not null && seen.Add(candidate.SourceId)) found.Add(candidate);
                     }
                 }
                 else
@@ -95,8 +94,7 @@ public static class ChatImportScanner
                         return OpenClawChats.ReadJsonl(path, key, label, summary, token);
                     });
                     foreach (var candidate in listed)
-                        if (seen.Add(candidate.SourceId))
-                            found.Add(candidate with { Automated = OpenClawChats.IsAutomated(byPath[candidate.Location].Key, candidate.Title) });
+                        if (seen.Add(candidate.SourceId)) found.Add(candidate);
                 }
             }
         }
@@ -168,7 +166,7 @@ public static class ChatImportScanner
 public sealed class ChatScanCache
 {
     /// <summary>Raised when what a summary holds changes, so old entries are read again.</summary>
-    private const int Version = 1;
+    private const int Version = 2;
 
     public sealed record Entry
     {
@@ -181,6 +179,7 @@ public sealed class ChatScanCache
         public int Messages { get; init; }
         public string? Project { get; init; }
         public string? Note { get; init; }
+        public bool Automated { get; init; }
 
         internal ChatCandidate ToCandidate(string location, Func<CancellationToken, Task<ImportedChat?>> load) => new()
         {
@@ -193,6 +192,7 @@ public sealed class ChatScanCache
             Project = Project,
             Location = location,
             Note = Note,
+            Automated = Automated,
             Load = load,
         };
     }
@@ -254,6 +254,7 @@ public sealed class ChatScanCache
                 Messages = chat.Messages,
                 Project = chat.Project,
                 Note = chat.Notes.Count > 0 ? chat.Notes[0] : null,
+                Automated = chat.Automated,
             };
         _changed = true;
     }
@@ -296,26 +297,29 @@ public static class ChatImporter
     public static IReadOnlyList<ChatCandidate> WithStatus(IEnumerable<ChatCandidate> candidates, ISet<string> keys) =>
         candidates.Select(c => c with { Status = keys.Contains(c.Key) ? ChatImportStatus.Imported : ChatImportStatus.New }).ToList();
 
-    /// <summary>Store one chat. Returns its new id, or null when it is already here. Call on the thread that owns the log.</summary>
+    /// <summary>Store one chat. Returns its new id, or null when it is already here (the same source and id, or — for a Vision
+    /// chat coming back — a chat with its id). Call on the thread that owns the log.</summary>
     public static string? Write(ConversationLog log, ImportedChat chat, ISet<string>? keys = null, DateTimeOffset? now = null)
     {
         keys ??= ImportedKeys(log);
         var key = ChatCandidate.KeyOf(chat.Source.RawValue(), chat.SourceId);
-        if (keys.Contains(key)) return null;
-        var id = chat.KeepId is { } keep && GuardianChats.IsSafeId(keep) && !log.Contains(keep) ? keep : Guid.NewGuid().ToString();
-        var cwd = chat.Project is { Length: > 0 } project && Directory.Exists(project) ? project : null;
+        if (keys.Contains(key) || chat.KeepId is { } taken && log.Contains(taken)) return null;
+        var id = chat.KeepId is { } keep && GuardianChats.IsSafeId(keep) ? keep : Guid.NewGuid().ToString();
+        var folderHere = chat.Project is { Length: > 0 } project && Directory.Exists(project);
+        var at = now ?? DateTimeOffset.Now;
         var rows = new List<LogItemRow>();
-        if (chat.Source != ChatSource.Vision)
-            rows.Add(new LogItemRow(id, 0, "notice", Header(chat, cwd is not null), null, null, null, false, chat.StartedAt ?? chat.Rows.FirstOrDefault()?.At ?? chat.UpdatedAt));
+        // A Vision chat coming back (a JSON export, or one saved in Guardian) is its rows as they were.
+        if (chat.KeepId is null)
+            rows.Add(new LogItemRow(id, 0, "notice", Header(chat, folderHere, at), null, null, null, false, chat.Rows.FirstOrDefault()?.At ?? chat.StartedAt ?? chat.UpdatedAt));
         rows.AddRange(chat.Rows);
         var session = new LogSession
         {
             Id = id,
             Title = chat.Title,
-            Cwd = cwd,
+            Cwd = folderHere ? chat.Project : null,
             Preset = PermissionPreset.WorkspaceWrite.RawValue(),
             UpdatedAt = chat.UpdatedAt,
-            Imported = chat.Source == ChatSource.Vision && chat.KeepId == id
+            Imported = chat.Source == ChatSource.Vision && chat.KeepId is not null
                 ? null // the same Vision chat, back on this PC
                 : new ChatOrigin
                 {
@@ -327,7 +331,7 @@ public static class ChatImporter
                     StartedAt = chat.StartedAt,
                     UpdatedAt = chat.UpdatedAt,
                     Messages = chat.Messages,
-                    ImportedAt = now ?? DateTimeOffset.Now,
+                    ImportedAt = at,
                 },
         };
         log.Import(session, rows);
@@ -336,15 +340,23 @@ public static class ChatImporter
         return id;
     }
 
-    /// <summary>The notice an imported chat opens with: where it came from, how much, and where it ran. Notices aren't sent
-    /// to the model.</summary>
-    public static string Header(ImportedChat chat, bool projectHere)
+    /// <summary>The notice an imported chat opens with — the same words as Vision for macOS: "Imported from Claude Code on Oct
+    /// 19, 2026: 412 messages, Oct 3, 2026 – Oct 5, 2026, in C:\code\shop. It ran 3 subagents whose own transcripts stayed in
+    /// Claude Code. Any model can carry on from here: …". Notices aren't sent to the model.</summary>
+    public static string Header(ImportedChat chat, bool folderHere, DateTimeOffset importedAt)
     {
-        var parts = new List<string> { $"Imported from {chat.Source.Label()}", Words.Count(chat.Messages, "message", "messages") };
-        if (chat.StartedAt is { } started) parts.Add("started " + started.ToLocalTime().ToString("d MMM yyyy", CultureInfo.InvariantCulture));
-        if (chat.Project is { Length: > 0 } project) parts.Add(projectHere ? $"in {project}" : $"in {project} (not on this PC)");
-        parts.AddRange(chat.Notes.Where(n => n != "Scheduled run"));
-        return string.Join(" · ", parts) + ". Carry on with any model: tool calls are kept as readable steps.";
+        static string Day(DateTimeOffset at) => at.ToLocalTime().ToString("MMM d, yyyy", CultureInfo.InvariantCulture);
+        var messages = chat.Messages;
+        var first = chat.Rows.FirstOrDefault()?.At ?? chat.StartedAt ?? chat.UpdatedAt;
+        var last = chat.Rows.LastOrDefault()?.At ?? chat.UpdatedAt;
+        var span = Day(first) == Day(last) ? Day(first) : $"{Day(first)} – {Day(last)}";
+        var text = $"Imported from {chat.Source.Label()} on {Day(importedAt)}: {messages} message{(messages == 1 ? "" : "s")}, {span}";
+        if (chat.Project is { Length: > 0 } cwd)
+            text += folderHere ? $", in {cwd}" : $", in {cwd} (not on this computer, so it continues without a project)";
+        text += ".";
+        if (chat.Subagents > 0)
+            text += $" It ran {chat.Subagents} subagent{(chat.Subagents == 1 ? "" : "s")} whose own transcripts stayed in {chat.Source.Label()}.";
+        return text + " Any model can carry on from here: earlier tool calls are shown as cards and reach the model as a written summary.";
     }
 
     /// <summary>Read and store the chosen chats, one at a time (reading off this thread, writing on it). One that can't be

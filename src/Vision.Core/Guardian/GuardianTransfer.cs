@@ -23,8 +23,9 @@ public static class GuardianChats
     /// <summary>The kinds both harnesses store; anything else in a payload is skipped.</summary>
     private static readonly HashSet<string> Kinds = new(StringComparer.Ordinal) { "user", "assistant", "tool", "notice", "error", "compaction" };
 
-    /// <summary>A chat's transcript as the payload Guardian keeps.</summary>
-    public static string ToPayload(string id, string title, string? cwd, IEnumerable<LogItemRow> rows)
+    /// <summary>A chat's transcript as the payload Guardian keeps; an imported chat also says where it came from
+    /// (<c>source</c>, <c>sourceId</c> — as Vision for macOS sends it).</summary>
+    public static string ToPayload(string id, string title, string? cwd, IEnumerable<LogItemRow> rows, ChatOrigin? origin = null)
     {
         var list = new JsonArray();
         foreach (var row in rows)
@@ -42,6 +43,11 @@ public static class GuardianChats
         if (cwd is not null) chat["cwd"] = cwd;
         chat["rows"] = list;
         chat["harness"] = GuardianClient.Source;
+        if (origin is { Source.Length: > 0, Id.Length: > 0 })
+        {
+            chat["source"] = origin.Source;
+            chat["sourceId"] = origin.Id;
+        }
         return chat.ToJsonString();
     }
 
