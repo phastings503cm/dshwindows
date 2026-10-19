@@ -78,20 +78,39 @@ public static class PlanAssignment
         var open = todos.Where(t => t.Status != TodoStatus.Completed).ToList();
         if (open.Count == 0) return null;
         var mine = SignificantWords(description + " " + (prompt.Length > 400 ? prompt[..400] : prompt));
-        TodoItem? best = null;
-        var bestScore = 0;
-        foreach (var step in open)
+        var words = open.Select(step => SignificantWords(step.Content)).ToList();
+        var scores = words.Select(w => w.Intersect(mine).Count()).ToList();
+        var bestScore = scores.Max();
+        if (bestScore > 0)
         {
-            var score = SignificantWords(step.Content).Intersect(mine).Count();
-            if (score > 0 && score > bestScore)
-            {
-                best = step;
-                bestScore = score;
-            }
+            var tied = Enumerable.Range(0, open.Count).Where(i => scores[i] == bestScore).ToList();
+            if (tied.Count == 1) return open[tied[0]].Content;
+            // A tie ("Write the parser" and "Add tests for the parser" for "Write tests for the parser"): what only that step
+            // says decides; still tied, no step is shown rather than a wrong one (the agent tool's step argument says it).
+            var distinctive = tied.Select(i => words[i].Where(w => !words.Where((_, j) => j != i).Any(other => other.Contains(w))).Intersect(mine).Count()).ToList();
+            var top = distinctive.Max();
+            return distinctive.Count(d => d == top) == 1 && top > 0 ? open[tied[distinctive.IndexOf(top)]].Content : null;
         }
-        if (best is not null) return best.Content;
         var inProgress = open.Where(t => t.Status == TodoStatus.InProgress).ToList();
         return inProgress.Count == 1 ? inProgress[0].Content : null;
+    }
+
+    /// <summary>The step a subagent was started on: the one its <c>step</c> argument names — the step's number in the plan
+    /// (1 = the first) or its text, whole or a part only that step has — else the best guess from its words
+    /// (<see cref="Step(string, string, IReadOnlyList{TodoItem})"/>).</summary>
+    public static string? Step(string? requested, string description, string prompt, IReadOnlyList<TodoItem> todos) =>
+        Named(requested, todos) ?? Step(description, prompt, todos);
+
+    /// <summary>The step <paramref name="requested"/> names, or null when it names none (or more than one).</summary>
+    public static string? Named(string? requested, IReadOnlyList<TodoItem> todos)
+    {
+        var text = requested?.Trim().TrimStart('#').Trim();
+        if (string.IsNullOrEmpty(text) || todos.Count == 0) return null;
+        if (int.TryParse(text, System.Globalization.NumberStyles.None, System.Globalization.CultureInfo.InvariantCulture, out var number))
+            return number >= 1 && number <= todos.Count ? todos[number - 1].Content : null;
+        if (todos.FirstOrDefault(t => string.Equals(t.Content.Trim(), text, StringComparison.OrdinalIgnoreCase)) is { } exact) return exact.Content;
+        var containing = todos.Where(t => t.Content.Contains(text, StringComparison.OrdinalIgnoreCase)).ToList();
+        return containing.Count == 1 ? containing[0].Content : null;
     }
 
     private static readonly HashSet<string> Stop = new(StringComparer.Ordinal)

@@ -25,6 +25,8 @@ public sealed record AgentRunInfo(string Id, string Description, string AgentTyp
     public string? Placement { get; init; }
     /// <summary>The plan step it is working (see <see cref="PlanAssignment"/>).</summary>
     public string? Assignment { get; init; }
+    /// <summary>The plan step the agent tool's <c>step</c> argument named (a number or the step's text), as given.</summary>
+    public string? RequestedStep { get; init; }
     /// <summary>Tokens its model calls used (known when its run ends).</summary>
     public long PromptTokens { get; init; }
     public long CompletionTokens { get; init; }
@@ -82,7 +84,7 @@ public sealed class AgentRoster
     }
 
     /// <summary>Register a new run; its id.</summary>
-    public string Begin(string description, string agentType, bool background, string? prompt = null)
+    public string Begin(string description, string agentType, bool background, string? prompt = null, string? step = null)
     {
         AgentRunInfo run;
         lock (_lock)
@@ -91,6 +93,7 @@ public sealed class AgentRoster
             run = new AgentRunInfo($"a{++_counter}", description, agentType, background, at)
             {
                 Prompt = prompt is null ? null : TextUtil.Prefix(prompt, 2_000),
+                RequestedStep = string.IsNullOrWhiteSpace(step) ? null : step.Trim(),
                 Log = [new AgentRunLine(at, $"Started ({agentType}{(background ? ", in the background" : "")})")],
             };
             _runs.Add(run);

@@ -183,7 +183,8 @@ public sealed partial class AgentHost
                 var isNew = vm.Agents.All(a => a.Id != run.Id);
                 vm.UpsertAgent(run);
                 // A subagent that just started works one of the plan's steps: say which, so the plan shows who works it.
-                if (isNew && run.Assignment is null && PlanAssignment.Step(run.Description, run.Prompt ?? "", vm.Todos) is { } step)
+                // The agent tool's step argument names it; without one, the best guess from its words (none on a tie).
+                if (isNew && run.Assignment is null && PlanAssignment.Step(run.RequestedStep, run.Description, run.Prompt ?? "", vm.Todos) is { } step)
                     roster.SetAssignment(run.Id, step);
             });
         };

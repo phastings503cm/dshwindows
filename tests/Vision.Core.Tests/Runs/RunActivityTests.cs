@@ -82,6 +82,42 @@ public sealed class RunActivityTests
         Assert.Null(PlanAssignment.Step("scan", "look", []));
     }
 
+    [Fact]
+    public void ATieIsNeverGuessedAndTheStepArgumentNamesTheStep()
+    {
+        // The review's probe: both steps share two words with the subagent; the first used to win.
+        TodoItem[] plan = [new("1", "Write the parser", TodoStatus.InProgress), new("2", "Add tests for the parser")];
+        Assert.Null(PlanAssignment.Step("Write tests for parser", "Write unit tests covering the parser's edge cases", plan));
+        // What only one step says still decides a tie.
+        TodoItem[] distinct = [new("1", "Parse the config", TodoStatus.InProgress), new("2", "Parse the command line"), new("3", "Validate the config")];
+        Assert.Equal("Parse the command line", PlanAssignment.Step("Parse", "the command config", distinct));
+        // The agent tool's step: a number (1 = first), the step's text, or a part only that step has.
+        Assert.Equal("Add tests for the parser", PlanAssignment.Step("2", "Write tests for parser", "…", plan));
+        Assert.Equal("Add tests for the parser", PlanAssignment.Step("#2", "x", "y", plan));
+        Assert.Equal("Add tests for the parser", PlanAssignment.Step("add tests for the parser", "x", "y", plan));
+        Assert.Equal("Add tests for the parser", PlanAssignment.Step("tests for", "x", "y", plan));
+        // Naming nothing (or two steps) falls back to the guess.
+        Assert.Null(PlanAssignment.Named("parser", plan));
+        Assert.Null(PlanAssignment.Named("9", plan));
+        Assert.Equal("Write the parser", PlanAssignment.Step("9", "scan", "look around", plan)); // the one in progress
+        Assert.Equal("Add tests for the parser", PlanAssignment.Step(null, "tests", "add some tests", plan));
+    }
+
+    [Fact]
+    public void TheStepArgumentIsReadAsANumberOrText()
+    {
+        Assert.Equal("2", AgentTool.StepArgument(JsonArgs.Object("""{"step":2}""")));
+        Assert.Equal("3", AgentTool.StepArgument(JsonArgs.Object("""{"step":3.0}""")));
+        Assert.Equal("Add tests", AgentTool.StepArgument(JsonArgs.Object("""{"step":"  Add tests "}""")));
+        Assert.Null(AgentTool.StepArgument(JsonArgs.Object("""{"step":""}""")));
+        Assert.Null(AgentTool.StepArgument(JsonArgs.Object("""{"step":true}""")));
+        Assert.Null(AgentTool.StepArgument(JsonArgs.Object("{}")));
+        Assert.Contains("\"step\"", AgentTool.SpecFor(AgentCatalog.Default).Parameters);
+        var roster = new AgentRoster();
+        var id = roster.Begin("tests", "general", false, "add tests", step: "2");
+        Assert.Equal("2", roster.Run(id)!.RequestedStep);
+    }
+
     // MARK: The activity list
 
     [Fact]

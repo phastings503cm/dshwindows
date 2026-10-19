@@ -63,7 +63,21 @@ public sealed class AgentTool : IToolExecutor
         "Pick agent_type for a specialist — " + catalog.Describe() + ". Omit it for the general worker. " +
         "Several agent calls in one turn run at the same time. Set run_in_background to true to launch it in the background and keep working: check on it with agent_status (you're also told automatically when one finishes) and stop one with agent_stop. To fan out many independent tasks in one go, use `delegate`." +
         (SubagentServers.Section(servers) is { Length: > 0 } section ? " " + section : ""),
-        """{"type":"object","properties":{"description":{"type":"string","description":"What to name this subagent"},"prompt":{"type":"string","description":"The complete task for the subagent. It cannot ask you questions and cannot see this conversation — everything it needs goes here."},"agent_type":{"type":"string","description":"The kind of subagent (default: general)"},"run_in_background":{"type":"boolean","description":"Start it in the background and return at once (default false: wait for its report)"},"sensitive":{"type":"boolean","description":""" + JsonArgs.Quote(SubagentServers.SensitiveParameter) + """}},"required":["description","prompt"]}""");
+        """{"type":"object","properties":{"description":{"type":"string","description":"What to name this subagent"},"prompt":{"type":"string","description":"The complete task for the subagent. It cannot ask you questions and cannot see this conversation — everything it needs goes here."},"agent_type":{"type":"string","description":"The kind of subagent (default: general)"},"run_in_background":{"type":"boolean","description":"Start it in the background and return at once (default false: wait for its report)"},"step":{"type":"string","description":""" + JsonArgs.Quote(StepParameter) + """},"sensitive":{"type":"boolean","description":""" + JsonArgs.Quote(SubagentServers.SensitiveParameter) + """}},"required":["description","prompt"]}""");
+
+    /// <summary>The <c>step</c> argument of agent and delegate's tasks: which plan step the subagent works, so the plan, the
+    /// Now card and the activity menu show it there (the same words on the Mac).</summary>
+    public const string StepParameter =
+        "Which step of your plan (todo_write) this subagent works: its number in the plan (1 = the first) or its text. Shown on that step.";
+
+    /// <summary>The step argument as text (models send a number or a string).</summary>
+    internal static string? StepArgument(JsonObject args) => args["step"] switch
+    {
+        JsonValue v when v.TryGetValue<string>(out var text) => string.IsNullOrWhiteSpace(text) ? null : text.Trim(),
+        JsonValue v when v.TryGetValue<double>(out var number) && double.IsFinite(number) =>
+            ((long)Math.Round(number)).ToString(System.Globalization.CultureInfo.InvariantCulture),
+        _ => null,
+    };
 
     public async Task<ToolResult> ExecuteAsync(string arguments, ToolContext context, CancellationToken cancellationToken)
     {
@@ -77,6 +91,7 @@ public sealed class AgentTool : IToolExecutor
         if (catalog.Find(typeName) is not { } definition)
             return $"Error: unknown agent_type '{typeName}'. Available: {catalog.Describe()}.";
         var sensitive = JsonArgs.Bool(args, "sensitive", false);
+        var step = StepArgument(args);
 
         if (JsonArgs.Bool(args, "run_in_background", false))
         {
@@ -85,14 +100,14 @@ public sealed class AgentTool : IToolExecutor
             // The background run belongs to the pool (Stop / agent_stop cancel it), not to this call.
             var (job, error) = pool.Launch(description, async ct =>
             {
-                var outcome = await RunCoreAsync(prompt, description, definition, background: true, context, ct, sensitive).ConfigureAwait(false);
+                var outcome = await RunCoreAsync(prompt, description, definition, background: true, context, ct, sensitive, step).ConfigureAwait(false);
                 return (outcome.Ok, outcome.Report);
             });
             if (job is null) return "Error: " + (error ?? "can't start another background agent.");
             return $"Started background agent {job.Id} “{description}”. It works while you continue — you'll be told automatically when it finishes; agent_status {{\"id\":\"{job.Id}\",\"wait_seconds\":120}} waits for it, agent_stop stops it.";
         }
 
-        var result = await RunCoreAsync(prompt, description, definition, background: false, context, cancellationToken, sensitive).ConfigureAwait(false);
+        var result = await RunCoreAsync(prompt, description, definition, background: false, context, cancellationToken, sensitive, step).ConfigureAwait(false);
         return Present(description, result);
     }
 
@@ -120,10 +135,10 @@ public sealed class AgentTool : IToolExecutor
     /// and keep the roster current. A <paramref name="sensitive"/> task runs only on a private server.</summary>
     internal static async Task<SubagentOutcome> RunCoreAsync(string prompt, string description, AgentDefinition definition,
                                                              bool background, ToolContext context, CancellationToken cancellationToken,
-                                                             bool sensitive = false)
+                                                             bool sensitive = false, string? step = null)
     {
         var roster = context.Roster;
-        var runId = roster?.Begin(description, definition.Name, background, prompt);
+        var runId = roster?.Begin(description, definition.Name, background, prompt, step);
         var clock = Stopwatch.StartNew();
         var failovers = 0;
         string? firstServer = null;
@@ -377,10 +392,10 @@ public sealed class DelegateTool : IToolExecutor
             "Run several independent subtasks at the same time, each by its own subagent, and get all their reports back together. Use it to fan work out — investigate three modules, review four files, implement three unrelated changes — instead of doing them one after another. Subtasks cannot talk to each other or see this conversation, so each prompt must be complete; make sure they don't edit the same files. " +
             "Give each an agent_type: " + types + ". When several model servers are configured the tasks are spread across them." +
             (SubagentServers.Section(servers) is { Length: > 0 } section ? " " + section : ""),
-            """{"type":"object","properties":{"tasks":{"type":"array","minItems":1,"maxItems":12,"items":{"type":"object","properties":{"description":{"type":"string","description":"A short name for the subtask"},"prompt":{"type":"string","description":"The complete task"},"agent_type":{"type":"string","description":"The kind of subagent (default: general)"},"sensitive":{"type":"boolean","description":""" + sensitive + """}},"required":["description","prompt"]},"description":"The subtasks to run in parallel"},"max_parallel":{"type":"integer","description":"At most this many at once (default 6)"},"sensitive":{"type":"boolean","description":""" + JsonArgs.Quote("The default for every task. " + SubagentServers.SensitiveParameter) + """}},"required":["tasks"]}""");
+            """{"type":"object","properties":{"tasks":{"type":"array","minItems":1,"maxItems":12,"items":{"type":"object","properties":{"description":{"type":"string","description":"A short name for the subtask"},"prompt":{"type":"string","description":"The complete task"},"agent_type":{"type":"string","description":"The kind of subagent (default: general)"},"step":{"type":"string","description":""" + JsonArgs.Quote(AgentTool.StepParameter) + """},"sensitive":{"type":"boolean","description":""" + sensitive + """}},"required":["description","prompt"]},"description":"The subtasks to run in parallel"},"max_parallel":{"type":"integer","description":"At most this many at once (default 6)"},"sensitive":{"type":"boolean","description":""" + JsonArgs.Quote("The default for every task. " + SubagentServers.SensitiveParameter) + """}},"required":["tasks"]}""");
     }
 
-    private sealed record Task1(string Description, string Prompt, AgentDefinition Definition, bool Sensitive);
+    private sealed record Task1(string Description, string Prompt, AgentDefinition Definition, bool Sensitive, string? Step);
 
     public async Task<ToolResult> ExecuteAsync(string arguments, ToolContext context, CancellationToken cancellationToken)
     {
@@ -410,7 +425,7 @@ public sealed class DelegateTool : IToolExecutor
                 return $"Error: task {index} has an unknown agent_type '{typeName}'. Available: {catalog.Describe()}.";
             var description = (JsonArgs.String(item, "description") ?? "").Trim();
             tasks.Add(new Task1(description.Length > 0 ? description : $"task {index}", prompt, definition,
-                JsonArgs.Bool(item, "sensitive", allSensitive)));
+                JsonArgs.Bool(item, "sensitive", allSensitive), AgentTool.StepArgument(item)));
         }
 
         var parallel = Math.Clamp(JsonArgs.Int(args, "max_parallel", DefaultParallel), 1, MaxTasks);
@@ -421,7 +436,7 @@ public sealed class DelegateTool : IToolExecutor
             try
             {
                 return await AgentTool.RunCoreAsync(task.Prompt, task.Description, task.Definition, background: false, context,
-                    cancellationToken, task.Sensitive).ConfigureAwait(false);
+                    cancellationToken, task.Sensitive, task.Step).ConfigureAwait(false);
             }
             finally
             {
