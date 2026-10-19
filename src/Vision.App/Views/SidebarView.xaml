@@ -115,6 +115,9 @@
                                     <MenuItem Header="Reveal Project in Explorer" Click="RevealSessionProject_Click"
                                               Visibility="{Binding WorkspacePath, Converter={StaticResource NullToVisibility}}" />
                                     <MenuItem Header="Copy Transcript" Click="CopyTranscript_Click" />
+                                    <MenuItem Header="Export as Markdown…" Click="ExportMarkdown_Click" />
+                                    <MenuItem Header="Export as JSON…" Click="ExportJson_Click" />
+                                    <MenuItem Header="Send to Guardian" Click="SendToGuardian_Click" />
                                     <Separator />
                                     <MenuItem Header="Delete…" InputGestureText="Del" Click="Delete_Click" />
                                 </ContextMenu>

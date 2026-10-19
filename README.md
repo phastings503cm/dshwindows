@@ -705,6 +705,25 @@ model servers (into `openclaw.json`, after a backup; a file with comments gets a
 from) — to the install you pick, inside WSL too. When a name is already taken, you choose: keep both, replace
 what is there, or skip it.
 
+## Importing chats
+
+**File › Import Chats…** (also in **Settings › Import & Export**) brings the conversations you had elsewhere
+into Vision as chats you can carry on with any model: Claude Code's sessions (`.claude\projects`), Codex's
+(`.codex\sessions`), OpenClaw's (its SQLite store or session files), a Claude.ai or ChatGPT data export (add
+the `.zip`), a session file or a chat exported from Vision, and — when you're signed in — your Guardian chats
+and the Vision chats you saved there. The list shows each one's source, title, date, size and folder, with the
+new ones ticked (OpenClaw's scheduled runs and chats shared with you are listed but not ticked). A chat keeps
+its own times; tool calls become tool rows (what ran, on what, and its output), which any model reads as
+plain steps; a Claude Code chat whose folder is on this PC opens in that project. Subagent transcripts,
+rewound branches and images are left out, and the chat's first line says what was. Importing again adds
+only chats that aren't here yet. Nothing is changed where chats are read from, and nothing leaves the PC
+except the calls to Guardian.
+
+**File › Export Chat** (or right-click a chat) saves it as Markdown, as JSON that either Vision imports
+again, or sends it to your Guardian account. **File › Search All Chats…** (Ctrl+Alt+F) finds words in every
+chat's title and messages — tool calls and their output too — with a filter by where the chat came from;
+each hit opens the chat at that message.
+
 ## Remembered notes
 
 Vision keeps a long-term memory that survives between chats: short notes about you and your projects — *the

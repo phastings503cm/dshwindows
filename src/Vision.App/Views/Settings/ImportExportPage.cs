@@ -39,9 +39,16 @@ public sealed class ImportExportPage : UserControl
         _model = model;
         var page = new StackPanel { MaxWidth = 760 };
         page.Children.Add(Ui.Title("Import & Export"));
-        var intro = Ui.Secondary("Bring skills, memory, keys and model servers in from the tools you already use on this PC, and send Vision's back to OpenClaw.");
+        var intro = Ui.Secondary("Bring chats, skills, memory, keys and model servers in from the tools you already use, and send Vision's back out.");
         intro.Margin = new Thickness(0, 6, 0, 4);
         page.Children.Add(intro);
+
+        page.Children.Add(Ui.Section("Chats"));
+        page.Children.Add(Ui.Row("Import chats", "From Claude Code, Codex and OpenClaw on this PC, a Claude.ai or ChatGPT export, and your Guardian chats — as chats you can carry on with any model. Importing again brings only what's new.",
+            Ui.Button("Import chats…", model.ShowChatImport, accent: true), Icons.Import));
+        page.Children.Add(Ui.Row("Search all chats", "Every chat on this PC — started here or imported — by title and by what was said, with a filter by where it came from (Ctrl+Alt+F).",
+            Ui.Button("Search…", () => model.ShowChatSearch()), Icons.Search));
+        page.Children.Add(ThisChatRow(model));
 
         page.Children.Add(Ui.Section("OpenClaw on this PC"));
         page.Children.Add(_openClaw);
@@ -62,6 +69,21 @@ public sealed class ImportExportPage : UserControl
         RenderOpenClaw();
         RenderExport();
         if (SelfTest.Current is null) _ = LookAsync();
+    }
+
+    /// <summary>The open chat: Markdown to read or share, JSON to import elsewhere, or a copy in the Guardian account.</summary>
+    private static Border ThisChatRow(AppModel model)
+    {
+        var chat = model.SelectedSession;
+        var markdown = Ui.Button("Markdown…", () => model.ExportChat(chat!.Id, json: false));
+        var json = Ui.Button("JSON…", () => model.ExportChat(chat!.Id, json: true));
+        var guardian = Ui.Button("Send to Guardian", () => _ = model.SendChatToGuardianAsync(chat!.Id));
+        markdown.IsEnabled = json.IsEnabled = guardian.IsEnabled = chat is not null;
+        if (chat is not null && !model.Guardian.IsSignedIn) guardian.ToolTip = "Sign in at Settings › Guardian first.";
+        return Ui.Row(chat is null ? "Export a chat" : $"Export “{TextUtil.Prefix(chat.Title, 60)}”",
+            "Markdown to read or share; JSON to bring into Vision on another computer or the Mac; or send it to your Guardian account. " +
+            (chat is null ? "Open a chat first." : "Any chat: right-click it in the list."),
+            Ui.Buttons(markdown, json, guardian), Icons.Export);
     }
 
     // MARK: Where OpenClaw is

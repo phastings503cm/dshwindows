@@ -87,6 +87,9 @@ public partial class MainWindow : Window
         model.ExternalImportRequested += ShowExternalImport;
         model.MemoriesRequested += ShowMemories;
         model.OpenClawImportRequested += ShowOpenClawImport;
+        model.ChatImportRequested += ShowChatImport;
+        model.ChatSearchRequested += query => Views.Import.ChatSearchWindow.Show(this, Model, query);
+        model.ChatRowRequested += ShowChatRow;
         model.Host.OpenMemoryManagerRequested += ShowMemories;
         model.Host.PlanAppeared += OnPlanAppeared;
         model.ImageRequested += path => ImageViewerWindow.Show(this, path);
@@ -672,6 +675,7 @@ public partial class MainWindow : Window
         Bind(Key.Q, ModifierKeys.Control | ModifierKeys.Shift, ToggleQueuePanel);
         Bind(Key.H, ModifierKeys.Control | ModifierKeys.Shift, () => ToggleRunTab(RunTab.Prompts));
         Bind(Key.H, ModifierKeys.Control | ModifierKeys.Alt, ShowAllPrompts);
+        Bind(Key.F, ModifierKeys.Control | ModifierKeys.Alt, () => Model.ShowChatSearch());
         Bind(Key.A, ModifierKeys.Control | ModifierKeys.Shift, ToggleActivity);
         Bind(Key.P, ModifierKeys.Control | ModifierKeys.Shift, TogglePlanPanel);
         Bind(Key.K, ModifierKeys.Control | ModifierKeys.Shift, ShowVault);
@@ -794,6 +798,7 @@ public partial class MainWindow : Window
         "Ctrl+Shift+Q\tTask list (this chat's): what it is doing now, and what is queued",
         "Ctrl+Shift+H\tPrompts (this chat's): every prompt it sent, and how it ended",
         "Ctrl+Alt+H\tAll prompts, across chats",
+        "Ctrl+Alt+F\tSearch all chats: every chat on this PC, imported or not",
         "Ctrl+Shift+A\tBackground activity: what is working, on which model",
         "Ctrl+Shift+P\tPlan panel (what the agent is working through)",
         "Ctrl+Shift+K\tCredentials vault",
@@ -900,6 +905,37 @@ public partial class MainWindow : Window
         new OpenClawImportWindow(Model) { Owner = owner }.ShowDialog();
     }
 
+    /// <summary>"Import chats", over whatever window is in front (Settings › Import &amp; Export, or the main window).</summary>
+    public void ShowChatImport()
+    {
+        var owner = OwnedWindows.OfType<Window>().FirstOrDefault(w => w.IsActive) ?? this;
+        new Views.Import.ChatImportWindow(Model) { Owner = owner }.ShowDialog();
+    }
+
+    /// <summary>A search result: open its chat and show that row (by its time, else by its place among the stored rows).</summary>
+    private void ShowChatRow(string chatId, int seq)
+    {
+        if (Model.Host.Session(chatId) is not { } vm) return;
+        Model.OpenSession(chatId);
+        Activate();
+        Dispatcher.BeginInvoke(System.Windows.Threading.DispatcherPriority.Loaded, () =>
+        {
+            var rows = Model.Host.Log.LoadItems(chatId);
+            if (rows.FirstOrDefault(r => r.Seq == seq) is not { } row) return;
+            var shown = new[] { "user", "assistant", "notice", "error", "tool", "compaction" };
+            var index = rows.TakeWhile(r => r.Seq < seq).Count(r => shown.Contains(r.Kind));
+            var entry = vm.Entries.FirstOrDefault(e => e.At == row.At && Same(e, row.Kind)) ?? vm.Entries.ElementAtOrDefault(index);
+            if (entry is not null) _chatView.ScrollToEntry(entry.Id);
+        });
+
+        static bool Same(ChatEntryVM entry, string kind) => kind switch
+        {
+            "tool" => entry is ToolEntryVM,
+            "compaction" => entry is CompactionEntryVM,
+            _ => entry is MessageEntryVM,
+        };
+    }
+
     /// <summary>"Bring in Claude Code &amp; Cursor". Opened over whatever window is in front, so it works
     /// from Settings and from Memory &amp; Skills alike.</summary>
     public void ShowExternalImport()
@@ -974,6 +1010,20 @@ public partial class MainWindow : Window
     private void TogglePlan_Click(object sender, RoutedEventArgs e) => TogglePlanPanel();
     private void Memories_Click(object sender, RoutedEventArgs e) => ShowMemories();
     private void ImportOpenClaw_Click(object sender, RoutedEventArgs e) => ShowOpenClawImport();
+    private void ImportChats_Click(object sender, RoutedEventArgs e) => ShowChatImport();
+    private void SearchChats_Click(object sender, RoutedEventArgs e) => Model.ShowChatSearch();
+    private void ExportChatMarkdown_Click(object sender, RoutedEventArgs e) => ExportSelectedChat(json: false);
+    private void ExportChatJson_Click(object sender, RoutedEventArgs e) => ExportSelectedChat(json: true);
+    private void SendChatToGuardian_Click(object sender, RoutedEventArgs e)
+    {
+        if (Model.Host.SelectedId is { } id) _ = Model.SendChatToGuardianAsync(id);
+    }
+
+    private void ExportSelectedChat(bool json)
+    {
+        if (Model.Host.SelectedId is { } id) Model.ExportChat(id, json, this);
+        else Dialog.Info("No chat open", "Open the chat you want to export first.");
+    }
     private void QueueLog_Click(object sender, RoutedEventArgs e)
     {
         if (Model.Host.SelectedId is not { } chatId) return;

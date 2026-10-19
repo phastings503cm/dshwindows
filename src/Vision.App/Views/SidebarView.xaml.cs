@@ -191,6 +191,21 @@ public partial class SidebarView : UserControl
         try { Clipboard.SetText(text); } catch (Exception) { }
     }
 
+    private void ExportMarkdown_Click(object sender, RoutedEventArgs e)
+    {
+        if (SessionOf(sender) is { } session) _model.ExportChat(session.Id, json: false, Window.GetWindow(this));
+    }
+
+    private void ExportJson_Click(object sender, RoutedEventArgs e)
+    {
+        if (SessionOf(sender) is { } session) _model.ExportChat(session.Id, json: true, Window.GetWindow(this));
+    }
+
+    private void SendToGuardian_Click(object sender, RoutedEventArgs e)
+    {
+        if (SessionOf(sender) is { } session) _ = _model.SendChatToGuardianAsync(session.Id);
+    }
+
     private void RunningBar_Click(object sender, MouseButtonEventArgs e)
     {
         if (_model.Host.RunningSessions.FirstOrDefault() is { } first) _model.Select(first.Id);
