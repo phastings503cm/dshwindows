@@ -173,7 +173,7 @@ public sealed class ComputerAccessTests : IDisposable
     {
         Assert.StartsWith("Screen access", ComputerAccess.Observe.Prompt());
         Assert.StartsWith("Computer control", ComputerAccess.Control.Prompt());
-        Assert.Contains("Ctrl+.", ComputerAccess.Control.Prompt());
+        Assert.Contains("Ctrl+Alt+.", ComputerAccess.Control.Prompt());
     }
 
     /// <summary>An approval of control covers the screenshots it needs, so the user is asked once.</summary>

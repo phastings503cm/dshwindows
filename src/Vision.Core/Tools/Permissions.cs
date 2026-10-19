@@ -240,7 +240,7 @@ public static class ComputerAccessInfo
 
     public static string Prompt(this ComputerAccess access) => access == ComputerAccess.Observe
         ? "Screen access — the agent wants to look at your screen: screenshots of apps and windows, window titles, and process details. What it captures is sent to the model. Allowing covers the rest of this chat."
-        : "Computer control — the agent wants to move the mouse, click, type, and bring apps to the front, acting as you. Allowing covers the rest of this chat. Press Ctrl+. to stop it at any time.";
+        : "Computer control — the agent wants to move the mouse, click, type, and bring apps to the front, acting as you. Allowing covers the rest of this chat. Where it can, it clicks and types into the app in the background, leaving your mouse free; the screen edges glow while it works. Press Ctrl+Alt+. to stop it at any time, from any app.";
 }
 
 /// <summary>Approvals the user has given in one chat. A class so it survives the engine being
