@@ -101,7 +101,9 @@ public sealed record ClaudeCodeLaunch(string Program, IReadOnlyList<string> Pref
     /// <summary>Run claude itself (claude.exe, or the macOS/Linux binary).</summary>
     public static ClaudeCodeLaunch Direct(string path) => new(path, [], path);
 
-    /// <summary>Run claude inside WSL through a login shell, so the PATH its installer set up applies.</summary>
+    /// <summary>Run claude inside WSL through a login shell, so the PATH its installer set up applies. wsl.exe gets
+    /// <c>--exec</c>: with a plain <c>--</c> it hands the rest of its command line to the default shell's <c>-c</c>, which
+    /// would expand the script's "$@" (to nothing) and re-split every argument.</summary>
     public static ClaudeCodeLaunch InWsl(string? distro) =>
         new("wsl.exe", [], distro is null ? "claude in WSL" : $"claude in WSL ({distro})") { Wsl = true, Distro = distro };
 
@@ -122,7 +124,7 @@ public sealed record ClaudeCodeLaunch(string Program, IReadOnlyList<string> Pref
         {
             if (Distro is { Length: > 0 }) { info.ArgumentList.Add("-d"); info.ArgumentList.Add(Distro); }
             if (workingDirectory is { Length: > 0 }) { info.ArgumentList.Add("--cd"); info.ArgumentList.Add(workingDirectory); }
-            info.ArgumentList.Add("--");
+            info.ArgumentList.Add("--exec");
             info.ArgumentList.Add("bash");
             info.ArgumentList.Add("-lc");
             info.ArgumentList.Add("exec claude \"$@\"");
@@ -498,4 +500,16 @@ public static partial class ClaudeCodeCli
 
     [GeneratedRegex(@"^/mnt/([a-zA-Z])/?(.*)$")]
     private static partial Regex WslMount();
+
+    /// <summary>A Windows path (C:\Users\x) as Claude Code inside WSL reaches it (/mnt/c/Users/x); anything else as it is.</summary>
+    public static string ToWslPath(string path)
+    {
+        var m = WindowsDrivePath().Match(path);
+        if (!m.Success) return path;
+        var rest = m.Groups[2].Value.Replace('\\', '/').TrimStart('/');
+        return $"/mnt/{char.ToLowerInvariant(m.Groups[1].Value[0])}" + (rest.Length > 0 ? "/" + rest : "");
+    }
+
+    [GeneratedRegex(@"^([a-zA-Z]):([\\/].*)?$")]
+    private static partial Regex WindowsDrivePath();
 }

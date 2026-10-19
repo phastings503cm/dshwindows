@@ -60,17 +60,24 @@ public static class ClaudeCodePermissions
     /// <summary>What Claude Code is told when the person (or an unattended run's timeout) says no.</summary>
     public const string Declined = "The person declined this in Vision. Don't retry it; carry on another way or say what you needed.";
 
-    /// <summary>Decide a permission question the way Vision's own engine decides the same call under the chat's preset:
-    /// reads and web fetches go ahead; writes go ahead inside the project (Workspace write) or always (Full access) and ask
-    /// otherwise; commands that only read go ahead, ones that could change something ask (Workspace write); anything Vision
-    /// doesn't know asks — except under Full access. A safety check Claude Code says needs a person always asks.</summary>
-    public static ClaudeCodePermissionDecision Decide(ClaudeCodePermissionRequest request, PermissionPolicy policy)
+    /// <summary>Decide a permission question the way Vision's own engine decides the same call under the chat's preset: reads
+    /// inside the project (or <paramref name="readRoots"/>, where Vision saved an attachment's text) and web fetches go ahead,
+    /// reads anywhere else ask (Claude Code reads inside its folders without asking, so a read question is always about a file
+    /// elsewhere — .ssh, .aws — and what it reads goes to Anthropic unmasked); writes go ahead inside the project (Workspace
+    /// write) or always (Full access) and ask otherwise; commands that only read go ahead, ones that could change something —
+    /// or that name a file in the home folder outside the project — ask (Workspace write); anything Vision doesn't know asks.
+    /// Full access says yes to all of it. A safety check Claude Code says needs a person always asks. <paramref name="mapPath"/>
+    /// turns the paths Claude Code names into Windows ones (inside WSL: /mnt/c/… → C:\…).</summary>
+    public static ClaudeCodePermissionDecision Decide(ClaudeCodePermissionRequest request, PermissionPolicy policy,
+                                                      IReadOnlyList<string>? readRoots = null, Func<string, string>? mapPath = null)
     {
         var tool = request.ToolName;
         var input = request.Input;
         var visionName = ClaudeCodeTools.VisionName(tool);
         var needsPerson = request.DecisionReasonType == "safetyCheck" || request.ClassifierApprovable == false;
         var why = request.DecisionReason is { Length: > 0 } reason ? $" — Claude Code says: {TextUtil.Prefix(StripAnsi(reason), 200)}" : "";
+        readRoots ??= [];
+        mapPath ??= p => p;
 
         switch (tool)
         {
@@ -88,19 +95,32 @@ public static class ClaudeCodePermissions
         {
             case "Write" or "Edit" or "MultiEdit" or "NotebookEdit":
             {
-                var raw = Str(input?["file_path"]) ?? Str(input?["notebook_path"]) ?? "";
+                var raw = mapPath(Str(input?["file_path"]) ?? Str(input?["notebook_path"]) ?? "");
                 decision = policy.CheckWrite(raw);
-                detail = $"{(policy.Preset == PermissionPreset.Plan ? "Write" : "Write outside the project")}: {policy.Resolve(raw).Path}";
+                detail = $"{(policy.Preset == PermissionPreset.Plan ? "Write" : "Write outside the project")}: {ResolvedOrRaw(policy, raw)}";
                 break;
             }
             case "Bash" or "PowerShell":
             {
                 var command = Str(input?["command"]) ?? "";
-                decision = policy.CheckShell(command);
+                decision = policy.Preset == PermissionPreset.WorkspaceWrite && NamesPrivatePath(command, policy, readRoots, mapPath)
+                    ? PermissionDecision.Ask : policy.CheckShell(command);
                 detail = $"Run command: {command}";
                 break;
             }
-            case "Read" or "Glob" or "Grep" or "LS" or "WebFetch" or "WebSearch" or "TodoWrite" or "Task" or "Agent" or "Skill"
+            case "Read" or "Glob" or "Grep" or "LS" or "NotebookRead":
+                if (ReadTarget(tool, input) is { } target && !IsInside(mapPath(target), policy, readRoots))
+                {
+                    decision = policy.Preset == PermissionPreset.FullAccess ? PermissionDecision.Proceed : PermissionDecision.Ask;
+                    detail = $"Read outside the project: {ResolvedOrRaw(policy, mapPath(target))}";
+                }
+                else
+                {
+                    decision = PermissionDecision.Proceed;
+                    detail = "";
+                }
+                break;
+            case "WebFetch" or "WebSearch" or "TodoWrite" or "Task" or "Agent" or "Skill"
                 or "TaskCreate" or "TaskUpdate" or "TaskGet" or "TaskList" or "TaskOutput" or "ToolSearch":
                 decision = PermissionDecision.Proceed;
                 detail = "";
@@ -114,6 +134,112 @@ public static class ClaudeCodePermissions
         if (decision.Verdict == PermissionVerdict.Ask || needsPerson)
             return new ClaudeCodePermissionDecision.Ask(visionName, (detail.Length > 0 ? detail : $"Use {ClaudeCodeTools.Label(tool)}: {ClaudeCodeTools.Preview(tool, input)}") + why);
         return new ClaudeCodePermissionDecision.Allow();
+    }
+
+    // MARK: Where a read goes
+
+    /// <summary>The path a read tool names (null = Claude Code's working folder). A Glob with no <c>path</c> but an absolute
+    /// pattern ("C:/Users/me/.ssh/*", "~/.aws/*") reads the folder its pattern starts in.</summary>
+    public static string? ReadTarget(string tool, JsonNode? input)
+    {
+        string? Value(string key) => Str(input?[key]) is { } v && v.Trim().Length > 0 ? v : null;
+        switch (tool)
+        {
+            case "Read":
+                return Value("file_path");
+            case "NotebookRead":
+                return Value("notebook_path") ?? Value("file_path");
+            case "Glob":
+            {
+                if (Value("path") is { } path) return path;
+                if (Value("pattern") is not { } pattern || !LooksAbsolute(pattern)) return null;
+                var fixedPart = new List<string>();
+                foreach (var piece in pattern.Replace('\\', '/').Split('/'))
+                {
+                    if (piece.IndexOfAny(['*', '?', '[', '{']) >= 0) break;
+                    fixedPart.Add(piece);
+                }
+                var folder = string.Join("/", fixedPart);
+                return folder.Length == 0 ? "/" : folder;
+            }
+            default:
+                return Value("path");
+        }
+    }
+
+    private static bool LooksAbsolute(string path) =>
+        path.StartsWith('/') || path.StartsWith('~') || path.StartsWith(@"\\", StringComparison.Ordinal)
+        || path.Length >= 2 && char.IsAsciiLetter(path[0]) && path[1] == ':';
+
+    /// <summary><paramref name="raw"/> (relative to the project, ~\…, or absolute) is inside the project or one of
+    /// <paramref name="readRoots"/>, links resolved — a link in the project that points out of it is outside.</summary>
+    public static bool IsInside(string raw, PermissionPolicy policy, IReadOnlyList<string> readRoots)
+    {
+        string real;
+        try
+        {
+            real = ClaudeCodePaths.Real(policy.Resolve(raw).Path);
+        }
+        catch (Exception ex) when (ex is ArgumentException or NotSupportedException or PathTooLongException)
+        {
+            return false;
+        }
+        return readRoots.Prepend(policy.WorkspaceRoot).Any(root => ClaudeCodePaths.Contains(ClaudeCodePaths.Real(root), real));
+    }
+
+    /// <summary>The command names a file in the home folder outside the project and <paramref name="readRoots"/>
+    /// (<c>type %USERPROFILE%\.aws\credentials</c>, <c>cat ~/.ssh/id_ed25519</c>, <c>..\..\.config\x</c>): Claude Code asks
+    /// about such commands, and "it only reads" is no reason to say yes to those.</summary>
+    public static bool NamesPrivatePath(string command, PermissionPolicy policy, IReadOnlyList<string> readRoots, Func<string, string>? mapPath = null)
+    {
+        mapPath ??= p => p;
+        var home = PermissionPolicy.HomeDirectory;
+        var realHome = ClaudeCodePaths.Real(home);
+        foreach (var piece in command.Split([' ', '\t', '\r', '\n', ';', '|', '&', '(', ')', '<', '>', '"', '\'', '`', '=', ','],
+                     StringSplitOptions.RemoveEmptyEntries))
+        {
+            var token = piece;
+            foreach (var prefix in HomeSpellings)
+            {
+                if (token.Equals(prefix, StringComparison.OrdinalIgnoreCase)
+                    || token.StartsWith(prefix + "/", StringComparison.OrdinalIgnoreCase) || token.StartsWith(prefix + "\\", StringComparison.OrdinalIgnoreCase))
+                {
+                    // A home spelling makes it a path: its separators as this system writes them.
+                    token = home + token[prefix.Length..].Replace('\\', Path.DirectorySeparatorChar).Replace('/', Path.DirectorySeparatorChar);
+                    break;
+                }
+            }
+            var pathLike = LooksAbsolute(token) || token == ".." || token.Contains("../", StringComparison.Ordinal)
+                           || token.Contains(@"..\", StringComparison.Ordinal) || token.EndsWith("/..", StringComparison.Ordinal)
+                           || token.EndsWith(@"\..", StringComparison.Ordinal);
+            if (!pathLike) continue;
+            string real;
+            try
+            {
+                real = ClaudeCodePaths.Real(policy.Resolve(mapPath(token)).Path);
+            }
+            catch (Exception ex) when (ex is ArgumentException or NotSupportedException or PathTooLongException)
+            {
+                continue;
+            }
+            if (ClaudeCodePaths.Contains(realHome, real) && !IsInside(real, policy, readRoots)) return true;
+        }
+        return false;
+    }
+
+    /// <summary>How commands spell the home folder (bash, PowerShell, cmd.exe).</summary>
+    private static readonly string[] HomeSpellings = ["${HOME}", "$HOME", "${env:USERPROFILE}", "$env:USERPROFILE", "$env:HOME", "%USERPROFILE%", "%HOME%"];
+
+    private static string ResolvedOrRaw(PermissionPolicy policy, string raw)
+    {
+        try
+        {
+            return policy.Resolve(raw).Path;
+        }
+        catch (Exception ex) when (ex is ArgumentException or NotSupportedException or PathTooLongException)
+        {
+            return raw;
+        }
     }
 
     private static string? Str(JsonNode? node) => ClaudeCodePermissionRequest.Str(node);

@@ -23,9 +23,39 @@ public sealed class ClaudeCodeSetupTests
         Assert.Equal(
         [
             "-p", "--input-format", "stream-json", "--output-format", "stream-json", "--verbose", "--include-partial-messages",
-            "--model", "sonnet", "--permission-mode", "default", "--permission-prompt-tool", "stdio",
+            "--model", "sonnet", "--permission-mode", "default", "--permission-prompt-tool", "stdio", "--setting-sources", "user",
             "--session-id", "11111111-2222-3333-4444-555555555555", "--append-system-prompt", "note", "--add-dir", "/attachments",
         ], args);
+    }
+
+    [Fact]
+    public void OnlyAFolderThePersonTrustedInClaudeCodeLoadsItsOwnSettings()
+    {
+        // Headless claude -p asks no trust question: a cloned repository's hooks and MCP servers would run. Untrusted → the
+        // person's own settings only; trusted (ProjectSettings) → as in a terminal; a CLI that refused the flag → left out.
+        Assert.Contains("--setting-sources", ClaudeCodeCommand.Args(new ClaudeCodeTurnOptions { Model = "sonnet" }));
+        Assert.DoesNotContain("--setting-sources", ClaudeCodeCommand.Args(new ClaudeCodeTurnOptions { Model = "sonnet", ProjectSettings = true }));
+        Assert.DoesNotContain("--setting-sources", ClaudeCodeCommand.Args(new ClaudeCodeTurnOptions
+        {
+            Model = "sonnet", Unsupported = new HashSet<string> { "--setting-sources" },
+        }));
+    }
+
+    [Fact]
+    public void AOneOffGetsNoToolsNoMcpServersNoFolderSettingsAndALongSystemPromptGoesInAFile()
+    {
+        var args = ClaudeCodeCommand.Args(new ClaudeCodeTurnOptions { Model = "haiku", OneShotSystemPrompt = "Summarize." }).ToList();
+        Assert.Equal(["--setting-sources", "user", "--strict-mcp-config", "--system-prompt", "Summarize.", "--tools", "", "--no-session-persistence"],
+            args[args.IndexOf("--setting-sources")..]);
+        var file = ClaudeCodeCommand.Args(new ClaudeCodeTurnOptions { Model = "haiku", OneShotSystemPromptFile = @"C:\Temp\s.txt" }).ToList();
+        Assert.Equal(@"C:\Temp\s.txt", file[file.IndexOf("--system-prompt-file") + 1]);
+        Assert.DoesNotContain("--system-prompt", file);
+        var older = ClaudeCodeCommand.Args(new ClaudeCodeTurnOptions
+        {
+            Model = "haiku", OneShotSystemPrompt = "x", Unsupported = new HashSet<string> { "--setting-sources", "--strict-mcp-config" },
+        });
+        Assert.DoesNotContain("--setting-sources", older);
+        Assert.DoesNotContain("--strict-mcp-config", older);
     }
 
     [Theory]
@@ -229,7 +259,11 @@ public sealed class ClaudeCodeSetupTests
     {
         var info = ClaudeCodeLaunch.InWsl("Ubuntu-24.04").StartInfo(["-p", "--model", "sonnet"], @"C:\work\proj");
         Assert.Equal("wsl.exe", info.FileName);
-        Assert.Equal(["-d", "Ubuntu-24.04", "--cd", @"C:\work\proj", "--", "bash", "-lc", "exec claude \"$@\"", "claude", "-p", "--model", "sonnet"], info.ArgumentList);
+        // --exec: wsl.exe hands argv over as it is (a plain -- would run it through the default shell's -c, which expands "$@").
+        Assert.Equal(["-d", "Ubuntu-24.04", "--cd", @"C:\work\proj", "--exec", "bash", "-lc", "exec claude \"$@\"", "claude", "-p", "--model", "sonnet"], info.ArgumentList);
+        Assert.Equal("/mnt/c/Users/pat/a.txt", ClaudeCodeCli.ToWslPath(@"C:\Users\pat\a.txt"));
+        Assert.Equal("/mnt/d", ClaudeCodeCli.ToWslPath("D:"));
+        Assert.Equal("/home/pat", ClaudeCodeCli.ToWslPath("/home/pat"));
         Assert.Equal(@"C:\Users\pat\a.txt", ClaudeCodeCli.FromWslPath("/mnt/c/Users/pat/a.txt"));
     }
 

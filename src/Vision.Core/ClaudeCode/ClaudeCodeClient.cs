@@ -73,7 +73,7 @@ public sealed class ClaudeCodeClient(ProviderProfile profile) : IProviderClient
         var launch = await LaunchAsync(cancellationToken).ConfigureAwait(false);
         var events = Channel.CreateUnbounded<LlmStreamEvent>();
         var streamed = false;
-        var stream = new ClaudeCodeStream(e =>
+        void Sink(EngineEvent e)
         {
             switch (e)
             {
@@ -89,32 +89,62 @@ public sealed class ClaudeCodeClient(ProviderProfile profile) : IProviderClient
                     break;
             }
             if (e is EngineEvent.TextDelta) streamed = true;
-        });
-        var options = new ClaudeCodeTurnOptions
+        }
+        var system = request.SystemPrompt.Length > 0 ? request.SystemPrompt : "You are a helpful assistant.";
+        // A long system prompt goes in a file: Windows' command line holds 32,767 characters (cmd.exe 8,191).
+        string? file = null;
+        if (system.Length > ClaudeCodeCommand.SystemPromptFileThreshold)
         {
-            Model = request.Model.Length > 0 ? request.Model : Profile.Model,
-            Thinking = request.Thinking ?? Profile.Thinking,
-            OneShotSystemPrompt = request.SystemPrompt.Length > 0 ? request.SystemPrompt : "You are a helpful assistant.",
-        };
+            file = Path.Combine(Path.GetTempPath(), $"vision-claude-system-{Guid.NewGuid():N}.txt");
+            await File.WriteAllTextAsync(file, system, TextUtil.Utf8NoBom, cancellationToken).ConfigureAwait(false);
+        }
+        var unsupported = new HashSet<string>(StringComparer.Ordinal);
+        var prompt = ClaudeCodeCommand.UserMessage(Prompt(request.Messages));
         var run = Task.Run(async () =>
         {
             try
             {
-                return await ClaudeCodeRunner.RunAsync(launch, options, Path.GetTempPath(), ClaudeCodeCommand.UserMessage(Prompt(request.Messages)), stream,
-                    (_, _) => Task.FromResult<ClaudeCodePermissionDecision>(new ClaudeCodePermissionDecision.Deny(ClaudeCodePermissions.Declined)),
-                    cancellationToken, StarterForTesting).ConfigureAwait(false);
+                while (true)
+                {
+                    var options = new ClaudeCodeTurnOptions
+                    {
+                        Model = request.Model.Length > 0 ? request.Model : Profile.Model,
+                        Thinking = request.Thinking ?? Profile.Thinking,
+                        OneShotSystemPrompt = file is null ? system : null,
+                        OneShotSystemPromptFile = file is null ? null : launch.Wsl ? ClaudeCodeCli.ToWslPath(file) : file,
+                        Unsupported = unsupported,
+                    };
+                    var outcome = await ClaudeCodeRunner.RunAsync(launch, options, Path.GetTempPath(), prompt, new ClaudeCodeStream(Sink),
+                        (_, _) => Task.FromResult<ClaudeCodePermissionDecision>(new ClaudeCodePermissionDecision.Deny(ClaudeCodePermissions.Declined)),
+                        cancellationToken, StarterForTesting).ConfigureAwait(false);
+                    // An older CLI that doesn't know an optional flag: once more without it.
+                    if (outcome.Failure is { Kind: ClaudeCodeFailureKind.UnknownOption, Detail: { } flag } && !outcome.Stream.Progressed
+                        && ClaudeCodeCommand.OneShotOptionalFlags.Contains(flag) && unsupported.Add(flag)) continue;
+                    return outcome;
+                }
             }
             finally
             {
                 events.Writer.TryComplete();
+                if (file is not null)
+                {
+                    try
+                    {
+                        File.Delete(file);
+                    }
+                    catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+                    {
+                        // Left in the temp folder.
+                    }
+                }
             }
         }, CancellationToken.None);
         await foreach (var e in events.Reader.ReadAllAsync(CancellationToken.None).ConfigureAwait(false)) yield return e;
-        var outcome = await run.ConfigureAwait(false);
-        if (outcome.Failure is { } failure)
+        var result = await run.ConfigureAwait(false);
+        if (result.Failure is { } failure)
             throw LlmException.Rejected(failure.Kind == ClaudeCodeFailureKind.NotSignedIn ? 401 : 500, failure.Message, "",
                 permanent: failure.Kind is ClaudeCodeFailureKind.NotSignedIn or ClaudeCodeFailureKind.RateLimited);
-        yield return new LlmStreamEvent.Done([], "stop", outcome.Usage ?? outcome.Result?.Usage);
+        yield return new LlmStreamEvent.Done([], "stop", result.Usage ?? result.Result?.Usage);
     }
 
     /// <summary>The request's messages as one prompt: a single message as it is, a conversation as labelled turns.</summary>

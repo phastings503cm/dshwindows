@@ -25,8 +25,14 @@ public sealed record ClaudeCodeTurnOptions
     /// <summary>Optional flags this CLI said it doesn't know ("--effort"): left out.</summary>
     public IReadOnlySet<string> Unsupported { get; init; } = new HashSet<string>();
     /// <summary>A one-off side task (a summary, a skill draft): Claude Code's system prompt replaced by this, no tools, no
-    /// session saved — and no permission or session flags.</summary>
+    /// MCP servers, only the person's own settings, no session saved — and no permission or session flags.</summary>
     public string? OneShotSystemPrompt { get; init; }
+    /// <summary>The one-off's system prompt saved in this file instead (--system-prompt-file): a long one would pass Windows'
+    /// 32,767-character command line (8,191 through cmd.exe).</summary>
+    public string? OneShotSystemPromptFile { get; init; }
+    /// <summary>The folder's own Claude Code settings load too — the person trusted it in Claude Code (<see cref="ClaudeCodeTrust"/>);
+    /// false = only the person's own (--setting-sources user), so a cloned repository's hooks and MCP servers don't run.</summary>
+    public bool ProjectSettings { get; init; }
 }
 
 public static class ClaudeCodeCommand
@@ -36,6 +42,16 @@ public static class ClaudeCodeCommand
     {
         "--effort", "--include-partial-messages", "--append-system-prompt", "--add-dir",
     };
+
+    /// <summary>What a one-off can also do without: it runs with no tools in the temp folder, so neither the folder's settings
+    /// nor MCP servers could do much there.</summary>
+    public static readonly IReadOnlySet<string> OneShotOptionalFlags = new HashSet<string>(StringComparer.Ordinal)
+    {
+        "--effort", "--include-partial-messages", "--setting-sources", "--strict-mcp-config",
+    };
+
+    /// <summary>A one-off's system prompt longer than this goes in a file (<see cref="ClaudeCodeTurnOptions.OneShotSystemPromptFile"/>).</summary>
+    public const int SystemPromptFileThreshold = 8_000;
 
     /// <summary>Claude Code's permission mode for a chat's preset. Plan only → plan (Claude Code itself refuses to change
     /// anything); Workspace write → default (every tool call that needs permission is asked of Vision, which decides with
@@ -75,15 +91,21 @@ public static class ClaudeCodeCommand
         args.Add("--model");
         args.Add(o.Model);
         if (o.Thinking is { } level) Optional("--effort", Effort(level));
-        if (o.OneShotSystemPrompt is { } system)
+        if (o.OneShotSystemPrompt is not null || o.OneShotSystemPromptFile is not null)
         {
-            args.AddRange(["--system-prompt", system, "--tools", "", "--no-session-persistence"]);
+            Optional("--setting-sources", "user");
+            Optional("--strict-mcp-config");
+            if (o.OneShotSystemPromptFile is { } file) args.AddRange(["--system-prompt-file", file]);
+            else args.AddRange(["--system-prompt", o.OneShotSystemPrompt!]);
+            args.AddRange(["--tools", "", "--no-session-persistence"]);
             return args;
         }
         args.Add("--permission-mode");
         args.Add(PermissionMode(o.Preset));
         args.Add("--permission-prompt-tool");
         args.Add("stdio");
+        // Only the person's own settings unless they trusted the folder in Claude Code (headless shows no trust question).
+        if (!o.ProjectSettings && !o.Unsupported.Contains("--setting-sources")) args.AddRange(["--setting-sources", "user"]);
         if (o.ResumeSession is { Length: > 0 } resume)
         {
             args.Add("--resume");
@@ -108,6 +130,58 @@ public static class ClaudeCodeCommand
         var start = at + marker.Length;
         var end = stderr.IndexOf('\'', start);
         return end > start ? stderr[start..end] : null;
+    }
+
+    /// <summary>How Claude Code takes attachments, within what the Messages API accepts in one request (32 MB, base64
+    /// included; a picture's 5 MB counted on its base64): up to 20 pictures (PNG, JPEG, GIF, WebP) of at most 3.75 MB and up
+    /// to 5 PDFs of at most 20 MB, at most <see cref="MaxAttachmentBytes"/> of them per message, as themselves; past that —
+    /// and everything else — as the text Vision read out of it. The same limits as Vision for macOS.</summary>
+    public static readonly AttachmentRoute Attachments = new()
+    {
+        Vision = true,
+        Documents = true,
+        ImageTypes = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "image/png", "image/jpeg", "image/gif", "image/webp" },
+        MaxImages = 20,
+        MaxImageBytes = 3_750_000,
+        MaxDocuments = 5,
+        MaxDocumentBytes = 20L * 1024 * 1024,
+    };
+
+    /// <summary>The most picture and PDF bytes one message carries as themselves (base64 makes them a third bigger).</summary>
+    public const long MaxAttachmentBytes = 20L * 1024 * 1024;
+
+    /// <summary>The attachments as the user message's content blocks (<see cref="Attachments"/>): an attachment whose pictures
+    /// or PDF would take the message past <see cref="MaxAttachmentBytes"/> goes as its text instead.</summary>
+    public static IReadOnlyList<AttachmentWirePart> AttachmentParts(IReadOnlyList<MessageAttachment> attachments)
+    {
+        var output = new List<AttachmentWirePart>();
+        long bytes = 0;
+        int images = 0, documents = 0;
+        foreach (var attachment in attachments)
+        {
+            var route = Attachments with
+            {
+                MaxImages = Math.Max(0, Attachments.MaxImages!.Value - images),
+                MaxDocuments = Math.Max(0, Attachments.MaxDocuments!.Value - documents),
+            };
+            var parts = AttachmentWire.Parts([attachment], route);
+            var size = parts.Sum(p => p switch
+            {
+                AttachmentWirePart.Image image => image.Data.LongLength,
+                AttachmentWirePart.Document doc => doc.Data.LongLength,
+                _ => 0L,
+            });
+            if (size > 0 && bytes + size > MaxAttachmentBytes)
+            {
+                output.Add(new AttachmentWirePart.Text(AttachmentWire.FallbackText(attachment)));
+                continue;
+            }
+            bytes += size;
+            images += parts.Count(p => p is AttachmentWirePart.Image);
+            documents += parts.Count(p => p is AttachmentWirePart.Document);
+            output.AddRange(parts);
+        }
+        return output;
     }
 
     private static readonly JsonSerializerOptions Compact = new() { WriteIndented = false };
