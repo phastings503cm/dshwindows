@@ -177,7 +177,15 @@ public sealed partial class AgentHost
         roster.Changed += run =>
         {
             if (run.Id.Length == 0) return;
-            _dispatcher.BeginInvoke(() => Session(sessionId)?.UpsertAgent(run));
+            _dispatcher.BeginInvoke(() =>
+            {
+                if (Session(sessionId) is not { } vm) return;
+                var isNew = vm.Agents.All(a => a.Id != run.Id);
+                vm.UpsertAgent(run);
+                // A subagent that just started works one of the plan's steps: say which, so the plan shows who works it.
+                if (isNew && run.Assignment is null && PlanAssignment.Step(run.Description, run.Prompt ?? "", vm.Todos) is { } step)
+                    roster.SetAssignment(run.Id, step);
+            });
         };
         _rosters[sessionId] = roster;
         return roster;

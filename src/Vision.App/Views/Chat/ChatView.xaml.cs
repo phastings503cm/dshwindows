@@ -34,6 +34,7 @@ public partial class ChatView : UserControl
     private readonly ObservableCollection<MessageAttachment> _attachments = [];
     private readonly Dictionary<string, (string Text, List<MessageAttachment> Attachments)> _drafts = new();
     private readonly ThinkingFooter _thinking = new();
+    private readonly PhaseFooter _phase = new();
     private readonly FilesFooter _files = new();
     private IReadOnlyList<Skill> _slashSkills = [];
     private int _slashSkillsRevision = -1;
@@ -119,6 +120,7 @@ public partial class ChatView : UserControl
     private void Attach()
     {
         _thinking.Session = _session;
+        _phase.Session = _session;
         _files.Session = _session;
         _attachments.Clear();
         if (_session is not { } session)
@@ -136,6 +138,7 @@ public partial class ChatView : UserControl
         Transcript.ItemsSource = new CompositeCollection
         {
             new CollectionContainer { Collection = session.Entries },
+            _phase,
             _thinking,
             _files,
         };
@@ -349,6 +352,7 @@ public partial class ChatView : UserControl
         var running = _session?.Running == true;
         SendButton.Visibility = running ? Visibility.Collapsed : Visibility.Visible;
         StopButton.Visibility = running ? Visibility.Visible : Visibility.Collapsed;
+        AddTaskButton.Visibility = running ? Visibility.Visible : Visibility.Collapsed;
         StopButton.IsEnabled = _session?.Stopping != true;
         StopGlyph.Text = _session?.Stopping == true ? Icons.Stopwatch : Icons.Stop;
         StopButton.ToolTip = _session?.Stopping == true ? "Stopping…" : "Stop the agent (Ctrl+.)";
@@ -358,8 +362,11 @@ public partial class ChatView : UserControl
         UpdateSendState();
     }
 
-    private void UpdateSendState() =>
+    private void UpdateSendState()
+    {
         SendButton.IsEnabled = Composer.Text.Trim().Length > 0 || _attachments.Count > 0;
+        AddTaskButton.IsEnabled = Composer.Text.Trim().Length > 0;
+    }
 
     private void UpdateMeta()
     {
@@ -506,6 +513,11 @@ public partial class ChatView : UserControl
                 Answer(true);
                 e.Handled = true;
                 break;
+            case Key.Enter when modifiers == ModifierKeys.Control:
+                // Ctrl+Enter any time: on this chat's tasks, after whatever is there.
+                AddToTasks();
+                e.Handled = true;
+                break;
             case Key.Enter when modifiers == ModifierKeys.None:
                 // With the hint list open, Enter picks the highlighted command.
                 if (SlashPopup.IsOpen && SlashList.SelectedItem is not null && !Composer.Text.Contains(' '))
@@ -539,6 +551,12 @@ public partial class ChatView : UserControl
     {
         if (_session is not { } session) return;
         var text = Composer.Text.Trim();
+        // While the agent works, Enter queues what you typed on this chat's tasks: it starts by itself after.
+        if (session.Running && text.Length > 0 && _attachments.Count == 0)
+        {
+            AddToTasks();
+            return;
+        }
         if ((text.Length == 0 && _attachments.Count == 0) || session.Running) return;
         var payload = _attachments.ToList();
         Composer.Clear();
@@ -552,6 +570,88 @@ public partial class ChatView : UserControl
     private void Stop_Click(object sender, RoutedEventArgs e)
     {
         if (_session is { } session) _model.Host.StopSession(session.Id);
+    }
+
+    private void AddTask_Click(object sender, RoutedEventArgs e) => AddToTasks();
+
+    /// <summary>"Add to tasks": what is typed goes on this chat's tasks, after whatever is there, and runs as the chat's next
+    /// prompt once the work before it is done (at once when the chat is free). Attachments stay for a message of their own.</summary>
+    private void AddToTasks()
+    {
+        if (_session is not { } session) return;
+        var text = Composer.Text.Trim();
+        if (text.Length == 0) return;
+        if (_model.Host.AddToTasks(session.Id, text) is null) return;
+        Composer.Clear();
+        SlashPopup.IsOpen = false;
+        _pinned = true;
+        ScrollIfPinned();
+    }
+
+    /// <summary>Drop <paramref name="text"/> into the composer (the Prompts timeline's "Add to composer"), after what is there.</summary>
+    public void InsertText(string text)
+    {
+        if (Composer.Text.Length > 0 && !Composer.Text.EndsWith('\n')) Composer.Text += "\n\n";
+        Composer.Text += text;
+        FocusComposer();
+    }
+
+    /// <summary>Scroll the transcript to an entry and flash it (the Prompts timeline's "Jump to it"). False when the chat no
+    /// longer has it.</summary>
+    public bool ScrollToEntry(string entryId)
+    {
+        if (_session is not { } session || session.Entries.FirstOrDefault(e => e.Id == entryId) is not { } entry) return false;
+        _pinned = false;
+        Transcript.UpdateLayout();
+        var container = Transcript.ItemContainerGenerator.ContainerFromItem(entry) as FrameworkElement;
+        if (container is null)
+        {
+            // Virtualized out of view: bring it into existence first.
+            if (FindPanel(Transcript) is VirtualizingStackPanel panel)
+            {
+                var index = session.Entries.IndexOf(entry);
+                panel.BringIndexIntoViewPublic(index);
+                Transcript.UpdateLayout();
+            }
+            container = Transcript.ItemContainerGenerator.ContainerFromItem(entry) as FrameworkElement;
+        }
+        if (container is null) return false;
+        container.BringIntoView(new Rect(0, 0, container.ActualWidth, Math.Min(container.ActualHeight, 400)));
+        Dispatcher.BeginInvoke(DispatcherPriority.Loaded, () => Flash(container));
+        return true;
+    }
+
+    private static VirtualizingStackPanel? FindPanel(DependencyObject root)
+    {
+        for (var i = 0; i < VisualTreeHelper.GetChildrenCount(root); i++)
+        {
+            var child = VisualTreeHelper.GetChild(root, i);
+            if (child is VirtualizingStackPanel panel) return panel;
+            if (FindPanel(child) is { } found) return found;
+        }
+        return null;
+    }
+
+    /// <summary>A brief accent wash over a row the timeline jumped to.</summary>
+    private static void Flash(FrameworkElement container)
+    {
+        var brush = new SolidColorBrush(ThemeService.Brush("AccentFillColorDefaultBrush", Colors.SteelBlue) is SolidColorBrush accent ? accent.Color : Colors.SteelBlue)
+        {
+            Opacity = 0,
+        };
+        var adorner = System.Windows.Documents.AdornerLayer.GetAdornerLayer(container);
+        if (adorner is null) return;
+        var wash = new HighlightAdorner(container, brush);
+        adorner.Add(wash);
+        var animation = new System.Windows.Media.Animation.DoubleAnimation(0.28, 0, TimeSpan.FromSeconds(1.6)) { BeginTime = TimeSpan.FromMilliseconds(150) };
+        animation.Completed += (_, _) => adorner.Remove(wash);
+        brush.BeginAnimation(Brush.OpacityProperty, animation);
+    }
+
+    private sealed class HighlightAdorner(UIElement element, Brush brush) : System.Windows.Documents.Adorner(element)
+    {
+        protected override void OnRender(DrawingContext context) =>
+            context.DrawRoundedRectangle(brush, null, new Rect(AdornedElement.RenderSize), 8, 8);
     }
 
     private void Suggestion_Click(object sender, RoutedEventArgs e)
