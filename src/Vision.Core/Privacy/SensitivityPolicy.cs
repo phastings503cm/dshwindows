@@ -17,17 +17,34 @@ namespace Vision.Core;
 //
 // Pure functions, with the words and machine codes of Vision for macOS's SensitivityPolicy.swift.
 
-/// <summary>How a Sensitive chat may use a route: <see cref="Code"/> is "private", "masked" or "refused".</summary>
-public sealed record RouteAdmission(string Code, string? Why = null, string? Refusal = null)
+/// <summary>How a Sensitive chat may use a route (the same shape as the Claude Code lane's copy of this file).</summary>
+public abstract record RouteAdmission
 {
-    public static RouteAdmission Private(string why) => new("private", Why: why);
-    public static RouteAdmission Masked { get; } = new("masked");
-    public static RouteAdmission Refused(string reason) => new("refused", Refusal: reason);
+    /// <summary>The route may see the chat as it is; <paramref name="Why"/> names what makes it private.</summary>
+    public sealed record Private(string Why) : RouteAdmission;
+    /// <summary>Allowed only behind the sensitive-data shield.</summary>
+    public sealed record Masked : RouteAdmission;
+    /// <summary>Not allowed in a Sensitive chat; <paramref name="Reason"/> says why in a plain sentence.</summary>
+    public sealed record Refused(string Reason) : RouteAdmission;
 
-    public bool IsAllowed => Code != "refused";
-    public bool IsPrivate => Code == "private";
-    public bool IsMasked => Code == "masked";
+    public bool IsAllowed => this is not Refused;
+    public bool IsPrivate => this is Private;
+    public bool IsMasked => this is Masked;
+
+    /// <summary>The reason a route is refused (null when it is allowed).</summary>
+    public string? Refusal => this is Refused refused ? refused.Reason : null;
+
+    /// <summary>Stable machine word for logs and tests: "private", "masked", "refused".</summary>
+    public string Code => this switch
+    {
+        Private => "private",
+        Masked => "masked",
+        _ => "refused",
+    };
 }
+
+/// <summary>A turn refused because the chat is Sensitive and its model may not see it.</summary>
+public sealed class SensitivityRefusalException(string message) : Exception(message);
 
 public static class SensitivityPolicy
 {
@@ -70,18 +87,18 @@ public static class SensitivityPolicy
     public static RouteAdmission Admission(string kind, string name, bool isPrivate, bool shieldOn)
     {
         if (DirectFileEngineKinds.Contains(kind))
-            return RouteAdmission.Refused($"{name} reads your files itself and sends them to its own service, so the " +
+            return new RouteAdmission.Refused($"{name} reads your files itself and sends them to its own service, so the " +
                                           "sensitive-data shield can't mask anything on the way. Sensitive chats can't use it — choose a " +
                                           "private model (your own hardware, Guardian, Amazon Bedrock in your AWS account), or turn Sensitive " +
                                           "off for this chat.");
-        if (kind.Equals("guardian", StringComparison.OrdinalIgnoreCase)) return RouteAdmission.Private("Guardian, your organisation's own server");
-        if (kind.Equals("bedrock", StringComparison.OrdinalIgnoreCase)) return RouteAdmission.Private("Amazon Bedrock in your own AWS account");
-        if (isPrivate) return RouteAdmission.Private("your own hardware");
+        if (kind.Equals("guardian", StringComparison.OrdinalIgnoreCase)) return new RouteAdmission.Private("Guardian, your organisation's own server");
+        if (kind.Equals("bedrock", StringComparison.OrdinalIgnoreCase)) return new RouteAdmission.Private("Amazon Bedrock in your own AWS account");
+        if (isPrivate) return new RouteAdmission.Private("your own hardware");
         if (!shieldOn)
-            return RouteAdmission.Refused($"{name} is an online service and the sensitive-data shield is switched off, so " +
+            return new RouteAdmission.Refused($"{name} is an online service and the sensitive-data shield is switched off, so " +
                                           "nothing would be masked before sending. Turn the shield on (Settings › AI Models › Sensitive data), " +
                                           "choose a private model, or turn Sensitive off for this chat.");
-        return RouteAdmission.Masked;
+        return new RouteAdmission.Masked();
     }
 
     /// <summary>The error a Sensitive chat shows when its model is refused (also what a turn throws); null when it is allowed.</summary>
@@ -92,11 +109,10 @@ public static class SensitivityPolicy
     public static string HeaderLine(ProviderProfile? route, bool shieldOn)
     {
         if (route is null) return "Sensitive — only private models, or others through the shield.";
-        var admission = Admission(route, shieldOn);
-        return admission.Code switch
+        return Admission(route, shieldOn) switch
         {
-            "private" => $"Sensitive — {Label(route)} is private ({admission.Why}).",
-            "masked" => $"Sensitive — {Label(route)} isn't private: what the shield detects is masked before sending.",
+            RouteAdmission.Private privately => $"Sensitive — {Label(route)} is private ({privately.Why}).",
+            RouteAdmission.Masked => $"Sensitive — {Label(route)} isn't private: what the shield detects is masked before sending.",
             _ => $"Sensitive — {Label(route)} can't be used in this chat. Choose a private model.",
         };
     }

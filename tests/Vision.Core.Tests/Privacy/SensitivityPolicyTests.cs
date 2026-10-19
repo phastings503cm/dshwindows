@@ -2,7 +2,7 @@ namespace Vision.Core.Tests;
 
 /// <summary>Which routes a Sensitive chat may use (10-19 #20): private ones as they are, online ones only through the shield,
 /// engines that read files themselves never — the same cases as Vision for macOS's SensitivityPolicyTests.</summary>
-public sealed class RouteAdmissionTests
+public sealed class SensitivityPolicyTests
 {
     private static ProviderProfile Route(ProviderKind kind, string name, string url, bool? isPrivate = null) =>
         new(kind, name, url, "m") { IsPrivate = isPrivate };
@@ -11,7 +11,7 @@ public sealed class RouteAdmissionTests
     public void YourOwnHardwareIsPrivate()
     {
         foreach (var url in new[] { "http://spark.local:8002/v1", "http://127.0.0.1:11434/v1", "http://192.168.1.50:8002/v1", "http://halo:8080/v1", "http://evo.tail1234.ts.net/v1" })
-            Assert.Equal(RouteAdmission.Private("your own hardware"), SensitivityPolicy.Admission(Route(ProviderKind.OpenAICompat, "Spark", url), shieldOn: false));
+            Assert.Equal(new RouteAdmission.Private("your own hardware"), SensitivityPolicy.Admission(Route(ProviderKind.OpenAICompat, "Spark", url), shieldOn: false));
         Assert.Equal("private", SensitivityPolicy.Admission(Route(ProviderKind.Ollama, "Ollama", "http://127.0.0.1:11434/v1"), shieldOn: true).Code);
         Assert.Equal("private", SensitivityPolicy.Admission(Route(ProviderKind.LmStudio, "LM Studio", "http://localhost:1234/v1"), shieldOn: true).Code);
     }
@@ -20,12 +20,12 @@ public sealed class RouteAdmissionTests
     public void GuardianAndBedrockInYourAccountArePrivate()
     {
         // Windows reaches Guardian through its model proxy (an OpenAI-compatible route under /api/harness/).
-        Assert.Equal(RouteAdmission.Private("Guardian, your organisation's own server"),
+        Assert.Equal(new RouteAdmission.Private("Guardian, your organisation's own server"),
             SensitivityPolicy.Admission(Route(ProviderKind.OpenAICompat, "Guardian", "https://guardian.503cm.com/api/harness/v1"), shieldOn: false));
         // Bedrock isn't "private" for the shield (it still masks), but it is the person's own AWS account.
         var bedrock = Route(ProviderKind.Bedrock, "Amazon Bedrock", "https://bedrock-runtime.us-east-1.amazonaws.com");
         Assert.False(bedrock.IsPrivateRoute);
-        Assert.Equal(RouteAdmission.Private("Amazon Bedrock in your own AWS account"), SensitivityPolicy.Admission(bedrock, shieldOn: false));
+        Assert.Equal(new RouteAdmission.Private("Amazon Bedrock in your own AWS account"), SensitivityPolicy.Admission(bedrock, shieldOn: false));
         Assert.Equal("private", SensitivityPolicy.Admission("guardian", "Guardian", isPrivate: false, shieldOn: false).Code);
     }
 
@@ -33,20 +33,20 @@ public sealed class RouteAdmissionTests
     public void AnOnlineServiceIsAllowedOnlyThroughTheShield()
     {
         var kimi = Route(ProviderKind.OpenAICompat, "Kimi Code", "https://api.kimi.com/coding/v1");
-        Assert.Equal(RouteAdmission.Masked, SensitivityPolicy.Admission(kimi, shieldOn: true));
+        Assert.Equal(new RouteAdmission.Masked(), SensitivityPolicy.Admission(kimi, shieldOn: true));
         var off = SensitivityPolicy.Admission(kimi, shieldOn: false);
         Assert.False(off.IsAllowed);
         Assert.Equal("refused", off.Code);
         Assert.Contains("the sensitive-data shield is switched off", off.Refusal);
         Assert.Contains("Settings › AI Models › Sensitive data", off.Refusal);
-        Assert.Equal(RouteAdmission.Masked, SensitivityPolicy.Admission(Route(ProviderKind.OpenAICompat, "DeepSeek", "https://api.deepseek.com/v1"), shieldOn: true));
+        Assert.Equal(new RouteAdmission.Masked(), SensitivityPolicy.Admission(Route(ProviderKind.OpenAICompat, "DeepSeek", "https://api.deepseek.com/v1"), shieldOn: true));
     }
 
     [Fact]
     public void ThePersonsPrivateSwitchWinsBothWays()
     {
         Assert.Equal("private", SensitivityPolicy.Admission(Route(ProviderKind.OpenAICompat, "My box", "https://box.example.com/v1", isPrivate: true), shieldOn: false).Code);
-        Assert.Equal(RouteAdmission.Masked, SensitivityPolicy.Admission(Route(ProviderKind.OpenAICompat, "Shared", "http://10.0.0.5:8000/v1", isPrivate: false), shieldOn: true));
+        Assert.Equal(new RouteAdmission.Masked(), SensitivityPolicy.Admission(Route(ProviderKind.OpenAICompat, "Shared", "http://10.0.0.5:8000/v1", isPrivate: false), shieldOn: true));
     }
 
     [Fact]

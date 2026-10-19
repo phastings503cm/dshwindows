@@ -1078,7 +1078,7 @@ public sealed partial class AgentHost : ObservableObject
         // before this turn's entry is added so its text isn't sent twice.
         if (!_transcripts.ContainsKey(sessionId)) _transcripts[sessionId] = ReplayMessages(vm.Entries);
         // A Sensitive chat never sends on a route it may not use (checked before anything is shown as sent).
-        if (SensitiveRefusal(vm) is { } refusal) throw new SensitiveRouteException(refusal);
+        if (SensitiveRefusal(vm) is { } refusal) throw new SensitivityRefusalException(refusal);
         var firstBadges = attachments.Select(a => AttachmentBadge.Of(a)).ToList();
         var userEntryId = vm.AppendMessage(MessageRole.User, displayText, attachments: firstBadges);
         Log.RecordItem(sessionId, "user", displayText, attachments: firstBadges);

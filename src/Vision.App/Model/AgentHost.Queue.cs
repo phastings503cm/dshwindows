@@ -718,7 +718,7 @@ public sealed partial class AgentHost
                 {
                     throw;
                 }
-                catch (SensitiveRouteException refused)
+                catch (SensitivityRefusalException refused)
                 {
                     // A Sensitive chat on a model it may not use: retrying can't help — the goal pauses until the person picks
                     // another model (or turns Sensitive off).

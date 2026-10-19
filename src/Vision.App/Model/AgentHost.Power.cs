@@ -346,9 +346,6 @@ public sealed partial class AgentHost
         "--- Sensitive chat ---\nThe user marked this chat Sensitive: treat what you read here as confidential. Don't put it into web addresses " +
         "(web_fetch), queue tasks, skills or anything that leaves this chat unless the user asks; give subagents only what their task needs.";
 
-    /// <summary>A chat's turn refused because it is Sensitive and its model may not see it.</summary>
-    public sealed class SensitiveRouteException(string message) : Exception(message);
-
     private void ForgetPowerState(string id)
     {
         _checkpointSlots.Remove(id);
