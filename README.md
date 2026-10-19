@@ -7,8 +7,8 @@
 <p align="center">
   A native Windows coding agent that <em>is</em> the harness. It runs the tool loop itself and talks
   straight to an OpenAI-compatible model server — a DGX Spark or Strix Halo on your LAN, a local
-  Ollama or LM Studio, a GLM, Kimi, Qwen or OpenAI plan, Amazon Bedrock, or your organization's
-  Guardian. No Node, no sidecar process, no web view.
+  Ollama or LM Studio, a GLM, Kimi, DeepSeek, Qwen or OpenAI plan, Claude on the Anthropic API,
+  Amazon Bedrock, or your organization's Guardian. No Node, no sidecar process, no web view.
 </p>
 
 <p align="center">
@@ -88,7 +88,7 @@ pin a permission preset, and optionally open a project folder.
 | Backend | Address | Notes |
 |---|---|---|
 | Spark Swapper (DGX Spark or Strix Halo) | a connection code | **My Spark Swapper** — see *Connecting a Spark Swapper* |
-| Z.ai GLM, Kimi, Qwen, OpenAI plans | hosted | **A subscription or API plan** — see *Subscription plans* |
+| Z.ai GLM, Kimi, Qwen, OpenAI, DeepSeek, Anthropic plans | hosted | **A subscription or API plan** (DeepSeek and the Anthropic API also have their own cards) — see *Subscription plans* |
 | DGX Spark / vLLM / SGLang / llama.cpp | `http://<host>:<port>/v1` | Port `8002` on a Spark set up with the guide |
 | Ollama | `http://127.0.0.1:11434/v1` | Start the Ollama app or `ollama serve` |
 | LM Studio | `http://127.0.0.1:1234/v1` | Developer › Start Server |
@@ -205,9 +205,10 @@ screenshots in them are from its repository (MIT, see `SWAPPER-SCREENSHOTS-LICEN
 
 A route that is off is never used and stays in the list, greyed; the primary can't be switched off
 until another route is primary. **Add** offers a Spark Swapper (connection code), a subscription plan,
-Amazon Bedrock, or any other OpenAI-compatible server; **Test All** checks every route that is on and
-shows the result as a dot beside it. The model menu under the composer groups routes the same way
-(Primary, Subagents, Backups, Other), with a lock or a shield beside each.
+DeepSeek, the Anthropic API (key), Amazon Bedrock, or any other OpenAI-compatible server; **Test All**
+checks every route that is on and shows the result as a dot beside it. The model menu under the composer
+groups routes the same way (Primary, Subagents, Backups, Other), with a lock or a shield beside each, and —
+while you are signed in to Guardian — Guardian's models under **Guardian** (see *Guardian*).
 
 **Each chat has its own model.** Picking a model in the menu under the composer changes that chat only
 (it is stored with the conversation): two projects open side by side can run on two different servers
@@ -278,8 +279,8 @@ reply, a command or a tool's output, even run together with other text (`-phunte
 
 ## Subscription plans
 
-**A subscription or API plan — GLM, Kimi, Qwen, OpenAI** on the wizard's first page, or **Settings ›
-AI Models › Add › Subscription plan…**, walks through connecting one:
+**A subscription or API plan — GLM, Kimi, Qwen, OpenAI, DeepSeek, Anthropic** on the wizard's first page, or
+**Settings › AI Models › Add › Subscription plan…**, walks through connecting one:
 
 | Plan | Notes |
 |---|---|
@@ -287,6 +288,8 @@ AI Models › Add › Subscription plan…**, walks through connecting one:
 | Kimi Code (subscription), and Moonshot pay-as-you-go API | Overseas or China. Vision tells Kimi who is calling (`Vision/<version> (Windows)`) and never poses as another tool; if Kimi refuses that, the guide suggests the Moonshot API. |
 | OpenAI API | A ChatGPT Plus or Pro subscription doesn't include API access — the API is billed separately. |
 | Qwen — Alibaba Cloud Coding Plan, and Model Studio pay-as-you-go | International or China. Coding Plan keys start with `sk-sp-`. |
+| DeepSeek API | `deepseek-v4-pro` (1M context, text) and `deepseek-flash` (V4.1 Flash, 1M, reads images). Also its own card on the wizard's first page and **Add › DeepSeek…**. |
+| Anthropic API (Claude, with an API key) | `claude-opus-5-5` (recommended), `claude-fable-5-1`, `claude-sonnet-5-5`, `claude-haiku-5-5` — what the key's `/v1/models` lists. Also its own card and **Add › Anthropic API (key)…**. |
 
 Pick the plan and region; the guide shows where to get the key, step by step (with a button to open
 the page), checks the key you paste — saying what's wrong when it isn't accepted: the wrong region or
@@ -300,6 +303,20 @@ only (plan terms)** (a switch in the route editor, for any route): while it is a
 task list won't start (or stops before its next task) and a `/goal` doesn't carry on by itself — pick
 another model for the chat for unattended work — and unattended work never falls back to it as a backup or
 sends subagents to it. Chats, the subagents they start, and prompts you queue with *Add to tasks* are fine.
+
+- **DeepSeek.** The thinking menu maps to DeepSeek's switch and effort: *Off* sends
+  `thinking: {"type": "disabled"}`, *Low* / *High* / *Max* send `"enabled"` with `reasoning_effort` `low` / `high` /
+  `max` (*Medium* is `high`, as DeepSeek maps it). With tools, every earlier answer's reasoning goes back with the
+  conversation, as DeepSeek requires; if DeepSeek still asks for reasoning a chat no longer has, that one turn runs
+  without thinking and the chat says so. A key it refuses, an empty balance (402) and its rate limit are said in plain
+  words, and only the last is retried. DeepSeek's servers are in China — the route starts out not private, so the
+  shield masks before sending.
+- **Anthropic API (key)** talks to Claude on the Messages API directly: streaming, tools, images, PDFs (up to 20 MB of
+  pictures and PDFs per request, the message being sent first — past that one goes as its text), extended thinking
+  (adaptive with summaries; Opus 5.5's *Off* is its lowest effort, Sonnet 5.5's is `between_tools`), prompt caching
+  (after the system prompt, the tools and the conversation) and Anthropic's server-side fallback (a declined request
+  moves to the model Anthropic recommends, with a line saying so). A request Claude declines is said in Anthropic's
+  words. A Claude Pro or Max subscription isn't an API key — the guide says so if you paste a subscription token.
 
 ## Using Amazon Bedrock
 
@@ -355,9 +372,14 @@ accounts — Guardian's page opens, you choose the organization, and Vision gets
 there (*Profile › API keys › Connected apps*). The sign-in is kept in Windows Credential Manager. Signed in,
 Vision gets whatever your Guardian role allows:
 
-- **Guardian's models** — **Use as my primary model** (or *Use for subagents*, *Just add it*) adds a route
-  through Guardian's model proxy, charged to you within your organization's limits. The page shows each
-  spend, token and request limit, what is left and when it resets.
+- **Guardian's models in every chat** — once signed in, the models Guardian offers you appear by themselves in
+  every chat's model menu under **Guardian**, no button to press, charged to you within your organization's
+  limits through Guardian's model proxy. Any chat can pick one like any other model (Guardian's context window and
+  plan terms come with it). The list is read again on every sign-in, on an organization switch and every 15
+  minutes, and kept for the next launch (without the token). Signing out takes them out of the menus; a chat that
+  was on one keeps it and says *Sign in to Guardian to use this model.* — signing in again renews the token for
+  every chat on them. **Use as my primary model** and *Use for subagents* save a Guardian route in those roles.
+  The page shows each spend, token and request limit, what is left and when it resets.
 - **Prompt history** — every prompt, task and `/goal` goes to your Guardian Prompt Notebook when it starts and
   again with how it ended. Guardian isn't private, so the copy that goes up is masked like a request to a model
   that isn't: the keys and passwords in your vault always, and — with the sensitive-data shield on — whatever it
@@ -804,8 +826,8 @@ To produce the release files locally (installers need [Inno Setup](https://jrsof
 ./scripts/package.ps1 -Arch x64 -SkipInstaller # just a portable x64 build
 ```
 
-`dotnet test tests/Vision.Core.Tests` runs the core tests anywhere (3,417 on Linux, 25 of them Windows-only and
-skipped there; 3,411 on Windows, 48 skipped). The app tests (140) and the computer-use tests (116) need Windows.
+`dotnet test tests/Vision.Core.Tests` runs the core tests anywhere (3,504 on Linux, 25 of them Windows-only and
+skipped there; 3,498 on Windows, 48 skipped). The app tests (156) and the computer-use tests (121) need Windows.
 
 `Vision.exe --self-test <folder> [--theme light|dark]` renders every main view and window to PNGs using
 a throwaway data folder and a demo project, and exits non-zero on any error. CI runs it on Windows.
