@@ -12,8 +12,8 @@
 </p>
 
 <p align="center">
-  <img src="assets/screenshots/agent-at-work-dark.png" width="920"
-       alt="Vision working through a task: its plan beside the chat with three of four steps done, the tests running, and a review subagent working on a second model server" />
+  <img src="assets/screenshots/turn-and-tasks-dark.png" width="920"
+       alt="Vision working through a goal: the turn card in Execution with its runtime against the estimate, the task list's Now card with each step's subagent and model, and two prompts queued behind it" />
 </p>
 
 ---
@@ -33,12 +33,20 @@ you → Vision.Core.Engine → OpenAI-compatible /chat/completions → tool call
 
 | | |
 |---|---|
-| ![The finished task: what changed, the checks it ran and the files it touched](assets/screenshots/task-done-light.png) | ![Code mode: the project's files, an editor and a PowerShell terminal beside the chat](assets/screenshots/code-mode-dark.png) |
-| The finished task: what changed, the checks it ran, the files it touched | Code mode: files, editor and a terminal beside the chat |
-| ![The setup wizard's first page](assets/screenshots/setup-wizard-light.png) | ![Settings, AI Models: a DGX Spark as the private primary and Amazon Bedrock](assets/screenshots/ai-models-dark.png) |
-| Setting up: a Spark Swapper code, a subscription plan, a DGX Spark from scratch, or Bedrock | AI Models: primary, subagents, backups and private routes |
-| ![Settings, Model servers: a DGX Spark serving one model while it installs another](assets/screenshots/model-servers-light.png) | ![A chat's task list beside the chat: done, waiting on you, and queued tasks](assets/screenshots/task-list-light.png) |
-| Model servers: what each Spark Swapper box serves and can install | Task lists: work queued for a chat, done one by one |
+| ![The finished turn: Completed with results, how long it took against the estimate, and the evidence](assets/screenshots/turn-results-light.png) | ![Code mode with the chat as the main view: the project's status bar and the Files, Editor, Terminal and Chat only switches](assets/screenshots/code-mode-dark.png) |
+| A finished turn: how it ended, how long against the estimate, the evidence | Code mode: the chat is the main view; files, editor and terminal switch on and off |
+| ![Prompts: every prompt the chat sent, how each ended, and one selected with its evidence](assets/screenshots/prompts-light.png) | ![Background activity: each agent and subagent, what it was given and the model it runs on](assets/screenshots/background-activity-light.png) |
+| Prompts: every prompt sent, and what came of it | Background activity: who is working on what, on which model |
+| ![Attachments read by Vision: a PDF, Markdown, a Word file, a scan and a 10,214-line paste, each saying how it is sent](assets/screenshots/attachments-dark.png) | ![The chat's model menu: this chat's model, the primary, and Make this the primary](assets/screenshots/model-menu-dark.png) |
+| Attachments: read by Vision, each chip says how it goes to the model | Each chat has its own model |
+| ![Settings, Guardian: signed in, the organization, limits and Guardian's models](assets/screenshots/guardian-light.png) | ![Guardian's refusal as a dialog: what is missing and who can turn it on](assets/screenshots/guardian-refusal-dark.png) |
+| Guardian: one sign-in for models, limits, prompts, skills and chats | When Guardian says no, Vision says why |
+| ![The machine-in-use glow around the screen and its label: which chat has the mouse, one waiting, Ctrl+Alt+. stops](assets/screenshots/machine-glow-dark.png) | ![Settings, Import & Export: OpenClaw on this PC in and out](assets/screenshots/import-export-light.png) |
+| Computer use: the glow, and one real mouse shared in turn | Import & Export with OpenClaw on this PC |
+| ![Checking a Z.ai key: it is a GLM Coding Plan key on the wrong endpoint, with Switch to Coding Plan](assets/screenshots/zai-check-light.png) | ![The setup wizard's first page](assets/screenshots/setup-wizard-light.png) |
+| Z.ai (GLM): a key on the wrong endpoint is found and switched | Setting up: a Spark Swapper code, a plan, Z.ai, a DGX Spark from scratch, Bedrock or Guardian |
+| ![Settings, AI Models: a DGX Spark as the private primary and Amazon Bedrock](assets/screenshots/ai-models-dark.png) | ![Settings, Model servers: a DGX Spark serving one model while it installs another](assets/screenshots/model-servers-light.png) |
+| AI Models: primary, subagents, backups and private routes | Model servers: what each Spark Swapper box serves and can install |
 | ![The credentials vault](assets/screenshots/credentials-vault-dark.png) | ![The Amazon Bedrock guide's first page](assets/screenshots/bedrock-guide-light.png) |
 | The credentials vault: the agent writes `{{vault:NAME}}` and never sees the value | The Amazon Bedrock guide: sign-in, model access and terms, step by step |
 
@@ -759,6 +767,9 @@ To produce the release files locally (installers need [Inno Setup](https://jrsof
 ./scripts/package.ps1                          # x64 + arm64: installers, portable zips, SHA256SUMS
 ./scripts/package.ps1 -Arch x64 -SkipInstaller # just a portable x64 build
 ```
+
+`dotnet test tests/Vision.Core.Tests` runs the core tests anywhere (3,417 on Linux, 25 of them Windows-only and
+skipped there; 3,411 on Windows, 48 skipped). The app tests (140) and the computer-use tests (116) need Windows.
 
 `Vision.exe --self-test <folder> [--theme light|dark]` renders every main view and window to PNGs using
 a throwaway data folder and a demo project, and exits non-zero on any error. CI runs it on Windows.
