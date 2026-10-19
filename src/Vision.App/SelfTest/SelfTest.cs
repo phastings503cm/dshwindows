@@ -110,6 +110,7 @@ public sealed partial class SelfTest
             await Settle(4000);
             Capture(window, "code");
             Note($"terminal: {model.Code.ActiveTerminal?.Transcript.Split('\n').FirstOrDefault(l => l.Trim().Length > 0) ?? "(none)"}");
+            await CaptureCodeLayouts(window, model);
 
             model.Mode = WorkspaceMode.Chat;
             model.NewChat();
@@ -192,6 +193,12 @@ public sealed partial class SelfTest
             await ShowAndCapture(vaultWindow, "vault");
 
             await CaptureProviders(window, model);
+
+            // What the composer says it will send for a PDF, a Markdown file, a Word file, a scan and a large paste.
+            await CaptureAttachments(window, model);
+
+            // Last, since it leaves a chat holding 10,000 lines: a very large paste, measured.
+            await ProbeLargePaste(window, model);
         }
         catch (Exception error)
         {

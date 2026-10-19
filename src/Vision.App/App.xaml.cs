@@ -78,6 +78,12 @@ public partial class App : Application
         AwsAccounts.Install();
         // What servers refused before (a temperature, a thinking setting) is remembered across launches.
         RequestAdaptationStore.Shared.FilePath = AppPaths.RequestAdaptations;
+        // Text in attached pictures and scanned PDFs, where Windows has an OCR language for the user (made off the UI thread:
+        // the first call loads the recognizer).
+        _ = Task.Run(() =>
+        {
+            if (OperatingSystem.IsWindowsVersionAtLeast(10, 0, 10240) && WindowsOcr.TryCreate() is { } ocr) AttachmentReader.Ocr = ocr;
+        });
         var config = new AppConfig();
         if (selfTest is null)
         {

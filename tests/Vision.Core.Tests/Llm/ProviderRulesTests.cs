@@ -171,8 +171,9 @@ public sealed class ProviderRulesTests
         Assert.Null(body["chat_template_kwargs"]); // a hosted API never gets template kwargs
         var text = body["messages"]![0]!["content"]!.GetValue<string>(); // Z.ai's text models take a string, not parts
         Assert.StartsWith("look", text);
-        Assert.Contains("--- notes.md ---\n# Notes\nhello", text);
-        Assert.Contains("[Image shot.png not sent: this model reads text only.]", text);
+        Assert.Contains("[Attached file: notes.md]\n# Notes\nhello", text); // the text Vision read, never a file part
+        Assert.DoesNotContain("image_url", body.ToJsonString()); // a picture goes as its text (OCR), never as a part
+        Assert.Contains("shot.png", text);
         var rules = ModelRequestRules.For(glm);
         Assert.Equal([ThinkingLevel.Low, ThinkingLevel.High, ThinkingLevel.Max], rules.ThinkingLevels);
         Assert.False(rules.AcceptsImages);

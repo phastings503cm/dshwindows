@@ -239,10 +239,11 @@ public sealed partial class AgentHost : ObservableObject
         Config.SetQueueResume(id, false);
         Config.SetSkillsFor(id, null);
         Log.Delete(id);
-        // Its Prompts timeline goes with it.
+        // Its Prompts timeline and the text of its attachments go with it.
         PromptStore.Delete(id);
         _chatTasksPaused.Remove(id);
         _pendingPromptSource.Remove(id);
+        AttachmentStoreFor(id).RemoveAll();
         _pendingShield.Remove(id);
         if (Session(id) is { } vm) Sessions.Remove(vm);
         // A chat without a project takes its scratch folder with it, to the Recycle Bin: its task list, which worked in the
@@ -307,7 +308,7 @@ public sealed partial class AgentHost : ObservableObject
         {
             switch (row.Kind)
             {
-                case "user": vm.AppendMessage(MessageRole.User, row.Text ?? "", row.At); break;
+                case "user": vm.AppendMessage(MessageRole.User, row.Text ?? "", row.At, row.Attachments); break;
                 case "assistant":
                     vm.AppendMessage(MessageRole.Assistant, row.Text ?? "", row.At);
                     // The shield's line rides in ArgSummary (an assistant row has no arguments).
@@ -357,7 +358,8 @@ public sealed partial class AgentHost : ObservableObject
             {
                 case MessageEntryVM { Role: MessageRole.User } m:
                     FlushTools();
-                    output.Add(LlmMessage.User(m.Text));
+                    // What it carried: the files' content isn't in the display rows, but where it is saved is.
+                    output.Add(LlmMessage.User(string.Join("\n\n", new[] { m.Text }.Concat(m.Attachments.Select(a => a.ReplayNote)).Where(t => t.Length > 0))));
                     break;
                 case MessageEntryVM { Role: MessageRole.Assistant } m:
                     FlushTools();
@@ -432,6 +434,8 @@ public sealed partial class AgentHost : ObservableObject
         var extra = new List<IToolExecutor>(PluginLoader.Tools(plain ? UserPlugins() : Plugins, builtins.Names));
         if (skillState.Active.Count > 0) extra.Add(new UseSkillTool(skillState.Active));
         extra.Add(new VaultSearchTool(Vault));
+        // Long attachments are read in parts; any attachment again after a restart.
+        extra.Add(new ReadAttachmentTool(AttachmentStoreFor(sessionId)));
         extra.AddRange(ToolRegistry.BackgroundAgentTools());
         if (Config.MemoryEnabled)
         {
@@ -976,8 +980,9 @@ public sealed partial class AgentHost : ObservableObject
         // Prime the model transcript from the timeline when it's missing (a chat from an earlier launch),
         // before this turn's entry is added so its text isn't sent twice.
         if (!_transcripts.ContainsKey(sessionId)) _transcripts[sessionId] = ReplayMessages(vm.Entries);
-        var userEntryId = vm.AppendMessage(MessageRole.User, displayText);
-        Log.RecordItem(sessionId, "user", displayText);
+        var firstBadges = attachments.Select(a => AttachmentBadge.Of(a)).ToList();
+        var userEntryId = vm.AppendMessage(MessageRole.User, displayText, attachments: firstBadges);
+        Log.RecordItem(sessionId, "user", displayText, attachments: firstBadges);
         PromptEntryLanded(vm, userEntryId, displayText);
         // A plan proposed earlier in Plan only mode is old news once the chat works in another mode.
         if (vm.Preset != PermissionPreset.Plan) vm.ProposedPlan = null;
@@ -1023,6 +1028,9 @@ public sealed partial class AgentHost : ObservableObject
         _failoverNoted.Remove(sessionId);
         _pendingShield.Remove(sessionId);
         var input = _transcripts[sessionId].ToList();
+        // Attachments go as what this route takes: text read out of every file (a long one in parts the model reads with
+        // read_attachment), pictures only to a model that takes them.
+        if (attachments.Count > 0) attachments = await PrepareAttachmentsAsync(attachments, vm, userEntryId, profile, window);
 
         // Engine events arrive on a pool thread; hop to the UI thread so the timeline is only ever
         // mutated from one place.
@@ -1075,6 +1083,49 @@ public sealed partial class AgentHost : ObservableObject
             Log.RecordItem(sessionId, "notice", text);
         }
         return result;
+    }
+
+    // MARK: - Attachments
+
+    /// <summary>Where a chat's attachments are saved (their full text, for read_attachment).</summary>
+    public AttachmentStore AttachmentStoreFor(string sessionId) =>
+        AttachmentStore.ForChat(sessionId, AttachmentsRootForTesting ?? AppPaths.Attachments);
+
+    /// <summary>Tests: keep chats' attachments here instead of the data folder.</summary>
+    public string? AttachmentsRootForTesting { get; set; }
+
+    /// <summary>What the main route takes besides text — what the composer's chips describe.</summary>
+    public AttachmentRoute AttachmentRouteFor(ProviderProfile? profile = null)
+    {
+        profile ??= Config.ActiveProvider;
+        if (profile is null) return Core.AttachmentRoute.TextOnly;
+        var route = Core.AttachmentRoute.Of(profile);
+        return VisionOn(profile) ? route : route with { Vision = false };
+    }
+
+    /// <summary>Read (if the composer hadn't), budget, split and save a message's attachments off the UI thread, and put
+    /// the final badges — how each one went — under the user's message and in its log row.</summary>
+    private async Task<IReadOnlyList<MessageAttachment>> PrepareAttachmentsAsync(IReadOnlyList<MessageAttachment> attachments, SessionVM vm,
+                                                                                string entryId, ProviderProfile profile, int window)
+    {
+        var store = AttachmentStoreFor(vm.Id);
+        var route = AttachmentRouteFor(profile);
+        var previous = vm.Activity;
+        if (attachments.Any(a => a.Digest is null)) vm.Activity = "Reading attachments…";
+        AttachmentPrep.Prepared prepared;
+        try
+        {
+            prepared = await Task.Run(() => AttachmentPrep.Prepare(attachments, window, store));
+        }
+        finally
+        {
+            vm.Activity = previous;
+        }
+        var badges = prepared.Badges.Zip(prepared.Attachments,
+            (badge, attachment) => badge with { Label = badge.Label + " · " + AttachmentWire.Delivery(attachment, route).Label() }).ToList();
+        vm.SetAttachments(entryId, badges);
+        Log.SetAttachments(vm.Id, badges);
+        return prepared.Attachments;
     }
 
     /// <summary>Changes when the memory part of the system prompt would (memory on/off, a pinned note edited),
@@ -1640,7 +1691,10 @@ public sealed partial class AgentHost : ObservableObject
                     MessageRole.Assistant => "assistant",
                     MessageRole.Notice => "notice",
                     _ => "error",
-                }, m.Text, null, m.Role == MessageRole.Assistant ? m.Shield : null, null, m.Role == MessageRole.Error, entry.At),
+                }, m.Text, null, m.Role == MessageRole.Assistant ? m.Shield : null, null, m.Role == MessageRole.Error, entry.At)
+                {
+                    Attachments = m.Attachments.Count > 0 ? m.Attachments : null,
+                },
                 ToolEntryVM t => new LogItemRow(sessionId, seq, "tool", t.Summary, t.Name, t.Preview, t.Output, t.IsOk == false, entry.At),
                 // The removed count rides in ArgSummary so a reloaded divider still says how much
                 // was folded away.

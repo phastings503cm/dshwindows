@@ -23,6 +23,12 @@
   </ItemGroup>
 
   <ItemGroup>
+    <!-- Text out of attached PDFs (and their scanned pages' images), so a model server is sent text it can take.
+         Apache-2.0, managed only, no dependencies on .NET 8+. -->
+    <PackageReference Include="PdfPig" Version="0.1.16" />
+  </ItemGroup>
+
+  <ItemGroup>
     <!-- SSH to a DGX Spark: the setup guide installs Spark Swapper over it. -->
     <PackageReference Include="SSH.NET" Version="2026.0.0" />
   </ItemGroup>

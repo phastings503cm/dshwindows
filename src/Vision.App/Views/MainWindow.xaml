@@ -43,7 +43,9 @@
                         <Separator />
                         <MenuItem Header="Toggle _Sidebar" InputGestureText="Ctrl+Shift+E" Click="ToggleSidebar_Click" />
                         <MenuItem Header="Toggle _File Tree" InputGestureText="Ctrl+B" Click="ToggleTree_Click" />
+                        <MenuItem Header="Toggle _Editor" InputGestureText="Ctrl+Shift+D" Click="ToggleEditor_Click" />
                         <MenuItem Header="Toggle _Terminal" InputGestureText="Ctrl+`" Click="ToggleTerminal_Click" />
+                        <MenuItem Header="Chat _Only (code mode)" InputGestureText="Ctrl+Shift+F" Click="ChatOnly_Click" />
                         <MenuItem Header="Toggle C_hat Panel" InputGestureText="Ctrl+Shift+C" Click="ToggleChatPanel_Click" />
                         <MenuItem Header="Toggle _Plan Panel" InputGestureText="Ctrl+Shift+P" Click="TogglePlan_Click" />
                         <MenuItem Header="P_rompts (this chat's)" InputGestureText="Ctrl+Shift+H" Click="TogglePrompts_Click" />

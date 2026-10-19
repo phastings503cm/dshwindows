@@ -35,7 +35,9 @@ public static class Placeholder
     {
         if (AdornerLayer.GetAdornerLayer(box) is not { } layer) return;
         var existing = layer.GetAdorners(box)?.OfType<PlaceholderAdorner>().FirstOrDefault();
-        var show = box.Text.Length == 0 && !string.IsNullOrEmpty(GetText(box));
+        // Not while the box is hidden: the adorner layer would keep drawing the hint where the box last was (over whatever
+        // took its place — the code view's status bar once the file tree is switched off).
+        var show = box.IsVisible && box.Text.Length == 0 && !string.IsNullOrEmpty(GetText(box));
         if (show && existing is null) layer.Add(new PlaceholderAdorner(box));
         else if (!show && existing is not null) layer.Remove(existing);
         else existing?.InvalidateVisual();

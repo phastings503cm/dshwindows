@@ -198,8 +198,9 @@ public sealed class OpenAiClientWireTests
     }
 
     [Fact]
-    public void AttachmentsBecomeMultipartContentWithDataUris()
+    public void AttachmentsBecomeImageUrlAndTextPartsNeverAFilePart()
     {
+        // vLLM: "Unsupported chat content part type: 'file'"; llama.cpp: "unsupported content[].type". A file goes as text.
         var png = TestImages.Png(2, 2);
         var pdf = "%PDF-1.4"u8.ToArray();
         var body = Body(new LlmRequest("", [
@@ -213,8 +214,9 @@ public sealed class OpenAiClientWireTests
         Assert.Equal(3, parts.Count);
         Assert.Equal("look", parts[0]!["text"]!.GetValue<string>());
         Assert.Equal($"data:image/png;base64,{Convert.ToBase64String(png)}", parts[1]!["image_url"]!["url"]!.GetValue<string>());
-        Assert.Equal("spec.pdf", parts[2]!["file"]!["filename"]!.GetValue<string>());
-        Assert.Equal($"data:application/pdf;base64,{Convert.ToBase64String(pdf)}", parts[2]!["file"]!["file_data"]!.GetValue<string>());
+        Assert.Equal("text", parts[2]!["type"]!.GetValue<string>());
+        Assert.StartsWith("[Attached file: spec.pdf]", parts[2]!["text"]!.GetValue<string>());
+        Assert.DoesNotContain(parts, p => p!["type"]!.GetValue<string>() == "file");
     }
 
     [Fact]

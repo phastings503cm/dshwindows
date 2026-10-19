@@ -433,6 +433,9 @@ public partial class MainWindow : Window
     /// <summary>Open the queue's add card and use it (the self-test drives it: the card has to survive being opened again and again).</summary>
     public void SelfTestAddQueueTasks(params string[] titles) => _queuePanel.SelfTestAddTasks(titles);
 
+    /// <summary>The chat view, for the self-test's measurements.</summary>
+    internal ChatView SelfTestChatView => _chatView;
+
     /// <summary>The panel is on the right, so dragging left makes it wider and the chat gives way (never past its minimum).</summary>
     private void QueueSplitter_DragDelta(object sender, DragDeltaEventArgs e)
     {
@@ -675,6 +678,8 @@ public partial class MainWindow : Window
         Bind(Key.D1, ModifierKeys.Control, () => Model.Mode = WorkspaceMode.Chat);
         Bind(Key.D2, ModifierKeys.Control, () => Model.Mode = WorkspaceMode.Code);
         Bind(Key.B, ModifierKeys.Control, ToggleTree);
+        Bind(Key.D, ModifierKeys.Control | ModifierKeys.Shift, ToggleEditor);
+        Bind(Key.F, ModifierKeys.Control | ModifierKeys.Shift, ToggleChatOnly);
         Bind(Key.E, ModifierKeys.Control | ModifierKeys.Shift, ToggleSidebar);
         Bind(Key.C, ModifierKeys.Control | ModifierKeys.Shift, ToggleChatPanel);
         Bind(Key.Oem3, ModifierKeys.Control, ToggleTerminal);
@@ -706,6 +711,19 @@ public partial class MainWindow : Window
     {
         Model.Mode = WorkspaceMode.Code;
         Model.Code.ShowTree = !Model.Code.ShowTree;
+    }
+
+    private void ToggleEditor()
+    {
+        Model.Mode = WorkspaceMode.Code;
+        _codeView.ToggleEditor();
+    }
+
+    /// <summary>Code mode with only the chat and the project status — or back to the panes that were showing.</summary>
+    private void ToggleChatOnly()
+    {
+        Model.Mode = WorkspaceMode.Code;
+        Model.Code.ToggleChatOnly();
     }
 
     private void ToggleSidebar()
@@ -765,6 +783,8 @@ public partial class MainWindow : Window
         "Ctrl+1 / Ctrl+2\tChat / Code",
         "Ctrl+P\tGo to file",
         "Ctrl+B\tToggle file tree",
+        "Ctrl+Shift+D\tToggle the editor in code mode (opening a file shows it)",
+        "Ctrl+Shift+F\tChat only in code mode: hide the file tree, editor and terminal",
         "Ctrl+`\tToggle terminal  ·  Ctrl+Shift+`: new terminal",
         "Ctrl+Shift+C\tToggle the chat panel in code mode",
         "Ctrl+Shift+E\tToggle the sidebar",
@@ -936,6 +956,8 @@ public partial class MainWindow : Window
     private void CodeMode_Click(object sender, RoutedEventArgs e) => Model.Mode = WorkspaceMode.Code;
     private void ToggleSidebar_Click(object sender, RoutedEventArgs e) => ToggleSidebar();
     private void ToggleTree_Click(object sender, RoutedEventArgs e) => ToggleTree();
+    private void ToggleEditor_Click(object sender, RoutedEventArgs e) => ToggleEditor();
+    private void ChatOnly_Click(object sender, RoutedEventArgs e) => ToggleChatOnly();
     private void ToggleTerminal_Click(object sender, RoutedEventArgs e) => ToggleTerminal();
     private void ToggleChatPanel_Click(object sender, RoutedEventArgs e) => ToggleChatPanel();
     private void GoToFile_Click(object sender, RoutedEventArgs e) => GoToFile();

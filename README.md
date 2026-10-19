@@ -257,9 +257,11 @@ reply, a command or a tool's output, even run together with other text (`-phunte
 - **Try it** shows exactly what a model that isn't private would receive for the text you type.
 - A reply whose request had anything masked carries a small shield: *Masked 2 emails and 1 key before
   sending to Kimi Code* (hover for the categories — never the values).
-- Text attachments are checked whatever they were saved as (UTF-8, UTF-16, Windows "ANSI"). Pictures and
-  files that aren't plain text (PDFs, Office documents) can't be: the first time a chat sends one to a model
-  that isn't private it says so, and the shield's chip counts them as not checked.
+- Attachments are checked as the text that is sent: what Vision read out of a PDF, an Office file or (with
+  OCR) a picture, as well as text files whatever they were saved as (UTF-8, UTF-16, Windows "ANSI"). Only
+  bytes that really go as they are can't be: a picture to a model that takes images, a PDF document to
+  Bedrock. The first time a chat sends one to a model that isn't private it says so, and the shield's chip
+  counts them as not checked.
 - A Bedrock turn's saved reasoning, which Claude sees again word for word, isn't sent back if it holds a
   sensitive value (a turn made while the route was private, say).
 
@@ -344,6 +346,19 @@ Markdown renders with headings, code blocks (with copy), lists, quotes and table
 composer: the chat's permission preset, the model menu (with switching on each Spark Swapper box),
 thinking level, skills, and a live context gauge.
 
+**Attachments** are read by Vision, not handed to the model server as files (which no self-hosted server
+takes): text and code as they are, PDFs page by page, Word, PowerPoint, Excel, OpenDocument and Rich Text
+from their contents, and pictures and scanned pages with Windows' own OCR where Windows has a language for
+it. Each chip says what will be sent — *report.pdf · PDF · 42 pages · sent as text*, *sent as image*,
+*sent as 3 page images*, *sent as text (OCR)* — and the sent message keeps those badges. A model that takes
+images gets pictures (scaled to at most 2,048 px); one that doesn't gets their text, and a server that
+turns a picture down is asked again with the text. Bedrock keeps a short PDF as a document. A file longer
+than a quarter of the model's context window goes as a contents list and its first parts; the rest is saved
+with the chat (`%APPDATA%\Vision\attachments`) and the model reads it with the `read_attachment` tool.
+A paste of more than 400 lines or 20,000 characters becomes a *Pasted text · 10,214 lines · 412 KB*
+attachment instead of text in the box (the pencil views and edits it), and a very long message in an older
+chat shows its first 40 lines with *Show all*.
+
 **Chats without a project** (File › New Chat Without a Project, Ctrl+Shift+N, or the chat button in the
 sidebar — even while a folder is open) are regular conversations: the model is told no project folder
 is needed and answers directly, using the web, your skills and long-term memory when they help. Your own
@@ -354,7 +369,12 @@ chat is deleted. Its task list runs in the chat too, so its tasks work in that f
 offers openers like *Explain something simply* or *Summarise a web page* (and your skills), with a link
 to open a folder for code.
 
-**Code** (Ctrl+2) — a VS Code-shaped workspace with the agent beside it:
+**Code** (Ctrl+2) — the chat is the main view, with a project status bar above it: the project, its
+branch, what the agent is doing (the step it is on, waiting for permission or an answer, how far through
+its plan) and the files it changed, and switches for **Files**, **Editor**, **Terminal** and **Chat only**
+(Ctrl+Shift+F hides all three; again brings them back). Opening a file shows the editor in the centre with
+the chat beside it; closing the last one gives the centre back to the chat (Ctrl+Shift+D toggles the
+editor). The terminal runs under both.
 
 - **File tree** — lazy, filterable (Ctrl+P), live-updating as the agent or a build writes files.
   Right-click to open, reveal in Explorer, rename, create, delete (to the Recycle Bin), open a
@@ -367,8 +387,8 @@ to open a folder for code.
   Git Bash or any command line in Settings), with colour, the alternate screen, and scrollback.
   Ctrl+Shift+C / Ctrl+Shift+V copy and paste; Ctrl+C copies when text is selected.
 
-Open tabs, the terminal panel and the panes' visibility are remembered per project. F1 lists the
-keyboard shortcuts.
+Open tabs, the terminal panel and which panes show are remembered per project. F1 lists the keyboard
+shortcuts.
 
 **Task Queue** (Ctrl+Shift+Q, or the list button in the top bar) — a panel on the right for work
 that should happen unattended. **Credentials Vault** (Ctrl+Shift+K, or the key button) — the API
@@ -638,6 +658,7 @@ with the computer-use tools.
 | Settings, conversations, skills, plugins, crash logs | `%APPDATA%\Vision` (or the portable `data` folder; `VISION_HOME` overrides both) |
 | API keys, Spark Swapper app tokens and passwords | Windows Credential Manager (`Vision/…` entries; a Swapper's under `Vision/swapper/<id>`) |
 | Scratch folders of chats without a project | `%APPDATA%\Vision\Chats\<chat id>` |
+| Attached files' text (read back with `read_attachment`) | `%APPDATA%\Vision\attachments\<chat id>` |
 | Your instructions (every project) | `%APPDATA%\Vision\instructions\*.md` |
 | Remembered notes | `%APPDATA%\Vision\memory\memories.jsonl` |
 | Your subagent types | `%APPDATA%\Vision\agents\*.md` |
