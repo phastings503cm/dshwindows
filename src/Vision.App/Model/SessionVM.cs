@@ -70,7 +70,9 @@ public sealed partial class MessageEntryVM(MessageRole role, string text, string
     public string ShownText => CollapsedText?.Preview ?? Text;
 
     /// <summary>"Show all 10,214 lines" under a long message.</summary>
-    public string ShowAllLabel => CollapsedText is { } c ? $"Show all {AttachmentFormat.Grouped(c.Lines)} lines" : "";
+    public string ShowAllLabel => CollapsedText is { } c
+        ? $"Show all {AttachmentFormat.Count(c.Lines, "line", "lines")} · {AttachmentFormat.Bytes(TextUtil.Utf8NoBom.GetByteCount(Text))}"
+        : "";
 
     partial void OnTextChanged(string value)
     {

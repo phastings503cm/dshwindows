@@ -59,12 +59,13 @@
                         </ItemsControl.ItemsPanel>
                         <ItemsControl.ItemTemplate>
                             <DataTemplate DataType="{x:Type core:AttachmentBadge}">
-                                <Border Style="{StaticResource Chip}" Margin="0,0,6,4" ToolTip="{Binding Label}">
+                                <Border Style="{StaticResource Chip}" Margin="0,0,6,4" ToolTip="{Binding Tooltip}">
                                     <StackPanel Orientation="Horizontal">
                                         <TextBlock x:Name="BadgeGlyph" Style="{StaticResource Glyph}" FontSize="11" Margin="0,0,6,0" VerticalAlignment="Center"
                                                    Text="{x:Static infra:Icons.Attach}" Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
                                         <TextBlock Text="{Binding Name}" Style="{StaticResource MonoText}" FontSize="11.5" MaxWidth="220"
-                                                   TextTrimming="CharacterEllipsis" VerticalAlignment="Center" Margin="0,0,8,0" />
+                                                   TextTrimming="CharacterEllipsis" VerticalAlignment="Center" Margin="0,0,8,0"
+                                                   Visibility="{Binding IsPasted, Converter={StaticResource BoolToVisibility}, ConverterParameter=invert}" />
                                         <TextBlock Text="{Binding Label}" FontSize="11.5" MaxWidth="420" TextTrimming="CharacterEllipsis"
                                                    VerticalAlignment="Center" Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
                                     </StackPanel>
@@ -72,6 +73,9 @@
                                 <DataTemplate.Triggers>
                                     <DataTrigger Binding="{Binding Image}" Value="True">
                                         <Setter TargetName="BadgeGlyph" Property="Text" Value="{x:Static infra:Icons.Picture}" />
+                                    </DataTrigger>
+                                    <DataTrigger Binding="{Binding IsPasted}" Value="True">
+                                        <Setter TargetName="BadgeGlyph" Property="Text" Value="{x:Static infra:Icons.Document}" />
                                     </DataTrigger>
                                 </DataTemplate.Triggers>
                             </DataTemplate>

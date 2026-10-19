@@ -122,7 +122,7 @@ public sealed class AttachmentTurnTests : IDisposable
         var entry = new MessageEntryVM(MessageRole.User, Log10k());
         Assert.True(entry.IsLong);
         Assert.Equal(40, AttachmentFormat.LineCount(entry.ShownText));
-        Assert.Equal("Show all 10,214 lines", entry.ShowAllLabel);
+        Assert.Equal("Show all 10,214 lines · 409 KB", entry.ShowAllLabel);
         var reply = new MessageEntryVM(MessageRole.Assistant, Log10k());
         Assert.False(reply.IsLong);
         Assert.Same(reply.Text, reply.ShownText);

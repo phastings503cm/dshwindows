@@ -212,6 +212,13 @@ public sealed record AttachmentBadge
         new(attachment.Name, attachment.Digest?.Summary ?? (attachment.Kind == AttachmentKind.Image ? "Image" : "File"),
             attachment.Kind == AttachmentKind.Image, stored);
 
+    /// <summary>A large paste: its badge names it by its label alone ("Pasted text · 10,214 lines · 412 KB").</summary>
+    [JsonIgnore] public bool IsPasted => Label.StartsWith(DigestFormat.Pasted.Label(), StringComparison.Ordinal);
+
+    /// <summary>The badge's tooltip: where its text is saved, or its name.</summary>
+    [JsonIgnore]
+    public string Tooltip => Stored is { } stored ? $"Saved with this chat as {stored}; the model can read it again with {AttachmentPrep.ToolName}." : Name;
+
     /// <summary>What a rebuilt conversation (after the app restarts) tells the model about the attachment.</summary>
     [JsonIgnore]
     public string ReplayNote => Stored is { } stored
