@@ -200,6 +200,8 @@ public partial class ChatView : UserControl
                 UpdateMeta();
                 UpdateGauge();
                 UpdateStarter();
+                // Another model, another "sent as …" (pictures, the window that decides the parts).
+                RefreshChipDeliveries();
                 break;
             case nameof(SessionVM.LastUsage):
             case nameof(SessionVM.ContextUsed):
@@ -913,9 +915,11 @@ public partial class ChatView : UserControl
     private void RefreshChipDeliveries()
     {
         if (_attachments.Count == 0) return;
-        var route = _model.Host.AttachmentRouteFor();
+        // This chat's own model and window, as PrepareAttachmentsAsync will use them (not the app's primary).
+        var profile = _model.Host.ChatRoute(_session);
+        var route = _model.Host.AttachmentRouteFor(profile);
         var readable = _attachments.Count(c => c.Attachment.Kind == AttachmentKind.File && c.Attachment.Digest?.Readable == true);
-        var budget = new AttachmentBudget(_model.Host.ContextLimit(), Math.Max(1, readable));
+        var budget = new AttachmentBudget(_model.Host.ContextLimit(profile), Math.Max(1, readable));
         foreach (var chip in _attachments)
         {
             if (chip.IsReading)
