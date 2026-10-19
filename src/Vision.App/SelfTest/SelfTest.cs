@@ -224,6 +224,9 @@ public sealed partial class SelfTest
 
             // Last, since it leaves a chat holding 10,000 lines: a very large paste, measured.
             await ProbeLargePaste(window, model);
+
+            // Then a chat of 2,000 messages with a 10,214-line one: opened, paged, searched, copied and measured.
+            await ProbeLongChat(window, model);
         }
         catch (Exception error)
         {

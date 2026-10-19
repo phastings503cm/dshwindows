@@ -392,8 +392,22 @@ turns a picture down is asked again with the text. Bedrock keeps a short PDF as 
 than a quarter of the model's context window goes as a contents list and its first parts; the rest is saved
 with the chat (`%APPDATA%\Vision\attachments`) and the model reads it with the `read_attachment` tool.
 A paste of more than 400 lines or 20,000 characters becomes a *Pasted text · 10,214 lines · 412 KB*
-attachment instead of text in the box (the pencil views and edits it), and a very long message in an older
-chat shows its first 40 lines with *Show all*.
+attachment instead of text in the box (the pencil views and edits it); a very long message in an older
+chat shows its first 40 lines (see *Long chats* below) and opens whole in a window of its own.
+
+**Long chats** are paged: a chat opens on its newest 50 messages and tool cards, with **Load earlier
+messages · 1,950 earlier** above them — scrolling to the top loads the page before, and the message you
+were reading stays where it was on screen. Far back in a chat (or after jumping to an old message), **Load
+newer messages** and **Jump to latest** sit at the bottom; scrolling down brings the newer pages back. A
+very long message — a 10,000-line paste, a huge tool output — shows its first lines and **Show more ·
+10,174 more lines**; opened, anything past 800 lines is read in a box of its own height (the wheel scrolls
+it, then the chat), so no single message can make the window slow or hard to scroll. **Ctrl+F** finds text
+anywhere in the chat, loaded or not, and jumps to each match (Enter for older, Shift+Enter for newer).
+
+**Copy** any message: hover it for its **Copy** button, right-click it for *Copy prompt* / *Copy reply*, or
+click into it and press **Ctrl+C** with nothing selected. A prompt is copied whole, as you sent it, even
+while the chat shows only its first lines — with the text of a large paste it carried as an attachment after
+what you typed, here and from *Copy* in Prompts; the button says *Copied*.
 
 **Chats without a project** (File › New Chat Without a Project, Ctrl+Shift+N, or the chat button in the
 sidebar — even while a folder is open) are regular conversations: the model is told no project folder
