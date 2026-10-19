@@ -731,6 +731,8 @@ public sealed partial class OpenAiClient : IProviderClient
         var rules = RulesFor(request);
         var learned = _adaptations.Adaptation(AdaptationKey(request));
         var echo = rules.EchoReasoning || learned?.EchoReasoning == true;
+        // A stand-in is only needed while the model thinks (K2.6 with thinking switched off wants none).
+        var thinkingOff = rules.Thinking.Kind == ThinkingControlKind.Toggle && ThinkingLevelFor(request) == ThinkingLevel.Off;
         var messages = new JsonArray();
         // Some OpenAI-compatible servers (SGLang on the DGX Spark, notably) reject any request with
         // more than one system message, or with one anywhere but index 0 — e.g. after compaction
@@ -769,7 +771,7 @@ public sealed partial class OpenAiClient : IProviderClient
                     if (echo)
                     {
                         if (ReasoningEcho.Reasoning(m.ProviderState) is { } reasoning) msg["reasoning_content"] = reasoning;
-                        else if (m.ToolCalls is { Count: > 0 }) msg["reasoning_content"] = ReasoningEcho.Placeholder;
+                        else if (m.ToolCalls is { Count: > 0 } && !thinkingOff) msg["reasoning_content"] = ReasoningEcho.Placeholder;
                     }
                     messages.Add(msg);
                     break;
@@ -1065,6 +1067,10 @@ public static class FallbackContextWindow
         ["qwen3-30b-a3b"] = 32_768, ["qwen3-32b"] = 32_768, ["qwen3-235b-a22b"] = 32_768,
         ["llama3.3-70b-instruct"] = 131_072, ["llama3.1-8b-instruct"] = 131_072,
         ["glm-4.5"] = 131_072, ["glm-4.5-air"] = 131_072, ["glm-4.6"] = 131_072,
+        // The subscription plans' models (see SubscriptionPlans).
+        ["glm-5.3"] = 1_000_000, ["kimi-for-coding"] = 1_000_000, ["k3-256k"] = 262_144, ["k3"] = 1_000_000,
+        // Moonshot's platform (platform.kimi.ai/docs/models, 2026-10-18).
+        ["kimi-k3"] = 1_000_000, ["kimi-k2.7-code"] = 262_144, ["kimi-k2.7-code-highspeed"] = 262_144, ["kimi-k2.6"] = 262_144,
     };
 
     /// <summary>Prefix rules on the base name, checked after the exact table.</summary>
@@ -1083,6 +1089,7 @@ public static class FallbackContextWindow
         ("mistral-large", 131_072), ("mistral-small", 131_072),
         ("mixtral", 32_768), ("llama", 131_072), ("smollm", 131_072),
         ("glm-4.5", 131_072), ("glm-4.6", 131_072), ("glm-4", 131_072),
+        ("kimi-k3", 1_000_000), ("kimi-k2.", 262_144),
     ];
 
     /// <summary>A context window for a model name, or null if unknown.</summary>

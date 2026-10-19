@@ -159,7 +159,7 @@ public static class Menus
     public static string ThinkingLabel(AppModel model, SessionVM session)
     {
         var rules = model.Host.RequestRules(session);
-        if (rules is { ThinkingLevels.Count: 0 }) return rules.AlwaysThinks ? "Thinking: Always on" : "Thinking: None";
+        if (rules is { ThinkingLevels.Count: 0 }) return rules.AlwaysThinks ? "Always thinks" : "No thinking setting";
         if (model.Host.ThinkingFor(session) is not { } level) return "Thinking: Default";
         return $"Thinking: {(rules?.NearestLevel(level) is { } nearest ? rules.Label(nearest) : level.Label())}";
     }

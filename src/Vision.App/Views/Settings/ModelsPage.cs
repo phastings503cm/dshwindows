@@ -249,7 +249,7 @@ public sealed class ModelsPage : UserControl
         if (provider.Kind != ProviderKind.Bedrock
             && RequestAdaptationStore.Shared.Adaptation(RequestAdaptationStore.Key(provider.BaseUrl, provider.Model)) is { IsEmpty: false } learned)
         {
-            var text = Ui.Secondary($"Learned: {learned.Summary.Replace("`", "")}", 12);
+            var text = Ui.Secondary($"Learned from the server: {learned.Summary.Replace("`", "")}", 12);
             text.ToolTip = "The server refused these settings for this model, so Vision stopped sending them (it said so in the chat). Forget it to send them again.";
             var forget = Ui.LinkButton("Forget", () =>
             {
@@ -487,6 +487,16 @@ public sealed class ModelsPage : UserControl
             profile.ApiKey = key.Length == 0 ? null : key;
             try
             {
+                // Z.ai lists models for any valid key on any endpoint; only a reply proves the endpoint fits the key.
+                if (ZaiEndpoints.Of(profile.BaseUrl) is { } endpoint)
+                {
+                    var result = await ZaiDiagnosis.RunAsync(endpoint, profile.Model, async (where, ct) =>
+                    {
+                        var request = new LlmRequest("", [LlmMessage.User("Reply with OK.")], [], profile.Model, MaxTokens: 1);
+                        await foreach (var _ in ProviderClients.Create(profile with { BaseUrl = where.BaseUrl() }).StreamAsync(request, ct)) { }
+                    });
+                    return (route, new AppModel.RouteCheck(result.Ok, result.Message, DateTimeOffset.Now));
+                }
                 var client = ProviderClients.Create(profile);
                 var models = await client.ListModelsAsync();
                 var info = await client.ModelInfoAsync();

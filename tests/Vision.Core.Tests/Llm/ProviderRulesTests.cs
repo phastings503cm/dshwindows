@@ -121,7 +121,22 @@ public sealed class ProviderRulesTests
         // Other servers never see it.
         var other = Body(Route("https://api.openai.com/v1", "gpt-4.1"), messages: [LlmMessage.User("go"), kept]);
         Assert.Null(other["messages"]![1]!["reasoning_content"]);
+        // K2.6 with thinking switched off wants no stand-in (it keeps real reasoning it was given).
+        var off = Body(k26, ThinkingLevel.Off, [LlmMessage.User("go"), lost, LlmMessage.ToolOutput("c2", "read_file", "y"), LlmMessage.User("next")]);
+        Assert.Null(off["messages"]!.AsArray().First(m => m!["role"]!.GetValue<string>() == "assistant")!["reasoning_content"]);
     }
+
+    /// <summary>Kimi's and the plans' context windows, when the server doesn't report one.</summary>
+    [Theory]
+    [InlineData("kimi-k3", 1_000_000)]
+    [InlineData("kimi-k2.7-code", 262_144)]
+    [InlineData("kimi-k2.6", 262_144)]
+    [InlineData("moonshotai/kimi-k2.6-preview", 262_144)]
+    [InlineData("glm-5.3", 1_000_000)]
+    [InlineData("k3", 1_000_000)]
+    [InlineData("k3-256k", 262_144)]
+    [InlineData("kimi-for-coding", 1_000_000)]
+    public void KimiAndGlmWindowsAreKnown(string model, int window) => Assert.Equal(window, FallbackContextWindow.Limit(model));
 
     /// <summary>The reasoning a thinking model streamed rides on the Done event, so the engine stores it on the message.</summary>
     [Fact]
