@@ -232,6 +232,11 @@ public partial class ChatView
     /// <summary>The transcript is moving because the reader moved it (just now), not because rows were added or laid out.</summary>
     private bool ReaderScrolling => _readerDragging || Environment.TickCount64 - _readerScrolledAt < 600;
 
+    /// <summary>The view moved up and now sits away from the end: something scrolled it there (content growing or shrinking
+    /// keeps the distance to the end, or moves the view down to it).</summary>
+    private bool MovedAwayFromEnd(ScrollChangedEventArgs e) =>
+        e.VerticalChange < 0 && _scroller is { } scroller && scroller.ScrollableHeight - scroller.VerticalOffset > 32;
+
     private void WatchReaderScrolling(ScrollViewer scroller)
     {
         void Now() => _readerScrolledAt = Environment.TickCount64;
@@ -382,6 +387,7 @@ public partial class ChatView
     internal (ChatEntryVM Row, double Top)? SelfTestPagingAnchor() => Anchor();
     internal FrameworkElement? SelfTestPagingContainer(object row) => Container(row);
     internal bool SelfTestPagingPinned => _pinned;
+    internal bool SelfTestPagingReader => ReaderScrolling;
     /// <summary>Scroll as the reader would (the wheel, the scrollbar): what <paramref name="scroll"/> does counts as theirs.</summary>
     internal void SelfTestPagingAsReader(Action scroll)
     {

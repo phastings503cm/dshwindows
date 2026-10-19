@@ -266,7 +266,7 @@ public partial class ChatView : UserControl
             // The user scrolled (the wheel, the scrollbar, a key — even when rows laid out on the way changed the extent in the
             // same pass, which used to snap a pinned transcript straight back to its end), or only the offset changed: stay put
             // unless they came back to the bottom (of the newest page).
-            if ((e.VerticalChange != 0 && ReaderScrolling) || (e.ExtentHeightChange == 0 && e.ViewportHeightChange == 0))
+            if ((e.VerticalChange != 0 && (ReaderScrolling || MovedAwayFromEnd(e))) || (e.ExtentHeightChange == 0 && e.ViewportHeightChange == 0))
             {
                 _pinned = _scroller.VerticalOffset >= _scroller.ScrollableHeight - 32 && _window is not { IsLive: false };
                 PageOnScroll();
