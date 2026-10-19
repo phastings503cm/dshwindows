@@ -149,6 +149,8 @@ public static class ClaudeCodeEnvironment
         "CLAUDECODE", "CLAUDE_CODE_ENTRYPOINT", "CLAUDE_CODE_SESSION_ID", "CLAUDE_CODE_HOST_SESSION_ID", "CLAUDE_CODE_CHILD_SESSION",
         "CLAUDE_CODE_SSE_PORT", "CLAUDE_CODE_EXECPATH", "CLAUDE_AGENT_SDK_VERSION", "CLAUDE_CODE_MESSAGING_SOCKET",
         "CLAUDE_CODE_MESSAGING_TOKEN", "CLAUDE_CODE_SDK_HAS_HOST_AUTH_REFRESH", "CLAUDE_PID",
+        // A parent's bare mode, which never reads the plan's sign-in.
+        "CLAUDE_CODE_SIMPLE",
     ];
 
     /// <summary>Tests: variables set for every CLI Vision starts (a stand-in API address, an isolated config folder).</summary>

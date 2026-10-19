@@ -264,17 +264,44 @@ public sealed class ClaudeCodeSetupTests
     }
 
     [Fact]
-    public async Task ItsClientReportsTheWindowTheCliLastReportedAndRefusesRawModelCalls()
+    public async Task ItsClientReportsTheWindowTheCliLastReportedAndAnswersOneOffRequestsWithoutTools()
     {
         var client = Assert.IsType<ClaudeCodeClient>(ProviderClients.Create(ClaudeCodeRoutes.Route("haiku")));
         Assert.Equal(ClaudeCodeRoutes.DefaultContextWindow, (await client.ModelInfoAsync()).ContextWindow);
         ClaudeCodeRoutes.LearnWindow("haiku", 1_000_000);
         Assert.Equal(1_000_000, (await client.ModelInfoAsync()).ContextWindow);
-        var error = await Assert.ThrowsAsync<LlmException>(async () =>
+
+        // A summary request: one `claude -p` with Vision's system prompt, no tools, no session — its text streamed back.
+        var process = ScriptedClaudeProcess.Replay(ClaudeFixtures.Lines("resume.jsonl"));
+        ClaudeCodeClient.LaunchForTesting = ClaudeCodeLaunch.Direct("claude");
+        ClaudeCodeClient.StarterForTesting = ScriptedClaudeProcess.Starter(process);
+        try
         {
-            await foreach (var _ in client.StreamAsync(new LlmRequest("", [LlmMessage.User("hi")], [], "haiku"))) { }
-        });
-        Assert.Contains("Claude Code answers chats only", error.Message);
+            var text = new System.Text.StringBuilder();
+            LlmUsage? usage = null;
+            await foreach (var e in client.StreamAsync(new LlmRequest("Summarize the conversation.",
+                               [LlmMessage.User("first"), LlmMessage.Assistant("reply"), LlmMessage.User("second")], [], "haiku")))
+            {
+                if (e is LlmStreamEvent.Text t) text.Append(t.Delta);
+                if (e is LlmStreamEvent.Done d) usage = d.Usage;
+            }
+            Assert.Equal("Hello from the fixture server. You said: And now just say hello", text.ToString());
+            Assert.NotNull(usage);
+            var args = process.Args.ToList();
+            Assert.Equal("Summarize the conversation.", args[args.IndexOf("--system-prompt") + 1]);
+            Assert.Equal("", args[args.IndexOf("--tools") + 1]);
+            Assert.Contains("--no-session-persistence", args);
+            Assert.DoesNotContain("--permission-prompt-tool", args);
+            Assert.DoesNotContain("--resume", args);
+            var prompt = (string?)JsonNode.Parse(process.Written[0])!["message"]!["content"]![0]!["text"];
+            Assert.Equal("Person: first\n\nAssistant: reply\n\nPerson: second\n\n(Reply to the last Person message.)", prompt);
+            Assert.Equal("only one", ClaudeCodeClient.Prompt([LlmMessage.User("only one")]));
+        }
+        finally
+        {
+            ClaudeCodeClient.LaunchForTesting = null;
+            ClaudeCodeClient.StarterForTesting = null;
+        }
     }
 
     // MARK: Recap

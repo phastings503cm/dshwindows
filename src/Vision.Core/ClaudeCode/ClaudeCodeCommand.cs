@@ -24,6 +24,9 @@ public sealed record ClaudeCodeTurnOptions
     public bool PartialMessages { get; init; } = true;
     /// <summary>Optional flags this CLI said it doesn't know ("--effort"): left out.</summary>
     public IReadOnlySet<string> Unsupported { get; init; } = new HashSet<string>();
+    /// <summary>A one-off side task (a summary, a skill draft): Claude Code's system prompt replaced by this, no tools, no
+    /// session saved — and no permission or session flags.</summary>
+    public string? OneShotSystemPrompt { get; init; }
 }
 
 public static class ClaudeCodeCommand
@@ -72,6 +75,11 @@ public static class ClaudeCodeCommand
         args.Add("--model");
         args.Add(o.Model);
         if (o.Thinking is { } level) Optional("--effort", Effort(level));
+        if (o.OneShotSystemPrompt is { } system)
+        {
+            args.AddRange(["--system-prompt", system, "--tools", "", "--no-session-persistence"]);
+            return args;
+        }
         args.Add("--permission-mode");
         args.Add(PermissionMode(o.Preset));
         args.Add("--permission-prompt-tool");

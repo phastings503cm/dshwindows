@@ -40,6 +40,7 @@ public sealed partial class AgentHost
     {
         _claudeLaunches.Clear();
         _claudeUnsupported.Clear();
+        ClaudeCodeClient.ResetCache();
     }
 
     /// <summary>How the top bar and the composer name a chat's model: "Claude Code · Sonnet" for Claude Code (its alias alone

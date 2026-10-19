@@ -131,6 +131,24 @@ public sealed class ClaudeCodeLiveTests : IDisposable
     }
 
     [ClaudeLiveFact]
+    public async Task AOneOffRequestRunsWithoutToolsOrASession()
+    {
+        ClaudeCodeClient.LaunchForTesting = _launch;
+        try
+        {
+            var client = new ClaudeCodeClient(ClaudeCodeRoutes.Route("haiku"));
+            var text = new System.Text.StringBuilder();
+            await foreach (var e in client.StreamAsync(new LlmRequest("Write a short title.", [LlmMessage.User("a chat about stock levels")], [], "haiku")))
+                if (e is LlmStreamEvent.Text t) text.Append(t.Delta);
+            Assert.Equal("Fixture title", text.ToString()); // the stand-in's answer to a request that offers no tools
+        }
+        finally
+        {
+            ClaudeCodeClient.LaunchForTesting = null;
+        }
+    }
+
+    [ClaudeLiveFact]
     public async Task AnUnknownSessionIsReportedAsMissing()
     {
         var (result, _) = await Turn("hi", new ClaudeCodeTurnOptions { Model = "sonnet", ResumeSession = Guid.NewGuid().ToString() });

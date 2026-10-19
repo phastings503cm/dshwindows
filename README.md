@@ -414,8 +414,8 @@ Code** puts *Claude Code · Opus*, *Sonnet* and *Haiku* in every chat's model me
 - after each turn the chat says what it used: steps, tokens and Claude Code's own cost estimate — covered by
   your plan, unless Claude Code is set up with an API key (`ANTHROPIC_API_KEY`), which the chat then says it bills.
 
-Claude Code answers chats only: Vision's own side jobs (subagents, summaries) keep using your other models, and
-it is never a backup or subagent server. **Sensitive chats can't use it** — it reads your files itself, so the
+Vision's own one-off requests on it (a summary, a skill draft) go to Claude Code as a single request with
+Vision's instructions and no tools; it is never a backup or a subagent server. **Sensitive chats can't use it** — it reads your files itself, so the
 shield can't stand between them and Anthropic. Advanced: the `claude` path to use, and *Run Claude Code inside
 WSL* for one installed in Linux.
 

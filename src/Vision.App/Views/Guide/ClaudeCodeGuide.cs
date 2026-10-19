@@ -179,8 +179,8 @@ public sealed class ClaudeCodeGuide : IWizardGuide
             }));
         Use(RouteUse.Primary, Icons.Chat, "Primary", "New projects' chats start on it.");
         Use(RouteUse.JustAdd, Icons.Add, "Just add it", "It's in the model menu for the chats you put on it.");
-        panel.Children.Add(Paragraph("Claude Code answers chats only. Vision's own side jobs (subagents, summaries) keep using your other models — " +
-                                     "and Sensitive chats can't use Claude Code, since it reads files itself.", 12.5, "TextFillColorSecondaryBrush"));
+        panel.Children.Add(Paragraph("Vision's own one-off requests on it (a summary, a skill draft) go to Claude Code as a single request without tools. " +
+                                     "Sensitive chats can't use Claude Code, since it reads files itself.", 12.5, "TextFillColorSecondaryBrush"));
         return panel;
     }
 
