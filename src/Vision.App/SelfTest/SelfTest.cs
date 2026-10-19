@@ -248,7 +248,7 @@ public sealed partial class SelfTest
             await Settle(800);
             Capture(owner, "chat-waiting-mouse");
             var card = chat.Entries.OfType<ToolEntryVM>().Last();
-            if (card.Summary != "Waiting for the mouse — \u201CBuild the game\u201D is using it…")
+            if (card.Summary != MachineText.Waiting(WaitReason.OtherChat, "Build the game"))
                 throw new InvalidOperationException($"the waiting card says \"{card.Summary}\"");
             chat.ShowMachineWait(null);
             if (card.Summary is not null || chat.Activity is not null) throw new InvalidOperationException("the waiting line stayed after the wait");

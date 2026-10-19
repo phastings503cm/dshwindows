@@ -86,16 +86,16 @@ public sealed class MachineActivityTests
     {
         var text = MachineText.Glow([S("A", "Fix login")], ArbiterSnapshot.Idle)!;
         Assert.Equal("Machine in use by Vision AI", text.Headline);
-        Assert.Equal("“Fix login” is working in the background — your mouse is free", text.Detail);
+        Assert.Equal("“Fix login” is working — your mouse is free", text.Detail); // the Mac's words
         Assert.Equal("Ctrl+Alt+. stops", text.Hint);
     }
 
     [Fact]
     public void SeveralChatsInTheBackground()
     {
-        Assert.Equal("“Fix login” and 1 more chat are working in the background — your mouse is free",
+        Assert.Equal("2 chats are working — your mouse is free",
                      MachineText.Glow([S("A", "Fix login"), S("B", "b")], ArbiterSnapshot.Idle)!.Detail);
-        Assert.Equal("“Fix login” and 2 more chats are working in the background — your mouse is free",
+        Assert.Equal("3 chats are working — your mouse is free",
                      MachineText.Glow([S("A", "Fix login"), S("B", "b"), S("C", "c")], ArbiterSnapshot.Idle)!.Detail);
     }
 
@@ -103,8 +103,8 @@ public sealed class MachineActivityTests
     public void TheChatWithTheMouseIsNamed()
     {
         var input = new ArbiterSnapshot("B", "Build the game", true, [new WaitingChat("A", "Fix login")], false);
-        Assert.Equal("“Build the game” has the mouse · 1 waiting", MachineText.Glow([S("A", "Fix login"), S("B", "Build the game")], input)!.Detail);
-        Assert.Equal("“Build the game” has the mouse", MachineText.Glow([S("B", "Build the game")], input with { Waiting = [] })!.Detail);
+        Assert.Equal("“Build the game” has the mouse and keyboard · 1 waiting", MachineText.Glow([S("A", "Fix login"), S("B", "Build the game")], input)!.Detail);
+        Assert.Equal("“Build the game” has the mouse and keyboard", MachineText.Glow([S("B", "Build the game")], input with { Waiting = [] })!.Detail);
         Assert.Equal("“Fix login” is waiting for the mouse",
                      MachineText.Glow([S("A", "Fix login")], input with { Holder = null, HolderTitle = null })!.Detail);
     }
@@ -113,8 +113,9 @@ public sealed class MachineActivityTests
     public void ThePersonPausesTheRealMouse()
     {
         var input = new ArbiterSnapshot("B", "b", false, [], PersonActive: true);
-        Assert.Equal("Paused while you use the mouse or keyboard — Vision carries on a moment after you stop",
-                     MachineText.Glow([S("B", "b")], input)!.Detail);
+        Assert.Equal("“b” is waiting for you to finish with the mouse", MachineText.Glow([S("B", "b")], input)!.Detail);
+        Assert.Equal("“a” is waiting for you to finish with the mouse",
+                     MachineText.Glow([S("A", "a")], new ArbiterSnapshot(null, null, false, [new WaitingChat("A", "a")], PersonActive: true))!.Detail);
         // Background work isn't paused by the person, so the glow doesn't claim it is.
         Assert.EndsWith("your mouse is free", MachineText.Glow([S("B", "b")], ArbiterSnapshot.Idle with { PersonActive = true })!.Detail);
     }
@@ -132,9 +133,10 @@ public sealed class MachineActivityTests
     [Fact]
     public void WaitingLines()
     {
-        Assert.Equal("Waiting for the mouse — “Fix login” is using it…", MachineText.Waiting(WaitReason.OtherChat, "Fix login"));
+        Assert.Equal("Waiting for the mouse — “Fix login” is using it. It goes to the next chat when that one is done; Ctrl+Alt+. stops all control.",
+                     MachineText.Waiting(WaitReason.OtherChat, "Fix login"));
         Assert.Equal("Waiting for you to finish with the mouse and keyboard…", MachineText.Waiting(WaitReason.Person, null));
-        Assert.Equal("Waiting for the mouse — another step of this chat is using it…", MachineText.Waiting(WaitReason.OwnAction, "x"));
+        Assert.Equal("Waiting for the mouse — another task in this chat is using it.", MachineText.Waiting(WaitReason.OwnAction, "x"));
         Assert.Null(MachineText.Waiting(WaitReason.None, null));
         Assert.StartsWith("Error: waited 5 minutes for the mouse, and “b” is still using it.", MachineText.ChatTimeout(TimeSpan.FromMinutes(5), "b"));
         Assert.StartsWith("Error: waited 2 minutes for the person", MachineText.PersonTimeout(TimeSpan.FromMinutes(2)));

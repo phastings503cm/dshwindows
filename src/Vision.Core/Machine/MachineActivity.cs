@@ -142,13 +142,14 @@ public static class MachineText
     {
         if (sessions.Count == 0 && input.Holder is null && input.Waiting.Count == 0) return null;
         string detail;
+        // The Mac's words (GlowStatus.pill), with Windows' own stop key.
         if (input.PersonActive && (input.Holder is not null || input.Waiting.Count > 0))
         {
-            detail = "Paused while you use the mouse or keyboard — Vision carries on a moment after you stop";
+            detail = $"{Quote(input.Holder is not null ? input.HolderTitle : input.Waiting[0].Title)} is waiting for you to finish with the mouse";
         }
         else if (input.Holder is not null)
         {
-            detail = $"{Quote(input.HolderTitle)} has the mouse";
+            detail = $"{Quote(input.HolderTitle)} has the mouse and keyboard";
             if (input.Waiting.Count > 0) detail += $" · {input.Waiting.Count} waiting";
         }
         else if (input.Waiting.Count > 0)
@@ -157,22 +158,21 @@ public static class MachineText
         }
         else if (sessions.Count == 1)
         {
-            detail = $"{Quote(sessions[0].Title)} is working in the background — your mouse is free";
+            detail = $"{Quote(sessions[0].Title)} is working — your mouse is free";
         }
         else
         {
-            var more = sessions.Count - 1;
-            detail = $"{Quote(sessions[0].Title)} and {more} more chat{(more == 1 ? "" : "s")} are working in the background — your mouse is free";
+            detail = $"{sessions.Count} chats are working — your mouse is free";
         }
         return new GlowText(Headline, detail, StopHint);
     }
 
-    /// <summary>What a chat shows while it waits for the real mouse; null once it has it.</summary>
+    /// <summary>What a chat shows while it waits for the real mouse; null once it has it (the Mac's lines).</summary>
     public static string? Waiting(WaitReason reason, string? blocker) => reason switch
     {
         WaitReason.Person => "Waiting for you to finish with the mouse and keyboard…",
-        WaitReason.OtherChat => $"Waiting for the mouse — {Quote(blocker)} is using it…",
-        WaitReason.OwnAction => "Waiting for the mouse — another step of this chat is using it…",
+        WaitReason.OtherChat => $"Waiting for the mouse — {Quote(blocker)} is using it. It goes to the next chat when that one is done; Ctrl+Alt+. stops all control.",
+        WaitReason.OwnAction => "Waiting for the mouse — another task in this chat is using it.",
         _ => null,
     };
 

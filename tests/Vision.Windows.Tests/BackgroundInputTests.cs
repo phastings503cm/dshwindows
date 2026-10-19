@@ -191,7 +191,8 @@ public sealed class BackgroundInputTests(ITestOutputHelper output)
         Assert.False(click.IsCompleted);
         Assert.Equal("Fix login", MachineControl.Arbiter.Snapshot().HolderTitle);
         Assert.Contains(MachineControl.Arbiter.Snapshot().Waiting, w => w.Title == "Build the game");
-        lock (heard) Assert.Contains("Waiting for the mouse — “Fix login” is using it…", heard);
+        lock (heard) Assert.Contains(MachineText.Waiting(WaitReason.OtherChat, "Fix login"), heard);
+        lock (heard) Assert.Contains(heard, line => line.StartsWith("Waiting for the mouse — “Fix login” is using it.", StringComparison.Ordinal));
         lease.Dispose();
         var said = await click; // after the holder's linger
         Assert.Equal($"Clicked left at ({x},{y}). Screenshot to verify.", said);

@@ -55,7 +55,7 @@ public sealed class MachineGlowTests
             Collect(label);
             Assert.Contains("Machine in use by Vision AI", words);
             Assert.Contains("  ·  Ctrl+Alt+. stops", words);
-            Assert.Contains("“Fix login” is working in the background — your mouse is free", words);
+            Assert.Contains("“Fix login” is working — your mouse is free", words);
             Assert.NotNull(GlowLook.Preview(text));
             return Task.CompletedTask;
         });
