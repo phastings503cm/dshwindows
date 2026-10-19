@@ -79,14 +79,17 @@ public static class GuardianRoutes
 
     /// <summary>The route for Guardian's model <paramref name="routeId"/> on <paramref name="address"/>, with the sign-in's
     /// <paramref name="token"/> as its key. Null when the id isn't a Guardian model id, or — once the account's models are known
-    /// (<paramref name="models"/> not null) — names one the account no longer offers. Before the list arrives (just after
-    /// launch) any Guardian model id resolves, so a chat on one doesn't fall back to another model while the list loads.</summary>
-    public static ProviderProfile? LiveRoute(string? routeId, string address, IReadOnlyList<GuardianModel>? models, string? orgId, string token)
+    /// (<paramref name="known"/>, with <paramref name="models"/> not null) — names one the account no longer offers. Before the
+    /// list arrives (just after launch or a sign-in) any Guardian model id resolves, so a chat on one doesn't fall back to
+    /// another model while the list loads; one in the list kept from last time (<paramref name="models"/>) keeps that entry's
+    /// facts meanwhile — its window, and whether it is interactive-only, so a task list resumed at launch can't run on it
+    /// unattended before Guardian answers.</summary>
+    public static ProviderProfile? LiveRoute(string? routeId, string address, IReadOnlyList<GuardianModel>? models, string? orgId, string token,
+        bool known = true)
     {
         if (ModelOfRouteId(routeId) is not { } id) return null;
-        GuardianModel? model;
-        if (models is null) model = new GuardianModel(id);
-        else model = models.FirstOrDefault(m => string.Equals(m.Id, id, StringComparison.Ordinal));
+        var model = models?.FirstOrDefault(m => string.Equals(m.Id, id, StringComparison.Ordinal))
+            ?? (known && models is not null ? null : new GuardianModel(id));
         if (model is null) return null;
         var route = Route(address, model, orgId);
         route.ApiKey = token;

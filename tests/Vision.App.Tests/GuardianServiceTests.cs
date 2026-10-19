@@ -396,4 +396,41 @@ public sealed class GuardianServiceTests : IDisposable
             await Task.Delay(50);
         }
     });
+
+    [Fact]
+    public void AtLaunchAKeptInteractiveOnlyGuardianModelStaysInteractiveOnlyBeforeGuardianAnswers() => UiThread.Run(async () =>
+    {
+        var (config, host, guardian, fake) = Make();
+        var model = new FakeModelServer();
+        const string Opus = "us.anthropic.claude-opus-5-5";
+        try
+        {
+            fake.Override = (method, path, _) => method == "GET" && path == "/api/harness/v1/models"
+                ? FakeGuardian.Json($$"""{"models":[{"id":"{{Opus}}","label":"Claude Opus 5.5","contextWindow":1000000,"interactiveOnly":true}],"data":[]}""")
+                : null;
+            Assert.True(await guardian.SignInAsync("https://guardian.example.test", "pat@503cm.com", "pw"));
+            var vm = ChatOnOwnServer(config, host, fake, model);
+            host.SetChatRoute(vm, GuardianRoutes.LiveRouteId(Opus));
+            Assert.NotNull(host.InteractiveOnlyRoute(vm));
+
+            // The next launch, before any refresh: the kept list stands in, so a task list resumed now can't run on it.
+            var again = new GuardianService(config, host, () => null, _dir, () => fake);
+            Assert.True(again.IsSignedIn);
+            Assert.NotNull(host.InteractiveOnlyRoute(vm));
+            Assert.Equal(1_000_000, host.ChatRoute(vm)!.ContextWindow);
+
+            // Signed in again as the same account while Guardian can't list the models: still interactive-only.
+            fake.Override = (method, path, _) => method == "GET" && path == "/api/harness/v1/models"
+                ? FakeGuardian.Json("""{"error":"unavailable","status":503,"message":"down"}""", HttpStatusCode.ServiceUnavailable)
+                : null;
+            Assert.True(await again.SignInAsync("https://guardian.example.test", "pat@503cm.com", "pw"));
+            Assert.NotNull(host.InteractiveOnlyRoute(vm));
+            Assert.Equal(Opus, Assert.Single(again.MenuModels).Id);
+        }
+        finally
+        {
+            host.StopAll();
+            await Task.Delay(50);
+        }
+    });
 }

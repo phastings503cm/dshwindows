@@ -56,7 +56,7 @@ public sealed partial class GuardianService : ObservableObject
                 _client = new GuardianClient(saved.Account.Address, session, _handler()) { OrgId = saved.Account.OrgId };
                 _account = saved.Account;
                 // The list Guardian last gave, for the menus until it answers again (a chat on any Guardian model keeps it
-                // meanwhile: _modelsKnown stays false).
+                // meanwhile: _modelsKnown stays false — and one in this list keeps its window and interactive-only flag).
                 _models = saved.Account.Models ?? [];
             }
             catch (GuardianError)
@@ -79,14 +79,14 @@ public sealed partial class GuardianService : ObservableObject
     // MARK: - Guardian's models in every chat
 
     /// <summary>Whether <see cref="Models"/> is the account's list (false until Guardian has answered since signing in or
-    /// launching — meanwhile a chat on a Guardian model keeps it).</summary>
+    /// launching — meanwhile a chat on a Guardian model keeps it, with the facts the kept list has for it).</summary>
     private bool _modelsKnown;
 
     /// <summary>One of the account's models as a route, with the sign-in's token and org — made fresh on every ask, so a new
     /// sign-in or another org applies at once. Null when signed out or not a model the account offers.</summary>
     public ProviderProfile? LiveRoute(string routeId) =>
         Client is { Session: { } session } client
-            ? GuardianRoutes.LiveRoute(routeId, client.Address, _modelsKnown ? Models : null, client.OrgId, session.Token)
+            ? GuardianRoutes.LiveRoute(routeId, client.Address, Models, client.OrgId, session.Token, known: _modelsKnown)
             : null;
 
     /// <summary>The account's models the model menu offers (none while signed out).</summary>
@@ -256,6 +256,10 @@ public sealed partial class GuardianService : ObservableObject
     /// orgs and models, and give every Guardian route on this address the new token.</summary>
     private async Task CompleteAsync(GuardianClient client, GuardianSession session, string method)
     {
+        // The same account signing in again (after a 401) keeps the list it had until Guardian answers: a chat on an
+        // interactive-only model stays one meanwhile.
+        var kept = Account is { } previous && GuardianRoutes.SameAddress(previous.Address, client.Address)
+            && string.Equals(previous.Email, session.Email, StringComparison.OrdinalIgnoreCase) ? previous.Models : null;
         var account = new GuardianAccount
         {
             Address = client.Address,
@@ -265,6 +269,7 @@ public sealed partial class GuardianService : ObservableObject
             OrgId = session.OrgId,
             Method = method,
             SignedInAt = DateTimeOffset.Now,
+            Models = kept,
         };
         try
         {
@@ -277,7 +282,7 @@ public sealed partial class GuardianService : ObservableObject
         }
         // Another account (or the same one again) may offer other models: the list is asked for afresh.
         _modelsKnown = false;
-        Models = [];
+        Models = kept ?? [];
         Client = client;
         Account = account;
         ApplyTokenToRoutes();

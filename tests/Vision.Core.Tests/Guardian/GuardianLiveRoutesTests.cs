@@ -53,6 +53,22 @@ public sealed class GuardianLiveRoutesTests
     }
 
     [Fact]
+    public void BeforeTheListArrivesAModelInTheKeptListKeepsItsFacts()
+    {
+        // Just after launch (or a sign-in), the list kept from last time stands in: an interactive-only model stays one, so a
+        // task list resumed at launch can't run on it unattended before Guardian answers.
+        var kept = GuardianRoutes.LiveRoute("Guardian|us.anthropic.claude-opus-5-5", Address, Models, null, "tok", known: false)!;
+        Assert.True(kept.IsInteractiveOnly);
+        Assert.Equal(1_000_000, kept.ContextWindow);
+        // An id the kept list doesn't have still resolves (bare) until the list arrives — and not afterwards.
+        var bare = GuardianRoutes.LiveRoute("Guardian|guardian/fast", Address, Models, null, "tok", known: false)!;
+        Assert.False(bare.IsInteractiveOnly);
+        Assert.Null(bare.ContextWindow);
+        Assert.Null(GuardianRoutes.LiveRoute("Guardian|guardian/fast", Address, Models, null, "tok", known: true));
+        Assert.NotNull(GuardianRoutes.LiveRoute("Guardian|guardian/fast", Address, [], null, "tok", known: false));
+    }
+
+    [Fact]
     public void TheMenuNamesAModelByItsLabel()
     {
         Assert.Equal("Claude Opus 5.5 (us.anthropic.claude-opus-5-5)", GuardianRoutes.MenuTitle(Models[1]));
