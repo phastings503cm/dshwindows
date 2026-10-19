@@ -986,7 +986,7 @@ public sealed partial class AgentHost : ObservableObject
         ct.ThrowIfCancellationRequested();
         // What this turn runs on, for its timeline row and the activity menu.
         vm.TurnModel = profile.Model;
-        vm.TurnRoute = Config.ActiveProvider is { } active ? RouteLabel(active) : RouteLabel(profile);
+        vm.TurnRoute = RouteLabel(profile);
         var window = ContextLimit();
         var thinking = vm.Thinking;
         var skillState = BuildSkillState(vm);
