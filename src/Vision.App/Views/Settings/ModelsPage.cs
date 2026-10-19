@@ -976,6 +976,8 @@ public sealed class ProviderEditorWindow : Window
         if (!existed || wasActive) config.Activate(profile);
         else config.Store(profile);
         config.SetApiKey(_key.Password, profile);
+        // The chats on this route follow it to its new name.
+        if (existed && _original.RouteId != profile.RouteId) config.NoteRouteRenamed(_original.RouteId, profile.RouteId);
         _model.Host.ResetRouteCache();
         DialogResult = true;
     }

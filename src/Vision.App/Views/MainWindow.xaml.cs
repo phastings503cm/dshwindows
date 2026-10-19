@@ -121,6 +121,7 @@ public partial class MainWindow : Window
             case nameof(AgentHost.SelectedId):
             case nameof(AgentHost.Selected):
                 WatchSelected();
+                UpdateModelLabel();
                 UpdateDetail();
                 UpdatePreset();
                 UpdateRunning();
@@ -170,6 +171,7 @@ public partial class MainWindow : Window
     {
         if (e.PropertyName is nameof(SessionVM.Running) or nameof(SessionVM.Stopping)) UpdateRunning();
         if (e.PropertyName is nameof(SessionVM.Preset)) UpdatePreset();
+        if (e.PropertyName is nameof(SessionVM.RouteId)) UpdateModelLabel();
         if (e.PropertyName is nameof(SessionVM.Title)) UpdateTitle();
         if (e.PropertyName is nameof(SessionVM.Todos) or nameof(SessionVM.Outline) or nameof(SessionVM.Running)) UpdatePlanButton();
     }
@@ -222,8 +224,10 @@ public partial class MainWindow : Window
 
     private void UpdateModelLabel()
     {
-        var provider = Model.Config.ActiveProvider;
-        var served = Model.Host.ActiveModelId;
+        // The selected chat's model (each chat has its own); without a chat, the primary.
+        var selected = Model.Host.Selected;
+        var provider = Model.Host.ChatRoute(selected);
+        var served = Model.Host.ModelIdFor(selected);
         ModelLabel.Text = provider is null ? "No model" : served ?? provider.Model;
         ModelButton.ToolTip = provider is null
             ? "No model configured — run the setup wizard"
@@ -445,7 +449,7 @@ public partial class MainWindow : Window
     private void ModelButton_Click(object sender, RoutedEventArgs e)
     {
         if (Model.Spark.Boxes.Any(b => b.Status is null)) _ = Model.Spark.RefreshAsync();
-        Menus.Open(Menus.Model(Model), (FrameworkElement)sender);
+        Menus.Open(Menus.Model(Model, Model.Host.Selected), (FrameworkElement)sender);
     }
 
     private void PresetButton_Click(object sender, RoutedEventArgs e)

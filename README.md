@@ -201,6 +201,18 @@ Amazon Bedrock, or any other OpenAI-compatible server; **Test All** checks every
 shows the result as a dot beside it. The model menu under the composer groups routes the same way
 (Primary, Subagents, Backups, Other), with a lock or a shield beside each.
 
+**Each chat has its own model.** Picking a model in the menu under the composer changes that chat only
+(it is stored with the conversation): two projects open side by side can run on two different servers
+at once. A new chat starts with what its project's chats last chose, else the primary — the primary is
+what new projects start with and the main server subagents fall back to. Everything a chat does — its
+turns, retries, `/goal`, its task list, compaction, its subagents when no subagent server is free —
+uses that chat's model. The thinking menu offers only the levels the chat's model takes (GLM-5.3: Low,
+High, Max; Kimi K2.6: Off, On; Kimi K2.7 Code: none — it always thinks).
+
+When a server refuses a setting it doesn't take ("invalid temperature: only 1 is allowed for this
+model"), Vision leaves that setting out, tries once more, remembers it for that server and model
+(`request-adaptations.json` in the data folder), and says so in one line in the chat instead of failing.
+
 ### Two or more model servers
 
 Add a second DGX Spark (or any other OpenAI-compatible server) as another route in **Settings ›
@@ -258,7 +270,7 @@ AI Models › Add › Subscription plan…**, walks through connecting one:
 
 | Plan | Notes |
 |---|---|
-| Z.ai — GLM Coding Plan, and pay-as-you-go API | International or China (BigModel). GLM-5.3 always thinks; Vision never asks it not to. |
+| Z.ai (GLM) | One provider, four endpoints: Coding Plan, General API, and both in China (BigModel). A Coding Plan key works only on the Coding Plan endpoint; if a key is on the wrong one, the check says which endpoint it belongs to and switches with one click. GLM-5.3 always thinks; Vision never asks it not to. Also in **Settings › AI Models › Add › Z.ai (GLM)…**, with an endpoint picker and a **Test** button. |
 | Kimi Code (subscription), and Moonshot pay-as-you-go API | Overseas or China. Vision tells Kimi who is calling (`Vision/<version> (Windows)`) and never poses as another tool; if Kimi refuses that, the guide suggests the Moonshot API. |
 | OpenAI API | A ChatGPT Plus or Pro subscription doesn't include API access — the API is billed separately. |
 | Qwen — Alibaba Cloud Coding Plan, and Model Studio pay-as-you-go | International or China. Coding Plan keys start with `sk-sp-`. |
@@ -271,9 +283,9 @@ the route and says hello through it. The key goes to Windows Credential Manager.
 services, so they aren't private: Vision masks sensitive data before sending (*Sensitive data*, above).
 
 Alibaba allows the Qwen Coding Plan only for interactive use, so its route is marked **Interactive use
-only (plan terms)** (a switch in the route editor, for any route): while it is the primary, a chat's
-task list won't start (or stops before its next task) and a `/goal` doesn't carry on by itself — make
-another model primary for unattended work — and unattended work never falls back to it as a backup or
+only (plan terms)** (a switch in the route editor, for any route): while it is a chat's model, that chat's
+task list won't start (or stops before its next task) and a `/goal` doesn't carry on by itself — pick
+another model for the chat for unattended work — and unattended work never falls back to it as a backup or
 sends subagents to it. Chats, and the subagents they start, are fine.
 
 ## Using Amazon Bedrock

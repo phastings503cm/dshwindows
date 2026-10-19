@@ -54,15 +54,16 @@ public sealed partial class AgentHost
     private IProviderClient MakeChatClient(ProviderProfile profile, string sessionId)
     {
         var primary = MakeClient(profile, sessionId);
-        var backups = BackupRoutes().Where(b => !b.IsInteractiveOnly || !IsUnattended(sessionId)).ToList();
+        var backups = BackupRoutes(profile.RouteId).Where(b => !b.IsInteractiveOnly || !IsUnattended(sessionId)).ToList();
         if (backups.Count == 0) return primary;
         return new FailoverClient(primary, backups.Select(b => MakeClient(b, sessionId)).ToList(),
             notice => _dispatcher.BeginInvoke(DispatcherPriority.Normal, () => OnFailover(sessionId, notice)));
     }
 
-    /// <summary>The enabled backups of the primary, in list order, with their keys.</summary>
-    private IReadOnlyList<ProviderProfile> BackupRoutes() =>
-        RouteRoster.Backups(Config.Providers, Config.ActiveRoute).Select(route =>
+    /// <summary>The enabled backups for a chat on <paramref name="routeId"/> (that route itself left out), in list order, with
+    /// their keys.</summary>
+    private IReadOnlyList<ProviderProfile> BackupRoutes(string? routeId) =>
+        RouteRoster.Backups(Config.Providers, routeId).Select(route =>
         {
             var copy = route.DeepCopy();
             var key = Config.ApiKey(route);
@@ -91,12 +92,11 @@ public sealed partial class AgentHost
 
     /// <summary>Changes when what a chat's engine is built with around the model does (the shield's settings, the backups,
     /// the subagent servers and their privacy), so the engine is rebuilt exactly then.</summary>
-    private string RoutingStamp()
+    private string RoutingStamp(ProviderProfile chatRoute)
     {
-        var backups = string.Join(",", RouteRoster.Backups(Config.Providers, Config.ActiveRoute).Select(b => b.RouteId + (b.IsPrivateRoute ? "+p" : "")));
+        var backups = string.Join(",", RouteRoster.Backups(Config.Providers, chatRoute.RouteId).Select(b => b.RouteId + (b.IsPrivateRoute ? "+p" : "")));
         var servers = string.Join(",", SubagentServersNow().Select(s => s.Label + (s.IsPrivate ? "+p" : "")));
-        var primary = Config.Providers.FirstOrDefault(p => p.RouteId == Config.ActiveRoute)?.IsPrivateRoute;
-        return $"{Config.Privacy}|{primary}|{backups}|{servers}";
+        return $"{Config.Privacy}|{chatRoute.IsPrivateRoute}|{chatRoute.IsInteractiveOnly}|{backups}|{servers}";
     }
 
     /// <summary>The subagent servers (workers) as the model is told about them, with their privacy.</summary>
@@ -109,13 +109,14 @@ public sealed partial class AgentHost
     /// itself).</summary>
     private bool IsUnattended(string sessionId) => _queueSessions.ContainsKey(sessionId) || Session(sessionId)?.Goal is not null;
 
-    /// <summary>The primary route, when its plan's terms allow only interactive use (the Qwen Coding Plan).</summary>
+    /// <summary>The primary route, when its plan's terms allow only interactive use (the Qwen Coding Plan). A chat checks its own
+    /// route: <see cref="InteractiveOnlyRoute(SessionVM?)"/>.</summary>
     public ProviderProfile? InteractiveOnlyPrimary =>
         Config.Providers.FirstOrDefault(p => p.RouteId == Config.ActiveRoute) is { IsInteractiveOnly: true } primary ? primary : null;
 
     public static string QueueRefusal(ProviderProfile route) =>
-        $"{route.Name} is for interactive use only under its plan's terms, so the task list won't run on it. Make another model primary for unattended work.";
+        $"{route.Name} is for interactive use only under its plan's terms, so the task list won't run on it. Pick another model for this chat (the model menu under the message box) for unattended work.";
 
     public static string GoalRefusal(ProviderProfile route) =>
-        $"{route.Name} is for interactive use only under its plan's terms, so the goal won't carry on by itself. Reply to take it one round further, or make another model primary for unattended work.";
+        $"{route.Name} is for interactive use only under its plan's terms, so the goal won't carry on by itself. Reply to take it one round further, or pick another model for this chat for unattended work.";
 }

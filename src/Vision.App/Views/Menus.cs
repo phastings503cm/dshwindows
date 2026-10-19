@@ -33,10 +33,11 @@ public static class Menus
         return item;
     }
 
-    /// <summary>The model in use, and one click to change it: what each Spark Swapper box serves (picking a model asks that
-    /// box to switch), then the configured routes by role — Primary, Subagents, Backups, Other — each marked private (a
-    /// lock) or masked (a shield). Switched-off routes aren't offered.</summary>
-    public static ContextMenu Model(AppModel model)
+    /// <summary>The model a chat uses, and one click to change it — for that chat only (its project's next chats start with
+    /// it too): what each Spark Swapper box serves (picking a model asks that box to switch), then the configured routes by
+    /// role — Primary (the default for new projects), Subagents, Backups, Other — each marked private (a lock) or masked (a
+    /// shield). Switched-off routes aren't offered. Without a chat, picking a route makes it the primary.</summary>
+    public static ContextMenu Model(AppModel model, SessionVM? session = null)
     {
         var menu = new ContextMenu();
         var spark = model.Spark;
@@ -73,23 +74,44 @@ public static class Menus
             menu.Items.Add(new Separator());
         }
         var config = model.Config;
+        var chosen = session is null ? config.ActiveRoute : model.Host.ChatRouteId(session);
+        if (session is not null) menu.Items.Add(Header("This chat's model"));
         foreach (var (role, routes) in RouteRoster.Groups(config.Providers, config.ActiveRoute))
         {
-            menu.Items.Add(Header(role.Title()));
+            menu.Items.Add(Header(role == RouteRole.Primary && session is not null ? "Primary (new projects start with it)" : role.Title()));
             foreach (var provider in routes)
             {
                 var route = provider.RouteId;
                 var item = Item(provider.DisplayName, () =>
                 {
+                    if (session is not null)
+                    {
+                        model.Host.SetChatRoute(session, route);
+                        return;
+                    }
                     if (config.ActiveRoute == route) return;
                     config.MakePrimary(route);
                     model.Host.ResetRouteCache();
-                }, provider.IsPrivateRoute ? Icons.Lock : Icons.Shield);
-                item.ToolTip = (role == RouteRole.Primary ? "The primary model: it answers you. " : "Make this the primary model. ") +
+                }, provider.IsPrivateRoute ? Icons.Lock : Icons.Shield, isChecked: route == chosen);
+                item.ToolTip = (session is not null
+                                   ? route == chosen ? "This chat's model. " : "Use this model in this chat (other chats keep theirs; new chats in this project start with it). "
+                                   : role == RouteRole.Primary ? "The primary model: it answers you. " : "Make this the primary model. ") +
                                (provider.IsPrivateRoute ? "Private — it may see sensitive data." : "Not private — sensitive details are masked before anything is sent.");
-                if (role == RouteRole.Primary) item.FontWeight = FontWeights.SemiBold;
+                if (route == chosen) item.FontWeight = FontWeights.SemiBold;
                 menu.Items.Add(item);
             }
+        }
+        if (session is not null && chosen is not null && chosen != config.ActiveRoute
+            && config.Providers.FirstOrDefault(p => p.RouteId == chosen) is { } chatRoute)
+        {
+            menu.Items.Add(new Separator());
+            var primary = Item($"Make {chatRoute.Name} the primary", () =>
+            {
+                config.MakePrimary(chatRoute.RouteId);
+                model.Host.ResetRouteCache();
+            }, Icons.Chat);
+            primary.ToolTip = "The primary is what new projects start with, and the main server subagents fall back to. Other chats keep their own models.";
+            menu.Items.Add(primary);
         }
         menu.Items.Add(new Separator());
         menu.Items.Add(Item("Configure Models…", () => model.ShowSettings(SettingsTab.Models), Icons.Settings));
@@ -98,19 +120,48 @@ public static class Menus
         return menu;
     }
 
-    /// <summary>Per-chat thinking level.</summary>
+    /// <summary>Per-chat thinking level: only the levels the chat's model takes (GLM-5.3: Low, High, Max; Kimi K2.6: Off, On;
+    /// Kimi K2.7 Code: none — it always thinks).</summary>
     public static ContextMenu Thinking(AppModel model, SessionVM session)
     {
         var menu = new ContextMenu();
-        var fallback = model.Config.ActiveProvider?.Thinking;
-        menu.Items.Add(Item($"Provider default ({fallback?.Label() ?? "server default"})", () => session.Thinking = null,
+        var fallback = model.Host.ChatRoute(session)?.Thinking;
+        var rules = model.Host.RequestRules(session);
+        var offered = rules?.ThinkingLevels ?? ThinkingLevels.All;
+        string Name(ThinkingLevel level) => rules?.Label(level) ?? level.Label();
+        var shownDefault = fallback is { } f && rules?.NearestLevel(f) is { } nearDefault ? Name(nearDefault) : fallback?.Label();
+        menu.Items.Add(Item($"Model default ({shownDefault ?? "server default"})", () => model.Host.SetChatThinking(session, null),
             isChecked: session.Thinking is null));
         menu.Items.Add(new Separator());
-        foreach (var level in ThinkingLevels.All)
+        if (offered.Count == 0)
         {
-            menu.Items.Add(Item($"{level.Label()} — {level.Blurb()}", () => session.Thinking = level, isChecked: session.Thinking == level));
+            menu.Items.Add(new MenuItem
+            {
+                Header = rules?.AlwaysThinks == true ? "This model always thinks — it takes no thinking setting" : "This model has no thinking setting",
+                IsEnabled = false,
+            });
+            return menu;
         }
+        // A level the model doesn't offer (chosen for another model) shows as the one it gets.
+        var current = session.Thinking is { } own ? rules?.NearestLevel(own) ?? own : (ThinkingLevel?)null;
+        foreach (var level in offered)
+        {
+            var blurb = rules?.Thinking.Kind == ThinkingControlKind.Toggle && level != ThinkingLevel.Off ? "Thinks before answering" : level.Blurb();
+            menu.Items.Add(Item($"{Name(level)} — {blurb}", () => model.Host.SetChatThinking(session, level), isChecked: current == level));
+        }
+        if (rules?.AlwaysThinks == true)
+            menu.Items.Add(new MenuItem { Header = "This model always thinks: Low asks for the least.", IsEnabled = false, FontSize = 11.5 });
         return menu;
+    }
+
+    /// <summary>"Thinking: High" for the composer: the level the chat's model really gets ("Always on" for one that takes no
+    /// setting).</summary>
+    public static string ThinkingLabel(AppModel model, SessionVM session)
+    {
+        var rules = model.Host.RequestRules(session);
+        if (rules is { ThinkingLevels.Count: 0 }) return rules.AlwaysThinks ? "Thinking: Always on" : "Thinking: None";
+        if (model.Host.ThinkingFor(session) is not { } level) return "Thinking: Default";
+        return $"Thinking: {(rules?.NearestLevel(level) is { } nearest ? rules.Label(nearest) : level.Label())}";
     }
 
     /// <summary>"128K", "1M" — context sizes for menus.</summary>

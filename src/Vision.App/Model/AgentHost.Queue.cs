@@ -191,7 +191,7 @@ public sealed partial class AgentHost
             return;
         }
         // A plan whose terms allow only interactive use never works a task list (nor picks one up at the next launch).
-        if (InteractiveOnlyPrimary is { } interactive)
+        if (InteractiveOnlyRoute(vm) is { } interactive)
         {
             ChatNote(vm, QueueRefusal(interactive), error: true);
             Config.SetQueueResume(chatId, false);
@@ -276,9 +276,9 @@ public sealed partial class AgentHost
             while (QueueActive(chatId, run))
             {
                 if (Queue.NextTaskFor(chatId) is not { } task) break;
-                // The primary was changed to an interactive-only plan while the list ran: stop before the next task (the
+                // The chat's model was changed to an interactive-only plan while the list ran: stop before the next task (the
                 // finally below forgets the list's resume-on-launch).
-                if (InteractiveOnlyPrimary is { } interactive)
+                if (InteractiveOnlyRoute(chatId) is { } interactive)
                 {
                     ChatNote(chatId, QueueRefusal(interactive), error: true);
                     return;
@@ -532,7 +532,7 @@ public sealed partial class AgentHost
                 if (ct.IsCancellationRequested) return new GoalOutcome.Stopped();
                 // Under an interactive-only plan, nothing runs without the user: a queue task not at all, a /goal one round at
                 // a time (each reply of the user's takes it one round further).
-                if ((auto || kickedOff) && InteractiveOnlyPrimary is { } interactive)
+                if ((auto || kickedOff) && InteractiveOnlyRoute(vm) is { } interactive)
                 {
                     var why = auto ? QueueRefusal(interactive) : GoalRefusal(interactive);
                     Notice(why, error: auto);
@@ -750,7 +750,7 @@ public sealed partial class AgentHost
         ProviderProfile? profile;
         try
         {
-            profile = await ResolveRouteAsync(force: true);
+            profile = await ResolveRouteAsync(Session(sessionId), force: true);
         }
         catch (Exception)
         {
@@ -798,7 +798,7 @@ public sealed partial class AgentHost
             || vm.BlockedGoal is not null || _stoppedChats.Contains(vm.Id)
             || !_backgroundPools.TryGetValue(vm.Id, out var pool) || !pool.HasUnreported
             || !pool.All.Any(j => j.Status is BackgroundAgentStatus.Done or BackgroundAgentStatus.Failed)
-            || IsServerSwitching?.Invoke() == true) return;
+            || ChatServerSwitching(vm)) return;
         // At most a few automatic continuations in a row: a model that keeps relaunching agents must
         // not loop unattended forever. (Said once; the count starts over with the user's next message.)
         var continued = _autoContinuations.GetValueOrDefault(vm.Id);
@@ -865,7 +865,7 @@ public sealed partial class AgentHost
         {
             StartQueue(sessionId);
             output += IsQueueRunning(sessionId) ? " Started the list: it begins once this turn is over."
-                : InteractiveOnlyPrimary is { } interactive ? $" The list couldn't start: {QueueRefusal(interactive)}"
+                : InteractiveOnlyRoute(sessionId) is { } interactive ? $" The list couldn't start: {QueueRefusal(interactive)}"
                 : " The list couldn't start (no model configured?).";
         }
         else

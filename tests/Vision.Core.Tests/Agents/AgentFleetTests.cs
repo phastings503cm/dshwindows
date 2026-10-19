@@ -55,6 +55,32 @@ public sealed class AgentFleetTests
         Assert.Equal("primary", third.Label);
     }
 
+    /// <summary>A chat's own server stands in for the configured primary: its subagents fall back to the model that chat
+    /// uses, never to the one another chat picked — the workers stay shared.</summary>
+    [Fact]
+    public async Task AChatsHomeServerStandsInForThePrimary()
+    {
+        var fleet = new AgentFleet();
+        fleet.Configure([S("spark-a", primary: true)]);
+        var home = S("spark-b");
+        var lease = await fleet.AcquireAsync(null, default, home: home);
+        Assert.Equal("spark-b", lease.Label);
+        Assert.Equal("model-spark-b", lease.Target.Model);
+        lease.Dispose();
+        Assert.Equal("spark-a", (await fleet.AcquireAsync(null, default)).Label); // no home: the configured primary
+
+        // With a worker, the worker first, then the chat's own server — and a worker that is the chat's own route is its home.
+        fleet.Configure([S("spark-a", primary: true), S("worker", max: 1)]);
+        var worker = await fleet.AcquireAsync(null, default, home: home);
+        Assert.Equal("worker", worker.Label);
+        var overflow = await fleet.AcquireAsync(null, default, home: home);
+        Assert.Equal("spark-b", overflow.Label);
+        worker.Dispose();
+        var self = await fleet.AcquireAsync(null, default, home: S("worker", max: 1));
+        Assert.Equal("worker", self.Label);
+        Assert.True(fleet.Servers.Single(s => s.Id == "spark-a").IsPrimary); // the configured fleet is unchanged
+    }
+
     [Fact]
     public async Task ThePrimaryCanBeKeptFreeForTheMainAgent()
     {
