@@ -306,7 +306,9 @@ internal static class PromptRows
         var title = Ui.Text(record.FirstLine, 12.5, selected ? FontWeights.SemiBold : FontWeights.Normal, wrap: false);
         title.TextTrimming = TextTrimming.CharacterEllipsis;
         lines.Children.Add(title);
-        var head = $"{record.Headline} · {record.Source.Label()} · {Formatting.Stamp(record.At)}" + (chatTitle is null ? "" : $" · {chatTitle}");
+        // Under a day heading the time is enough; the full date is in the details.
+        var head = $"{record.Headline} · {record.Source.Label()} · {record.At.ToLocalTime().ToString("t", System.Globalization.CultureInfo.CurrentCulture)}"
+                   + (chatTitle is null ? "" : $" · {chatTitle}");
         var meta = Ui.Text(head, 11, brushKey: brush == "TextFillColorTertiaryBrush" ? "TextFillColorTertiaryBrush" : brush, wrap: false);
         meta.TextTrimming = TextTrimming.CharacterEllipsis;
         lines.Children.Add(meta);
@@ -393,13 +395,20 @@ internal static class PromptRows
             note.Margin = new Thickness(0, 6, 0, 0);
             panel.Children.Add(note);
         }
-        var buttons = Ui.Buttons(
-            Small("Copy", () => Copy(record.Text), "Copy the prompt"),
-            Small("Add to composer", () => actions.AddToComposer(record), "Quote it in the composer, with how it ended, to talk about it"),
-            Small("Jump to it", () => actions.Jump(record), "Show it in the transcript (double-click a row does the same)"),
-            Small("Results…", () => PromptResultsWindow.Show(owner, record, chatTitle), "Its results and completion notes"));
-        buttons.Margin = new Thickness(0, 10, 0, 0);
-        panel.Children.Add(new WrapPanel { Children = { buttons } });
+        // (A wrap panel of its own, so the buttons wrap in a narrow column instead of being cut off.)
+        var buttons = new WrapPanel { Margin = new Thickness(0, 10, 0, 0) };
+        foreach (var button in new[]
+                 {
+                     Small("Copy", () => Copy(record.Text), "Copy the prompt"),
+                     Small("Add to composer", () => actions.AddToComposer(record), "Quote it in the composer, with how it ended, to talk about it"),
+                     Small("Jump to it", () => actions.Jump(record), "Show it in the transcript (double-click a row does the same)"),
+                     Small("Results…", () => PromptResultsWindow.Show(owner, record, chatTitle), "Its results and completion notes"),
+                 })
+        {
+            button.Margin = new Thickness(0, 0, 6, 6);
+            buttons.Children.Add(button);
+        }
+        panel.Children.Add(buttons);
         return panel;
     }
 

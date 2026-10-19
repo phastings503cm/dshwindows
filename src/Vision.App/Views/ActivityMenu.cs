@@ -147,7 +147,9 @@ public sealed class ActivityMenu : UserControl
         title.TextTrimming = TextTrimming.CharacterEllipsis;
         lines.Children.Add(title);
         if (item.Assignment is { } assignment) lines.Children.Add(Line(assignment, "TextFillColorPrimaryBrush"));
-        lines.Children.Add(Line(item.Placement is { } where ? "Runs on " + where : "Not on a model server", item.Placement is null ? "TextFillColorTertiaryBrush" : "AccentTextFillColorPrimaryBrush"));
+        // Waiting tasks run nowhere yet: no placement line for them.
+        if (item.Kind != ActivityKind.ChatTasks)
+            lines.Children.Add(Line(item.Placement is { } where ? "Runs on " + where : "Not on a model server yet", item.Placement is null ? "TextFillColorTertiaryBrush" : "AccentTextFillColorPrimaryBrush"));
         var meta = Line(Meta(item, now), "TextFillColorSecondaryBrush");
         _clocks.Add((meta, item));
         lines.Children.Add(meta);

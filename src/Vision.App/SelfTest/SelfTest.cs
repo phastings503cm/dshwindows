@@ -528,7 +528,7 @@ public sealed class SelfTest
             var frame = new System.Windows.Controls.Border { Child = menu, Padding = new Thickness(12) };
             var host = new Window
             {
-                Owner = window, Width = 500, SizeToContent = SizeToContent.Height, WindowStyle = WindowStyle.ToolWindow, Title = "Background activity",
+                Owner = window, Width = 530, SizeToContent = SizeToContent.Height, WindowStyle = WindowStyle.ToolWindow, Title = "Background activity",
                 Content = frame,
             };
             host.SetResourceReference(Window.BackgroundProperty, "SolidBackgroundFillColorBaseBrush");
