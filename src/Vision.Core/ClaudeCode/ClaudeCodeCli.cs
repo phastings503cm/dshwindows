@@ -466,9 +466,19 @@ public static partial class ClaudeCodeCli
             info.ArgumentList.Add("-q");
             using var process = Process.Start(info);
             if (process is null) return [];
-            var text = await process.StandardOutput.ReadToEndAsync(cancellationToken).ConfigureAwait(false);
-            await process.WaitForExitAsync(cancellationToken).ConfigureAwait(false);
-            return process.ExitCode != 0 ? [] : text.Replace("\0", "").Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).ToList();
+            using var limit = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            limit.CancelAfter(TimeSpan.FromSeconds(10)); // a WSL that is half installed can sit there
+            try
+            {
+                var text = await process.StandardOutput.ReadToEndAsync(limit.Token).ConfigureAwait(false);
+                await process.WaitForExitAsync(limit.Token).ConfigureAwait(false);
+                return process.ExitCode != 0 ? [] : text.Replace("\0", "").Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).ToList();
+            }
+            catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+            {
+                KillTree(process);
+                return [];
+            }
         }
         catch (Exception ex) when (ex is IOException or Win32Exception or InvalidOperationException)
         {

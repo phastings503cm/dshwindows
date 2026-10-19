@@ -229,7 +229,7 @@ public sealed class ClaudeCodeStreamTests
         Assert.Equal((1, TimeSpan.FromSeconds(2), "Claude Code: overloaded, HTTP 529"), (retry.Attempt, retry.Delay, retry.Reason));
         Assert.Equal(1, Assert.IsType<EngineEvent.Recovered>(r.Events[1]).Attempts);
         Assert.Equal(2, r.Events.Count); // the subagent's Read is not a card of the chat's own
-        Assert.Equal("Subagent: Read src/Stock.cs", r.Activity[^1]);
+        Assert.Equal("Subagent: Read " + Path.Combine("src", "Stock.cs"), r.Activity[^1]); // relative, in the OS's own separators
     }
 
     [Fact]
