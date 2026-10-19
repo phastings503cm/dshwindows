@@ -691,8 +691,70 @@ internal static class KeyRoutes
                 var result = await PointerRoutes.TryAsync(route, target, MachineChat.Standalone(), PointerAction.Click, default, cancellationToken)
                     .ConfigureAwait(false);
                 return result.Outcome == RouteOutcome.Done ? RouteResult.Done(InputPlanner.Describe(route)) : result;
+            case InputRoute.UiaSubmit:
+                return await SubmitAsync(target, cancellationToken).ConfigureAwait(false);
             default:
                 return RouteResult.Skip();
         }
+    }
+
+    /// <summary>Enter in a field, without the keyboard: the one submit button of the web form it is in (Chromium and Firefox
+    /// show an HTML form to UI Automation as a group whose control type reads "form"), else — outside a form — the field's
+    /// own Invoke when it offers one. Nothing certain — no form, no button, or several that could be it — is a Skip, and
+    /// the real keyboard presses Enter instead.</summary>
+    private static async Task<RouteResult> SubmitAsync(InputTarget target, CancellationToken cancellationToken)
+    {
+        if (target.Element is not { } element) return RouteResult.Skip("no field to submit");
+        var (finished, result) = await MtaThread.Run(() =>
+        {
+            try
+            {
+                var walker = TreeWalker.ControlViewWalker;
+                AutomationElement? form = null;
+                for (var (current, hop) = (walker.GetParent(element), 0); current is not null && hop < 12; current = walker.GetParent(current), hop++)
+                {
+                    if (current.Current.ControlType == ControlType.Window) break;
+                    if (string.Equals(current.Current.LocalizedControlType?.Trim(), "form", StringComparison.OrdinalIgnoreCase))
+                    {
+                        form = current;
+                        break;
+                    }
+                }
+                if (form is null)
+                {
+                    // Outside a form, only a field that offers Invoke itself (a search box whose action is its query).
+                    if (!element.TryGetCurrentPattern(InvokePattern.Pattern, out var own)) return RouteResult.Skip("the field isn't in a web form");
+                    ((InvokePattern)own).Invoke();
+                    return RouteResult.Done("the field's own Invoke (UI Automation)");
+                }
+                var buttons = form.FindAll(TreeScope.Descendants, new PropertyCondition(AutomationElement.ControlTypeProperty, ControlType.Button));
+                var candidates = new List<(AutomationElement Element, string Name, bool Enabled)>();
+                foreach (AutomationElement button in buttons)
+                {
+                    if (candidates.Count >= 40) break;
+                    if (button.Current.IsOffscreen) continue;
+                    candidates.Add((button, button.Current.Name ?? "", button.Current.IsEnabled));
+                }
+                if (SubmitButton.Pick(candidates.Select(c => (c.Name, c.Enabled)).ToList()) is not { } index)
+                    return RouteResult.Skip("its form has no one button that clearly submits it");
+                if (!candidates[index].Element.TryGetCurrentPattern(InvokePattern.Pattern, out var press))
+                    return RouteResult.Skip("its submit button can't be pressed through UI Automation");
+                ((InvokePattern)press).Invoke();
+                return RouteResult.Done($"its form's “{candidates[index].Name.Trim()}” button (UI Automation)");
+            }
+            catch (ElementNotEnabledException)
+            {
+                return RouteResult.Skip("the button is disabled");
+            }
+            catch (InvalidOperationException)
+            {
+                return RouteResult.Skip("the field no longer offers that");
+            }
+            catch (Exception ex) when (UiaElements.IsGone(ex))
+            {
+                return RouteResult.Skip("the field went away");
+            }
+        }, UiaElements.LookupTimeout, cancellationToken).ConfigureAwait(false);
+        return finished ? result : RouteResult.Done("its submit (UI Automation); it opened something that is still waiting");
     }
 }

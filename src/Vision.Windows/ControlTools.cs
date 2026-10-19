@@ -109,7 +109,9 @@ public sealed class MouseTool : IToolExecutor
         "(app + element, a name or #automationId from ui_tree). By default (mode auto) a click reaches the app in the background — " +
         "UI Automation on the control, or a click message to it — so the person's mouse stays free and other chats can work at the same time; " +
         "where that can't work (games, canvases, right-clicks, drags) it uses the real mouse, waiting its turn if the person or another chat is using it, " +
-        "and puts the cursor back afterwards. window aims at one window even when it is behind others. scroll=up/down/left/right with amount (notches). " +
+        "and puts the cursor back afterwards. window aims at one window even when it is behind others; without it, x,y go to the window this chat " +
+        "last captured (screenshot window=…) or named, covered or not, and a point outside it on another app is refused. " +
+        "Never clicks Vision itself. scroll=up/down/left/right with amount (notches). " +
         "Apps running as administrator ignore it unless Vision is elevated too. Screenshot after to verify.",
         "{\"type\":\"object\",\"properties\":{" +
         "\"x\":{\"type\":\"integer\",\"description\":\"Screen x (pixels)\"},\"y\":{\"type\":\"integer\",\"description\":\"Screen y (pixels)\"}," +
@@ -151,6 +153,8 @@ public sealed class MouseTool : IToolExecutor
         // Never Vision itself, even in the background and by element name: it could press its own gate's Allow Once.
         if (window is not null && TerminalGuard.IsHarness(window.Handle)) return TerminalGuard.SelfClickRefusal();
         if (window is { Minimized: true }) return $"Error: {window.Label} is minimized: focus_app restores it first.";
+        // A window named on purpose becomes this chat's: its next clicks by coordinates go there too.
+        if (window is not null) _chat.Aim(window.Handle, window.Label);
         var screen = ScreenCapture.VirtualScreen();
         (int X, int Y)? to = null;
         if (ToolArgs.Number(args, "to_x") is { } tx && ToolArgs.Number(args, "to_y") is { } ty)
@@ -159,9 +163,12 @@ public sealed class MouseTool : IToolExecutor
             if (!screen.Contains(to.Value.X, to.Value.Y)) return OffScreen(to.Value.X, to.Value.Y, screen);
         }
 
-        // Where the input goes: an element by name, or a point (in a given window, or whatever is on top there).
+        // Where the input goes: an element by name, or a point (in a given window, the chat's own window, or whatever is on
+        // top there).
         InputTarget target;
         int x, y;
+        var aimNote = "";
+        var aimedThere = window is not null;
         if (!string.IsNullOrWhiteSpace(elementName))
         {
             if (window is null) return "Error: element needs app (or window): which app's element to click.";
@@ -178,8 +185,27 @@ public sealed class MouseTool : IToolExecutor
             if (!screen.Contains(x, y)) return OffScreen(x, y, screen);
             if (window is not null && !window.Bounds.Contains(x, y))
                 return $"Error: ({x},{y}) is outside {window.Label} (it spans {window.Bounds}). Take coordinates from a screenshot of it.";
-            if (InputTargets.AtPoint(x, y, window?.Handle ?? IntPtr.Zero) is not { } atPoint) return $"Error: no window is at ({x},{y}).";
+            // No window named: the one this chat last captured or used, where the point is in it — not whatever the person
+            // (or another chat's app) has on top there.
+            var aimAt = window?.Handle ?? IntPtr.Zero;
+            if (window is null && _chat.AimedWindow is { } aimed)
+            {
+                var top = InputTargets.TopAt(x, y);
+                var bounds = WindowServices.Bounds(aimed.Top);
+                var decision = InputAim.Decide(bounds.Contains(x, y), top == aimed.Top, BelongsTo(top, aimed));
+                switch (decision)
+                {
+                    case AimDecision.Aimed:
+                        aimAt = aimed.Top;
+                        aimNote = InputAim.AimedNote(aimed.Label, top == IntPtr.Zero ? "nothing" : TerminalGuard.AppName(top));
+                        break;
+                    case AimDecision.Refuse:
+                        return InputAim.OutsideAimed(x, y, aimed.Label, bounds.ToString(), top == IntPtr.Zero ? "no window" : TerminalGuard.AppName(top));
+                }
+            }
+            if (InputTargets.AtPoint(x, y, aimAt) is not { } atPoint) return $"Error: no window is at ({x},{y}).";
             target = atPoint;
+            aimedThere = aimAt != IntPtr.Zero;
         }
 
         var action = to is not null ? PointerAction.Drag
@@ -222,14 +248,31 @@ public sealed class MouseTool : IToolExecutor
             {
                 if (x == int.MinValue) return $"Error: {target.Label} has no position on screen to click with the real mouse.";
                 if (!screen.Contains(x, y)) return OffScreen(x, y, screen);
-                return await RealAsync(target, window is not null, x, y, to, button, clicks, scroll, cancellationToken).ConfigureAwait(false);
+                var real = await RealAsync(target, aimedThere, x, y, to, button, clicks, scroll, cancellationToken).ConfigureAwait(false);
+                return real.Output.StartsWith("Error", StringComparison.Ordinal) ? real : WithNote(real.Output, aimNote);
             }
             var result = await PointerRoutes.TryAsync(route, target, _chat, action, scroll ?? default, cancellationToken).ConfigureAwait(false);
+            if (result.Outcome == RouteOutcome.Done) return WithNote(result.Message, aimNote);
             if (result.Outcome != RouteOutcome.Skip) return result.Message;
             if (result.Message.Length > 0) skipped.Add($"{InputPlanner.Describe(route)}: {result.Message}");
         }
         return $"Error: couldn't do that to {target.Label} in the background ({string.Join("; ", skipped)}). " +
                "Use mode \"auto\" to let it use the real mouse (it waits its turn).";
+    }
+
+    /// <summary>Whether <paramref name="top"/> is part of the chat's window: a dialog or popup it owns, or a menu of its app.</summary>
+    private static bool BelongsTo(IntPtr top, AimedWindow aimed)
+    {
+        if (top == IntPtr.Zero || WindowServices.ProcessIdOf(top) != aimed.ProcessId) return false;
+        if (WindowServices.ClassName(top) == "#32768") return true; // a menu
+        var owner = top;
+        for (var hop = 0; hop < 8; hop++)
+        {
+            owner = Native.GetWindow(owner, Native.GW_OWNER);
+            if (owner == IntPtr.Zero) return false;
+            if (owner == aimed.Top) return true;
+        }
+        return false;
     }
 
     private static string BackgroundRefusal(PointerAction action, InputTarget target)
@@ -261,15 +304,17 @@ public sealed class MouseTool : IToolExecutor
         using (lease)
         {
             Native.GetCursorPos(out var before);
+            var previous = IntPtr.Zero;
             try
             {
                 // A window named on purpose but covered at that point comes to the front first.
                 var front = "";
                 if (aimed && InputTargets.TopAt(x, y) != target.Top)
                 {
+                    previous = Native.GetForegroundWindow();
                     if (!WindowFocus.Bring(target.Top, out var why)) return $"Error: {target.App} is covered at ({x},{y}) and could not be brought to the front ({why}).";
                     await Task.Delay(250, cancellationToken).ConfigureAwait(false);
-                    front = $" (brought {target.App} to the front first)";
+                    front = $" (brought {target.App} to the front first, then gave your window back)";
                 }
                 var done = await ClickAsync(x, y, to, button, clicks, scroll, cancellationToken).ConfigureAwait(false);
                 return done.StartsWith("Error", StringComparison.Ordinal) ? done : WithNote(done, front);
@@ -282,6 +327,8 @@ public sealed class MouseTool : IToolExecutor
                     PersonInput.Shared.ExpectCursor(before.X, before.Y);
                     Native.SetCursorPos(before.X, before.Y);
                 }
+                // And the window they had in front, when it was this click that took it.
+                ForegroundReturn.Restore(previous, target);
             }
         }
     }
@@ -359,7 +406,9 @@ public sealed class KeyboardTool : IToolExecutor
         "[\"ctrl+s\"] [\"enter\"] [\"ctrl+c\"] [\"esc\"] [\"up\",\"down\"] [\"f5\"] with modifiers ctrl/alt/shift/win. " +
         "app picks the app (process name or window title); element (with app) picks a field by name or #automationId from ui_tree — " +
         "keyboard(app:\"Notepad\", element:\"Text editor\", text:\"hi\"); replace:true replaces the field's text instead of adding to it. " +
-        "Without app it types where the last mouse click picked a field (for 2 minutes), else into the frontmost app. " +
+        "Without app it types where the last mouse click picked a field (for 2 minutes), else into the window this chat last captured or " +
+        "used (for 5 minutes), else into an app this chat started that is in front — otherwise name the app (the window in front may be the person's). " +
+        "Text ending in a line break is the text and then Enter (Enter in a web form's field presses its submit button in the background). " +
         "By default (mode auto) text and lone keys go to the app in the background (UI Automation values, messages to the control), " +
         "leaving the person's keyboard alone; shortcuts with ctrl/alt/shift/win and apps that need it use the real keyboard, waiting " +
         "their turn (the reliable pattern for those: keyboard(app:\"Godot\", keys:[\"F5\"])). " +
@@ -390,6 +439,12 @@ public sealed class KeyboardTool : IToolExecutor
             combos.Add(combo);
         }
         if (text.Length == 0 && combos.Count == 0) return "Error: give text and/or keys.";
+        // "terms\n" is the text and then Enter: the text can go in the background, the Enter by the field's submit.
+        if (mode != InputMode.Real && TrailingEnter.Split(text) is (var head, true) && KeyNames.Parse("enter") is { } enter)
+        {
+            text = head;
+            combos.Insert(0, enter);
+        }
 
         // Where the keystrokes go. The terminal guard resolves the *destination* window and refuses TTYs,
         // launchers and Vision.
@@ -404,6 +459,7 @@ public sealed class KeyboardTool : IToolExecutor
             if (WindowServices.FindApp(app) is not { } hit)
                 return $"Error: '{app}' is not running or cannot be focused: no window of it is open.";
             if (TerminalGuard.IsBlocked(hit.Handle)) return TerminalGuard.Refusal(app);
+            _chat.Aim(hit.Handle, hit.Label);
             if (!string.IsNullOrWhiteSpace(elementName))
             {
                 var (found, error) = await ControlArgs.Element(hit.Handle, elementName, app, cancellationToken).ConfigureAwait(false);
@@ -431,12 +487,23 @@ public sealed class KeyboardTool : IToolExecutor
             targetName = target.Label;
             if (TerminalGuard.IsBlocked(field.Top)) return TerminalGuard.Refusal(TerminalGuard.AppName(field.Top));
         }
+        else if (_chat.AimedWindow is { } aimed)
+        {
+            // The window this chat last captured or used — not the person's front window.
+            if (TerminalGuard.IsBlocked(aimed.Top)) return TerminalGuard.Refusal(TerminalGuard.AppName(aimed.Top));
+            target = InputTargets.ForWindow(aimed.Top);
+            targetName = aimed.Label;
+            remembered = true;
+        }
         else
         {
-            targetName = "frontmost app";
+            // Only an app this chat started itself may be typed into without naming it: the window in front may be the person's.
             var front = Native.GetForegroundWindow();
             if (front != IntPtr.Zero && TerminalGuard.IsBlocked(front)) return TerminalGuard.Refusal(TerminalGuard.AppName(front));
-            target = front == IntPtr.Zero ? null : InputTargets.ForWindow(front);
+            if (front == IntPtr.Zero || !_chat.Owns(WindowServices.ProcessIdOf(front)))
+                return InputAim.NoTypingTarget(front == IntPtr.Zero ? "none" : TerminalGuard.AppName(front));
+            target = InputTargets.ForWindow(front);
+            targetName = TerminalGuard.AppName(front);
         }
         if (target is not null && _chat.Refuse(target.Top, "typing into") is { } refusal) return refusal;
 
@@ -526,7 +593,21 @@ public sealed class KeyboardTool : IToolExecutor
         {
             return wait.Message;
         }
+        var previous = Native.GetForegroundWindow();
         using (lease)
+        {
+            try
+            {
+                return await TypeAsync().ConfigureAwait(false);
+            }
+            finally
+            {
+                // The person gets their window back once the keystrokes are in (unless they moved on meanwhile).
+                if (target is not null) ForegroundReturn.Restore(previous, target);
+            }
+        }
+
+        async Task<ToolResult> TypeAsync()
         {
             // Put the keyboard focus where the text goes: the app, then its field.
             if (target is not null && (app is not null || remembered))
@@ -644,6 +725,31 @@ public sealed class KeyboardTool : IToolExecutor
         KeyNames.Sequence(combo).Select(e => InputSender.Key(e.VirtualKey, e.Up)).ToList();
 }
 
+// MARK: - Giving the person their window back
+
+/// <summary>After the real mouse or keyboard brought a chat's window to the front: the window the person had in front goes
+/// back to the front, unless they used the computer meanwhile or something else came up since (see <see cref="FocusReturn"/>).</summary>
+internal static class ForegroundReturn
+{
+    public static void Restore(IntPtr previous, InputTarget target)
+    {
+        if (previous == IntPtr.Zero) return;
+        static IntPtr Root(IntPtr window)
+        {
+            var root = Native.GetAncestor(window, Native.GA_ROOT);
+            return root == IntPtr.Zero ? window : root;
+        }
+        var front = Root(Native.GetForegroundWindow());
+        var restore = FocusReturn.ShouldRestore(
+            hadPrevious: true,
+            previousIsTarget: Root(previous) == target.Top,
+            previousExists: Native.IsWindow(previous),
+            frontIsTargetApp: front != IntPtr.Zero && (front == target.Top || WindowServices.ProcessIdOf(front) == target.ProcessId),
+            personActive: MachineControl.Arbiter.PersonActive);
+        if (restore) WindowFocus.Bring(previous, out _);
+    }
+}
+
 // MARK: - focus_app
 
 public sealed class FocusAppTool : IToolExecutor
@@ -672,6 +778,7 @@ public sealed class FocusAppTool : IToolExecutor
         {
             if (TerminalGuard.IsHarness(hit.Handle)) return TerminalGuard.SelfClickRefusal("bringing forward");
             if (_chat.Refuse(hit.Handle, "bringing forward") is { } refusal) return refusal;
+            _chat.Aim(hit.Handle, hit.Label);
             InputLease lease;
             try
             {

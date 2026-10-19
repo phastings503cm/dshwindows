@@ -137,6 +137,89 @@ public sealed class BackgroundInputTests(ITestOutputHelper output)
     }
 
     [Fact]
+    public async Task AClickAimedFromACoveredWindowsCaptureReachesThatWindow()
+    {
+        // The review's case: the chat captured a window that another one covers (PrintWindow draws it whole), then clicks
+        // at coordinates read off that capture, without window:. The click reaches the covered window, not the cover.
+        using var back = new TestWindow();
+        using var front = new TestWindow(); // same place, opened later: it covers the first
+        var chat = new MachineChat(Id("aim"));
+        var shot = await Tools.Run(Tool(chat, "screenshot"), $$"""{"window":{{Tools.Q(back.Title)}}}""");
+        output.WriteLine(shot.Output);
+        Assert.StartsWith("Captured ", shot.Output);
+        Assert.Contains("mouse clicks at these coordinates go to it even where other windows cover it", shot.Output);
+        Assert.Contains($"window:\"{back.Handle.ToInt64()}\"", shot.Output);
+        var (x, y) = back.ButtonCenter();
+        var covered = InputTargets.TopAt(x, y) == front.Handle;
+        var cursor = Cursor();
+        var said = await Tools.Output(Tool(chat, "mouse"), $$"""{"x":{{x}},"y":{{y}}}""");
+        output.WriteLine(said);
+        Assert.StartsWith("Pressed Button “Press me” in ", said);
+        if (covered) Assert.Contains("the window this chat last captured", said);
+        await Wait.Until(() => back.Clicks == 1);
+        Assert.Equal(1, back.Clicks);
+        Assert.Equal(0, front.Clicks);
+        Assert.Equal(cursor, Cursor());
+
+        // A point outside it, on another window: refused, never a click into whatever is there.
+        var screen = ScreenCapture.VirtualScreen();
+        var bounds = WindowServices.Bounds(back.Handle);
+        var (ox, oy) = (bounds.X + bounds.Width + 30, bounds.Y + 30);
+        if (screen.Contains(ox, oy))
+        {
+            var outside = await Tools.Output(Tool(chat, "mouse"), $$"""{"x":{{ox}},"y":{{oy}}}""");
+            Assert.StartsWith($"Error: ({ox},{oy}) is outside ", outside);
+        }
+        // A chat that never captured a window clicks what is on top, as before.
+        var other = new MachineChat(Id("top"));
+        await Tools.Output(Tool(other, "mouse"), $$"""{"x":{{x}},"y":{{y}}}""");
+        if (covered) await Wait.Until(() => front.Clicks == 1);
+    }
+
+    [Fact]
+    public async Task KeystrokesWithoutAnAppNeverGoToThePersonsWindow()
+    {
+        // No field clicked, no window captured, and the window in front isn't one this chat started: name the app.
+        var chat = new MachineChat(Id("keys"));
+        var front = Native.GetForegroundWindow();
+        var said = await Tools.Output(Tool(chat, "keyboard"), """{"text":"hello"}""");
+        output.WriteLine(said);
+        // (A terminal in front — the CI runner's console — is refused by the terminal guard first.)
+        if (front != IntPtr.Zero && TerminalGuard.IsBlocked(front)) Assert.StartsWith("Error: not typing into ", said);
+        else Assert.StartsWith("Error: say which app to type into", said);
+    }
+
+    [Fact]
+    public async Task EachSubagentKeepsItsOwnTypingTarget()
+    {
+        // Two agents of one chat (parallel subagents): the field one of them clicked is not where the other one types.
+        using var window = new TestWindow();
+        var chat = new MachineChat(Id("agents"));
+        var (x, y) = window.BoxCenter();
+        if (InputTargets.TopAt(x, y) != window.Handle) return; // something covers it
+        var picked = await Task.Run(async () =>
+        {
+            AgentScope.Current = "a1";
+            await Tools.Output(Tool(chat, "mouse"), $$"""{"x":{{x}},"y":{{y}}}""");
+            return chat.TypingTarget;
+        });
+        Assert.NotNull(picked);
+        var other = await Task.Run(() =>
+        {
+            AgentScope.Current = "a2";
+            return chat.TypingTarget;
+        });
+        Assert.Null(other);
+        Assert.Null(chat.TypingTarget); // the main agent's own is untouched too
+        var again = await Task.Run(() =>
+        {
+            AgentScope.Current = "a1";
+            return chat.TypingTarget;
+        });
+        Assert.Same(picked, again);
+    }
+
+    [Fact]
     public async Task TheMouseRefusesVisionsOwnWindowsByNameAndByPoint()
     {
         // Run as Vision itself does (SelfIsHarness): this process's windows are Vision's. A chat must not press its own

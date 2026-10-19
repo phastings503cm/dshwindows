@@ -103,3 +103,18 @@ public static class ProcessTree
 
     private static bool StartedBefore(DateTimeOffset root, DateTimeOffset? child) => child is not { } at || root <= at + Slack;
 }
+
+/// <summary>The agent inside a chat whose run this code is part of: a subagent's or background agent's own id, null for the
+/// chat's main agent. Like <see cref="ChatProcesses.Current"/>, an AsyncLocal set where each agent's run starts (in
+/// AgentTool), so parallel subagents of one chat each keep their own machine state (the field they clicked, the window they
+/// look at) and never type into the field another one picked.</summary>
+public static class AgentScope
+{
+    private static readonly AsyncLocal<string?> CurrentAgent = new();
+
+    public static string? Current
+    {
+        get => CurrentAgent.Value;
+        set => CurrentAgent.Value = value;
+    }
+}

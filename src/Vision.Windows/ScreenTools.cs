@@ -9,6 +9,14 @@ namespace Vision.Windows;
 public sealed class ScreenshotTool : IToolExecutor
 {
     public const string ToolName = "screenshot";
+    private readonly MachineChat _chat;
+
+    public ScreenshotTool() : this(MachineChat.Standalone()) { }
+
+    /// <param name="chat">Whose capture it is: a window's capture makes that window the chat's (its clicks by coordinates go
+    /// there, even where other windows cover it); a screen or area capture lets coordinates mean what is on top.</param>
+    public ScreenshotTool(MachineChat chat) => _chat = chat;
+
     public string Name => ToolName;
     public ToolSpec Spec { get; } = new(ToolName,
         "Capture the screen (or one window, or one area) as a PNG and show it to the model. " +
@@ -25,12 +33,14 @@ public sealed class ScreenshotTool : IToolExecutor
         Capture? capture;
         string what;
         var fromScreen = false;
+        WindowInfo? captured = null;
         if (!string.IsNullOrWhiteSpace(window))
         {
             if (WindowServices.Match(window) is not { } hit) return Task.FromResult<ToolResult>(NoWindow(window));
             what = $"{hit.Owner} — {(hit.Title.Length == 0 ? $"(window {hit.Id})" : hit.Title)}";
             if (hit.Minimized) return Task.FromResult<ToolResult>(Minimized(what, hit));
             capture = ScreenCapture.Window(hit, out fromScreen);
+            captured = hit;
         }
         else if (!string.IsNullOrWhiteSpace(area))
         {
@@ -48,6 +58,10 @@ public sealed class ScreenshotTool : IToolExecutor
             capture = ScreenCapture.Screen(ScreenCapture.PrimaryScreen());
         }
         if (capture is null) return Task.FromResult<ToolResult>(CaptureFailed);
+        // What the next click by coordinates means: in this window (a window's capture shows it whole, covered or not), or
+        // whatever is on top there (the screen as it is).
+        if (captured is not null) _chat.Aim(captured.Handle, captured.Label);
+        else _chat.Aim(IntPtr.Zero);
 
         var name = $"screenshot-{FileSafe(what, 30)}.png";
         var image = ImagePipeline.Png(capture, ImagePipeline.LongEdge, name);
@@ -55,9 +69,15 @@ public sealed class ScreenshotTool : IToolExecutor
         var output = $"Captured {what} ({image.Data.Length / 1024} KB; {Geometry(capture, image)})"
                      + (string.IsNullOrWhiteSpace(note) ? "" : $" — looking for: {note}")
                      + ". It is shown below; describe what you see before deciding the next step."
+                     + (captured is null ? "" : " " + AimNote(captured))
                      + (fromScreen ? " (The window would not draw itself off screen — typical for GPU-rendered games — so these are the pixels on screen: anything overlapping it shows too.)" : "");
         return Task.FromResult(new ToolResult(output) { Images = [new MessageAttachment(AttachmentKind.Image, image.Name, image.Data)] });
     }
+
+    /// <summary>What a window's capture tells the model about its next click: which window the coordinates belong to.</summary>
+    internal static string AimNote(WindowInfo window) =>
+        $"This is window {window.Id} ({window.Label}): mouse clicks at these coordinates go to it even where other windows cover it " +
+        $"(the same as passing window:\"{window.Id}\"); keyboard input without an app goes to it too.";
 
     /// <summary>Where the pixels came from and how they were scaled, so coordinates read off the
     /// image can be turned back into screen pixels for the mouse tool.</summary>
@@ -129,6 +149,12 @@ public sealed class ListWindowsTool : IToolExecutor
 public sealed class ScreenWatchTool : IToolExecutor
 {
     public const string ToolName = "screen_watch";
+    private readonly MachineChat _chat;
+
+    public ScreenWatchTool() : this(MachineChat.Standalone()) { }
+
+    public ScreenWatchTool(MachineChat chat) => _chat = chat;
+
     public string Name => ToolName;
     public ToolSpec Spec { get; } = new(ToolName,
         "Watch a window: capture it every `interval` seconds for up to `duration`, and return only the frames that actually changed — " +
@@ -143,6 +169,7 @@ public sealed class ScreenWatchTool : IToolExecutor
         if (string.IsNullOrWhiteSpace(needle) || WindowServices.Match(needle) is not { } hit)
             return $"Error: no window matching \"{needle ?? "?"}\" right now.";
         if (hit.Minimized) return ScreenshotTool.Minimized(hit.Label, hit);
+        _chat.Aim(hit.Handle, hit.Label);
         var (interval, duration, shots) = Schedule(ToolArgs.Number(args, "interval"), ToolArgs.Number(args, "duration"));
 
         Capture? previous = null;

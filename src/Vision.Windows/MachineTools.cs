@@ -35,7 +35,7 @@ public static class MachineTools
         chat ??= MachineChat.Standalone();
         IToolExecutor[] tools =
         [
-            new ScreenshotTool(), new ListWindowsTool(), new ScreenWatchTool(), new UiTreeTool(), new InspectProcessTool(),
+            new ScreenshotTool(chat), new ListWindowsTool(), new ScreenWatchTool(chat), new UiTreeTool(chat), new InspectProcessTool(),
             new MouseTool(chat), new KeyboardTool(chat), new FocusAppTool(chat), new ViewImageTool(),
         ];
         return tools.Select(tool => (IToolExecutor)new MachineScoped(tool, chat)).ToList();

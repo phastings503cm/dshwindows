@@ -217,6 +217,74 @@ public sealed class InputPlannerTests
     }
 
     [Fact]
+    public void EnterInABrowserOrWpfFieldTriesItsSubmitBeforeTheRealKeyboard()
+    {
+        var field = new ElementFacts { ControlType = "Edit", Value = true };
+        foreach (var kind in new[] { WindowKind.Browser, WindowKind.Wpf, WindowKind.Modern })
+        {
+            Assert.Equal([InputRoute.UiaSubmit, InputRoute.RealKeyboard], InputPlanner.ForKey("enter", false, false, false, false, InputMode.Auto, kind, field));
+            Assert.Equal([InputRoute.UiaSubmit], InputPlanner.ForKey("return", false, false, false, false, InputMode.Background, kind, field));
+        }
+        // A Win32 text box takes a posted Enter; a modifier or another key is not a submit.
+        Assert.Equal([InputRoute.PostKeys, InputRoute.RealKeyboard], InputPlanner.ForKey("enter", false, false, false, false, InputMode.Auto, WindowKind.Win32Edit, field));
+        Assert.Equal([InputRoute.RealKeyboard], InputPlanner.ForKey("enter", false, false, true, false, InputMode.Auto, WindowKind.Browser, field));
+        Assert.Equal([InputRoute.RealKeyboard], InputPlanner.ForKey("tab", false, false, false, false, InputMode.Auto, WindowKind.Browser, field));
+        Assert.True(InputPlanner.IsBackground(InputRoute.UiaSubmit));
+    }
+
+    [Fact]
+    public void OnlyOneButtonThatClearlySubmitsIsPressed()
+    {
+        Assert.Equal(0, SubmitButton.Pick([("Google Search", true), ("I'm Feeling Lucky", true)]));
+        Assert.Equal(1, SubmitButton.Pick([("Forgot password?", true), ("Sign in", true), ("Create account", true)]));
+        Assert.Equal(0, SubmitButton.Pick([("Send", true), ("Send", false)])); // a greyed-out one doesn't count
+        Assert.Null(SubmitButton.Pick([("Search", true), ("Submit", true)])); // two candidates: not certain
+        Assert.Null(SubmitButton.Pick([("Clear", true), ("Upload a file", true)])); // none
+        Assert.Null(SubmitButton.Pick([]));
+        Assert.Null(SubmitButton.Pick([("Gopher", true)])); // "go" only as a word
+    }
+
+    [Fact]
+    public void ATrailingLineBreakIsTextThenEnter()
+    {
+        Assert.Equal(("weather in Portland", true), TrailingEnter.Split("weather in Portland\n"));
+        Assert.Equal(("weather in Portland", true), TrailingEnter.Split("weather in Portland\r\n"));
+        Assert.Equal(("two\nlines\n", false), TrailingEnter.Split("two\nlines\n")); // a real multi-line text stays as it is
+        Assert.Equal(("\n", false), TrailingEnter.Split("\n"));
+        Assert.Equal(("plain", false), TrailingEnter.Split("plain"));
+        Assert.Equal(("a\tb\n", false), TrailingEnter.Split("a\tb\n"));
+    }
+
+    [Fact]
+    public void AClickGoesToTheChatsOwnWindowNotWhateverCoversIt()
+    {
+        // On top there is the chat's window, or a menu/dialog of the same app: that.
+        Assert.Equal(AimDecision.Top, InputAim.Decide(insideAimed: true, topIsAimed: true, topBelongsToAimed: false));
+        Assert.Equal(AimDecision.Top, InputAim.Decide(insideAimed: false, topIsAimed: false, topBelongsToAimed: true)); // its menu past its edge
+        Assert.Equal(AimDecision.Top, InputAim.Decide(insideAimed: true, topIsAimed: false, topBelongsToAimed: true)); // its own dialog over it
+        // Covered there by the person's window, another chat's app or another window of the same app: the chat's window.
+        Assert.Equal(AimDecision.Aimed, InputAim.Decide(insideAimed: true, topIsAimed: false, topBelongsToAimed: false));
+        // Outside the chat's window, on another window: refused, with what to do instead.
+        Assert.Equal(AimDecision.Refuse, InputAim.Decide(insideAimed: false, topIsAimed: false, topBelongsToAimed: false));
+        Assert.StartsWith("Error: (5,6) is outside notepad — notes.txt, the window this chat last captured (it spans 0,0 800×600); chrome is there. Pass window:",
+                          InputAim.OutsideAimed(5, 6, "notepad — notes.txt", "0,0 800×600", "chrome"));
+        Assert.StartsWith("Error: say which app to type into (app:\"…\")", InputAim.NoTypingTarget("chrome"));
+        Assert.Contains("the window in front (chrome) is not one this chat started or used", InputAim.NoTypingTarget("chrome"));
+    }
+
+    [Fact]
+    public void ThePersonGetsTheirWindowBackOnlyWhenNothingElseHappened()
+    {
+        Assert.True(FocusReturn.ShouldRestore(hadPrevious: true, previousIsTarget: false, previousExists: true, frontIsTargetApp: true, personActive: false));
+        // They were already in that app; they touched something since; their window closed; something else came up.
+        Assert.False(FocusReturn.ShouldRestore(true, previousIsTarget: true, true, true, false));
+        Assert.False(FocusReturn.ShouldRestore(true, false, true, true, personActive: true));
+        Assert.False(FocusReturn.ShouldRestore(true, false, previousExists: false, true, false));
+        Assert.False(FocusReturn.ShouldRestore(true, false, true, frontIsTargetApp: false, false));
+        Assert.False(FocusReturn.ShouldRestore(hadPrevious: false, false, true, true, false));
+    }
+
+    [Fact]
     public void OnlyTheRealDevicesAreForeground()
     {
         foreach (var route in Enum.GetValues<InputRoute>())

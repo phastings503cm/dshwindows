@@ -27,6 +27,26 @@ internal sealed record TypingTarget(IntPtr Top, IntPtr Control, WindowKind Kind,
     public bool IsFresh => DateTimeOffset.UtcNow - At < Fresh && Native.IsWindow(Top);
 }
 
+/// <summary>The window a chat (one agent of it) last captured or aimed input at: screenshot or screen_watch of a window,
+/// ui_tree of an app, a mouse, keyboard or focus_app that named one. Its clicks by coordinates go to it — even where other
+/// windows cover it, since a window's screenshot shows it whole — and its keystrokes without an app go to it, never to
+/// whatever the person has in front.</summary>
+internal sealed record AimedWindow(IntPtr Top, int ProcessId, string Label, DateTimeOffset At)
+{
+    /// <summary>How long the window stays the chat's default.</summary>
+    public static readonly TimeSpan Fresh = TimeSpan.FromMinutes(5);
+
+    public bool IsFresh => DateTimeOffset.UtcNow - At < Fresh && Native.IsWindow(Top) && !Native.IsIconic(Top);
+}
+
+/// <summary>One agent's own input state inside a chat (the main agent, or one subagent or background agent).</summary>
+internal sealed class AgentInput
+{
+    public TypingTarget? TypingTarget { get; set; }
+    public AimedWindow? Window { get; set; }
+    public DateTimeOffset Touched { get; set; } = DateTimeOffset.UtcNow;
+}
+
 /// <summary>One chat as the machine tools see it: its name for the glow, whether it may only use the
 /// apps it started, the field it last clicked into, and where it shows "waiting for the mouse".</summary>
 public sealed class MachineChat
@@ -68,7 +88,48 @@ public sealed class MachineChat
     /// <summary>Shows (text) or clears (null) the chat's "waiting for the mouse" line.</summary>
     public Action<string?>? Status { get; set; }
 
-    internal TypingTarget? TypingTarget { get; set; }
+    private readonly System.Collections.Concurrent.ConcurrentDictionary<string, AgentInput> _agents = new(StringComparer.Ordinal);
+
+    /// <summary>How long an agent's state outlives its last use (a finished subagent's goes then).</summary>
+    private static readonly TimeSpan AgentIdle = TimeSpan.FromMinutes(15);
+
+    /// <summary>The state of the agent this code runs for (<see cref="AgentScope.Current"/>; the main agent when none).</summary>
+    internal AgentInput Input
+    {
+        get
+        {
+            var now = DateTimeOffset.UtcNow;
+            foreach (var (key, stale) in _agents)
+                if (key.Length > 0 && now - stale.Touched > AgentIdle) _agents.TryRemove(key, out _);
+            var input = _agents.GetOrAdd(AgentScope.Current ?? "", static _ => new AgentInput());
+            input.Touched = now;
+            return input;
+        }
+    }
+
+    /// <summary>The field this agent last clicked into (keyboard text without an app goes there for two minutes).</summary>
+    internal TypingTarget? TypingTarget
+    {
+        get => Input.TypingTarget;
+        set => Input.TypingTarget = value;
+    }
+
+    /// <summary>The window this agent last captured or aimed at, while fresh.</summary>
+    internal AimedWindow? AimedWindow => Input.Window is { IsFresh: true } aimed ? aimed : null;
+
+    /// <summary>This agent now looks at / works in <paramref name="top"/> (a top-level window; zero clears it).</summary>
+    internal void Aim(IntPtr top, string? label = null)
+    {
+        if (top == IntPtr.Zero)
+        {
+            Input.Window = null;
+            return;
+        }
+        var root = Native.GetAncestor(top, Native.GA_ROOT);
+        if (root != IntPtr.Zero) top = root;
+        var pid = WindowServices.ProcessIdOf(top);
+        Input.Window = new AimedWindow(top, pid, label ?? WindowServices.ProcessName(pid), DateTimeOffset.UtcNow);
+    }
 
     /// <summary>The real mouse and keyboard for one action (waits its turn, and for the person).</summary>
     public Task<InputLease> AcquireRealInputAsync(CancellationToken cancellationToken)

@@ -336,6 +336,11 @@ internal static class Native
     [DllImport("user32.dll")]
     public static extern IntPtr WindowFromPoint(POINT point);
 
+    public const uint GW_OWNER = 4;
+
+    [DllImport("user32.dll")]
+    public static extern IntPtr GetWindow(IntPtr hWnd, uint command);
+
     [StructLayout(LayoutKind.Sequential)]
     public struct LASTINPUTINFO
     {

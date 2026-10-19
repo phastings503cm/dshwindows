@@ -84,6 +84,9 @@ public enum InputRoute
     PostEditCommand,
     /// <summary>alt+f4 as WM_CLOSE to the top-level window.</summary>
     PostClose,
+    /// <summary>Enter in a text field of a browser, WPF or modern app: the field's own Invoke, or its web form's one submit
+    /// button, through UI Automation (instead of the real keyboard).</summary>
+    UiaSubmit,
     RealMouse,
     RealKeyboard,
 }
@@ -291,6 +294,9 @@ public static class InputPlanner
             if (key is "enter" or "return" or "space" && e.Invoke && e.ControlType is "Button" or "SplitButton" or "Hyperlink" or "MenuItem")
                 routes.Add(InputRoute.UiaInvoke);
             else if (key == "space" && e.Toggle) routes.Add(InputRoute.UiaToggle);
+            // Enter in a field of a window that ignores key messages: submit it through UI Automation first (the field's own
+            // Invoke, or its web form's one submit button); the real keyboard only if that finds nothing.
+            else if (key is "enter" or "return" && e.IsTextField && !PostsWork(kind)) routes.Add(InputRoute.UiaSubmit);
         }
         if (PostsWork(kind))
         {
@@ -335,7 +341,100 @@ public static class InputPlanner
         InputRoute.PostKeys => "key messages to the control",
         InputRoute.PostEditCommand => "the text box's own edit command",
         InputRoute.PostClose => "WM_CLOSE to the window",
+        InputRoute.UiaSubmit => "UI Automation (the field's submit)",
         InputRoute.RealMouse => "the real mouse",
         _ => "the real keyboard",
     };
+}
+
+// MARK: - Which window a chat's input goes to
+//
+// Input belongs to the chat that sends it, not to whatever happens to be on top. A chat that captured a window (or named
+// it, or read its tree) clicks into that window by coordinates even where the person's window or another chat's app covers
+// the point — the capture showed it whole — and types into it when it names no app. Without such a window, a click goes to
+// what is on top at the point (the chat saw the screen as it is), and typing needs an app, a field the chat clicked, or a
+// window of an app the chat started itself: never the person's window by default.
+
+/// <summary>Where a click by coordinates goes.</summary>
+public enum AimDecision
+{
+    /// <summary>What is on top at the point (it is the chat's window, or a menu or dialog of the same app).</summary>
+    Top,
+    /// <summary>The chat's window, behind what covers the point (as <c>window:</c> does).</summary>
+    Aimed,
+    /// <summary>Neither: the point is outside the chat's window, on another app. The model must say which window it means.</summary>
+    Refuse,
+}
+
+public static class InputAim
+{
+    /// <summary>Where a click at a point goes when the chat has a window of its own (<paramref name="insideAimed"/>: the point
+    /// is inside it; <paramref name="topIsAimed"/>: it is on top there; <paramref name="topBelongsToAimed"/>: what is on top
+    /// is that window's own — a menu of its app, or a dialog or popup it owns — and so part of what the chat is working in).
+    /// Another window of the same app (a second browser window) is not.</summary>
+    public static AimDecision Decide(bool insideAimed, bool topIsAimed, bool topBelongsToAimed) =>
+        topIsAimed || topBelongsToAimed ? AimDecision.Top
+        : insideAimed ? AimDecision.Aimed
+        : AimDecision.Refuse;
+
+    /// <summary>The keyboard tool's refusal when it has nowhere of the chat's own to type.</summary>
+    public static string NoTypingTarget(string frontApp) =>
+        $"Error: say which app to type into (app:\"…\"). Without one, keystrokes go to the field this chat last clicked or the window it last " +
+        $"captured, and it has neither — the window in front ({frontApp}) is not one this chat started or used, so it may be the person's.";
+
+    /// <summary>The mouse tool's refusal for a point outside the chat's window, on another app.</summary>
+    public static string OutsideAimed(int x, int y, string aimed, string bounds, string coveringApp) =>
+        $"Error: ({x},{y}) is outside {aimed}, the window this chat last captured (it spans {bounds}); {coveringApp} is there. " +
+        "Pass window:\"…\" (an id or title from list_windows) to click another window, or take a screenshot of the whole screen first.";
+
+    /// <summary>The note on a click that went to the chat's window behind another one.</summary>
+    public static string AimedNote(string aimed, string coveringApp) =>
+        $" (in {aimed}, the window this chat last captured — {coveringApp} covers that point)";
+}
+
+/// <summary>After the real keyboard or mouse took the foreground for a chat, whether to give the person their window
+/// back: only when they haven't touched anything since, their window still exists, and what is in front now is the
+/// chat's doing (its target window or that app's dialog) — not something the person or another app brought up.</summary>
+public static class FocusReturn
+{
+    public static bool ShouldRestore(bool hadPrevious, bool previousIsTarget, bool previousExists, bool frontIsTargetApp, bool personActive) =>
+        hadPrevious && !previousIsTarget && previousExists && frontIsTargetApp && !personActive;
+}
+
+/// <summary>Text that ends in one line break ("search terms\n") is text and then Enter: the text can go in the background
+/// (a field's value) and the Enter by the field's own submit, instead of all of it needing the real keyboard.</summary>
+public static class TrailingEnter
+{
+    public static (string Text, bool Enter) Split(string text)
+    {
+        var trimmed = text.EndsWith("\r\n", StringComparison.Ordinal) ? text[..^2] : text.EndsWith('\n') || text.EndsWith('\r') ? text[..^1] : null;
+        if (trimmed is null || trimmed.Length == 0 || trimmed.IndexOfAny(['\r', '\n', '\t']) >= 0) return (text, false);
+        return (trimmed, true);
+    }
+}
+
+/// <summary>Which button submits a web form, for Enter in one of its fields: the one enabled button whose name says submit
+/// ("Search", "Sign in", "Send"…). None, or more than one, is no answer — a wrong button is worse than the real keyboard.</summary>
+public static class SubmitButton
+{
+    private static readonly string[] Words =
+    [
+        "search", "submit", "go", "send", "sign in", "log in", "login", "next", "continue", "find", "ok", "save", "apply", "done",
+        "enter", "post", "reply", "subscribe", "join", "start",
+    ];
+
+    /// <summary>The index of the submit button among <paramref name="buttons"/> (name, enabled), or null.</summary>
+    public static int? Pick(IReadOnlyList<(string Name, bool Enabled)> buttons)
+    {
+        var hits = new List<int>();
+        for (var i = 0; i < buttons.Count; i++)
+        {
+            if (!buttons[i].Enabled) continue;
+            var name = buttons[i].Name.Trim().ToLowerInvariant();
+            if (name.Length == 0) continue;
+            if (Words.Any(w => name == w || name.StartsWith(w + " ", StringComparison.Ordinal) || name.EndsWith(" " + w, StringComparison.Ordinal)))
+                hits.Add(i);
+        }
+        return hits.Count == 1 ? hits[0] : null;
+    }
 }

@@ -139,6 +139,8 @@ public sealed class AgentTool : IToolExecutor
     {
         var roster = context.Roster;
         var runId = roster?.Begin(description, definition.Name, background, prompt, step);
+        // This subagent's own machine state (see AgentScope); the caller's comes back when this method returns.
+        AgentScope.Current = runId ?? Guid.NewGuid().ToString("N");
         var clock = Stopwatch.StartNew();
         var failovers = 0;
         string? firstServer = null;

@@ -144,6 +144,13 @@ internal static class UiAutomationTree
 public sealed class UiTreeTool : IToolExecutor
 {
     public const string ToolName = "ui_tree";
+    private readonly MachineChat _chat;
+
+    public UiTreeTool() : this(MachineChat.Standalone()) { }
+
+    /// <param name="chat">Whose look it is: the app's window becomes the chat's, so clicks at the positions it lists go there.</param>
+    public UiTreeTool(MachineChat chat) => _chat = chat;
+
     public string Name => ToolName;
     public ToolSpec Spec { get; } = new(ToolName,
         "Dump an app's accessibility tree (UI Automation: buttons, text, menus, values, positions) by app/process name or window title — " +
@@ -170,6 +177,7 @@ public sealed class UiTreeTool : IToolExecutor
                 : $"Error: no running process named '{app}'. Check the name (list_windows / process_list / inspect_process).";
         }
 
+        _chat.Aim(hit.Handle, hit.Label);
         // A hung app blocks UI Automation calls for a long time, so the walk runs on its own
         // thread and is abandoned (not awaited) past the timeout.
         var work = OnOwnThread(() => UiAutomationTree.Read(hit.Handle, depth, MaxNodes, Budget));
