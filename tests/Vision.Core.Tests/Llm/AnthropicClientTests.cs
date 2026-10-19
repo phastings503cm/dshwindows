@@ -77,6 +77,78 @@ public sealed class AnthropicClientTests
         Assert.True(body["stream"]!.GetValue<bool>());
         Assert.Equal("claude-opus-5-5", body["model"]!.GetValue<string>());
         Assert.Equal(AnthropicMessages.AdaptiveDefaultMaxTokens, body["max_tokens"]!.GetValue<int>());
+        // Opus 5.5 asks for Anthropic's server-side fallback.
+        Assert.Equal("default", body["fallbacks"]!.GetValue<string>());
+        Assert.Equal(AnthropicMessages.FallbackBeta, sent.Headers["anthropic-beta"]);
+    }
+
+    /// <summary>Fable 5.1, Opus 5.5, Opus 5 and Sonnet 5.5 take fallbacks: "default"; Sonnet 5.5's between_tools takes nothing
+    /// beside it; Haiku and older models never get it.</summary>
+    [Fact]
+    public void ServerSideFallbackIsAskedForWhereItIsOffered()
+    {
+        Assert.True(AnthropicMessages.TakesFallbacks("claude-fable-5-1"));
+        Assert.True(AnthropicMessages.TakesFallbacks("claude-opus-5-5"));
+        Assert.True(AnthropicMessages.TakesFallbacks("claude-opus-5"));
+        Assert.True(AnthropicMessages.TakesFallbacks("claude-sonnet-5-5"));
+        Assert.False(AnthropicMessages.TakesFallbacks("claude-sonnet-5"));
+        Assert.False(AnthropicMessages.TakesFallbacks("claude-haiku-5-5"));
+        Assert.False(AnthropicMessages.TakesFallbacks("claude-opus-4-8"));
+        Assert.Equal("default", Body(Route("claude-sonnet-5-5"), thinking: ThinkingLevel.High)["fallbacks"]!.GetValue<string>());
+        Assert.Null(Body(Route("claude-sonnet-5-5"), thinking: ThinkingLevel.Off)["fallbacks"]); // between_tools
+        Assert.Null(Body(Route("claude-haiku-5-5"))["fallbacks"]);
+        Assert.Null(AnthropicMessages.Request(Hi(), Route(), fallbacks: false)["fallbacks"]);
+    }
+
+    /// <summary>A declined request handed to another model: one line in the chat, and the declined model's unrun tool call and
+    /// thinking before the hand-over are dropped — only what the fallback model wrote is kept.</summary>
+    [Fact]
+    public async Task AHandOverIsSaidAndWhatCameBeforeItIsDropped()
+    {
+        var notices = new List<string>();
+        var client = new AnthropicClient(Route("claude-fable-5-1"), new FakeHttpHandler(_ => Stream(
+            """{"type":"message_start","message":{"id":"msg_3","type":"message","role":"assistant","model":"claude-fable-5-1","content":[],"usage":{"input_tokens":40,"output_tokens":1}}}""",
+            """{"type":"content_block_start","index":0,"content_block":{"type":"thinking","thinking":"","signature":""}}""",
+            """{"type":"content_block_delta","index":0,"delta":{"type":"signature_delta","signature":"sig-declined"}}""",
+            """{"type":"content_block_stop","index":0}""",
+            """{"type":"content_block_start","index":1,"content_block":{"type":"tool_use","id":"toolu_declined","name":"shell","input":{}}}""",
+            """{"type":"content_block_delta","index":1,"delta":{"type":"input_json_delta","partial_json":"{\"command\":\"nmap\"}"}}""",
+            """{"type":"content_block_stop","index":1}""",
+            """{"type":"content_block_start","index":2,"content_block":{"type":"fallback","from":{"model":"claude-fable-5-1"},"to":{"model":"claude-opus-5-5"}}}""",
+            """{"type":"content_block_stop","index":2}""",
+            """{"type":"content_block_start","index":3,"content_block":{"type":"text","text":""}}""",
+            """{"type":"content_block_delta","index":3,"delta":{"type":"text_delta","text":"Here is a safer way."}}""",
+            """{"type":"content_block_stop","index":3}""",
+            """{"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"output_tokens":30}}""",
+            """{"type":"message_stop"}""")), notices.Add);
+        var done = (await Collect(client, Hi("claude-fable-5-1"))).OfType<LlmStreamEvent.Done>().Single();
+        Assert.Empty(done.Calls);
+        Assert.Equal("stop", done.Finish);
+        Assert.Null(done.ProviderState); // the declined model's signed thinking isn't this reply's
+        Assert.Equal("claude-fable-5-1 declined this request — claude-opus-5-5 carried on (Anthropic's server-side fallback).", Assert.Single(notices));
+    }
+
+    /// <summary>A key that isn't enabled for the fallback beta: the turn goes again without it, said once, and later turns don't
+    /// ask again.</summary>
+    [Fact]
+    public async Task AKeyWithoutTheFallbackBetaCarriesOnWithoutIt()
+    {
+        var replies = new Queue<HttpResponseMessage>([
+            FakeHttpHandler.Json("""{"type":"error","error":{"type":"invalid_request_error","message":"Unexpected value(s) `server-side-fallback-2026-07-01` for the `anthropic-beta` header. Please consult our documentation at docs.anthropic.com or try again without the header."},"request_id":"req_8"}""", HttpStatusCode.BadRequest),
+            Stream(Hello), Stream(Hello)]);
+        var handler = new FakeHttpHandler(_ => replies.Dequeue());
+        var notices = new List<string>();
+        var client = new AnthropicClient(Route(baseUrl: "https://fallback-off.example.com/v1"), handler, notices.Add);
+        await Collect(client, Hi());
+        await Collect(client, Hi());
+        Assert.Equal(3, handler.Requests.Count);
+        Assert.NotNull(JsonNode.Parse(handler.Requests[0].Body)!["fallbacks"]);
+        Assert.Null(JsonNode.Parse(handler.Requests[1].Body)!["fallbacks"]);
+        Assert.False(handler.Requests[1].Headers.ContainsKey("anthropic-beta"));
+        Assert.Null(JsonNode.Parse(handler.Requests[2].Body)!["fallbacks"]);
+        Assert.Equal(AnthropicClient.NoFallbackNotice, Assert.Single(notices));
+        // Preserved thinking's 400 names the anthropic-beta header too: that one is about thinking, not the fallback beta.
+        Assert.False(AnthropicClient.RejectsFallbackBeta("""{"type":"error","error":{"type":"invalid_request_error","message":"messages.1.content.0: Invalid `signature` in `thinking` block. The block is bound to a different conversation. Remove the block, or set `thinking.block_binding.prefix_mismatch_behavior` to \"drop_block\". That setting requires the `thinking-binding-controls-2026-08-01` value in the `anthropic-beta` header."}}"""));
     }
 
     [Theory]
@@ -277,7 +349,8 @@ public sealed class AnthropicClientTests
         Assert.Single(events.OfType<LlmStreamEvent.Done>());
         Assert.Equal("thinking", JsonNode.Parse(handler.Requests[0].Body)!["messages"]![1]!["content"]![0]!["type"]!.GetValue<string>());
         Assert.Equal("text", JsonNode.Parse(handler.Requests[1].Body)!["messages"]![1]!["content"]![0]!["type"]!.GetValue<string>());
-        Assert.Single(notices);
+        Assert.NotNull(JsonNode.Parse(handler.Requests[1].Body)!["fallbacks"]); // still asked for: that 400 wasn't about the beta
+        Assert.Empty(notices);
         // Another client's state (Bedrock's, the reasoning echo) is never replayed here.
         var bedrock = """[{"reasoningContent":{"reasoningText":{"text":"x","signature":"s"}}},{"text":"Done."}]""";
         Assert.Null(AnthropicMessages.ReplayBlocks(LlmMessage.Assistant("Done.") with { ProviderState = bedrock }));
@@ -293,26 +366,26 @@ public sealed class AnthropicClientTests
     public async Task ErrorsAreSaidInPlainWordsAndRetriedOnlyWhenWaitingHelps()
     {
         var key = await Fail(HttpStatusCode.Unauthorized, """{"type":"error","error":{"type":"authentication_error","message":"invalid x-api-key"},"request_id":"req_1"}""");
-        Assert.StartsWith("Anthropic didn't accept the key.", key.Message);
+        Assert.Equal("Anthropic didn't accept the API key (“invalid x-api-key”). Use a key from console.anthropic.com/settings/keys — it starts with sk-ant-. A Claude Pro or Max subscription doesn't include API access; for that, use Claude Code.", key.Message);
         Assert.IsType<RetryDisposition.Fail>(RequestRetry.Disposition(key));
 
         var credit = await Fail((HttpStatusCode)402, """{"type":"error","error":{"type":"billing_error","message":"Your credit balance is too low to access the Anthropic API."},"request_id":"req_2"}""");
-        Assert.Contains("console.anthropic.com → Billing", credit.Message);
-        Assert.Contains("credit balance is too low", credit.Message);
+        Assert.Equal("The Anthropic account needs credit or a payment method (402: Your credit balance is too low to access the Anthropic API.). Add it at console.anthropic.com ▸ Billing.", credit.Message);
         Assert.IsType<RetryDisposition.Fail>(RequestRetry.Disposition(credit));
 
         var model = await Fail(HttpStatusCode.NotFound, """{"type":"error","error":{"type":"not_found_error","message":"model: claude-opus-5-5"},"request_id":"req_3"}""");
-        Assert.StartsWith("Anthropic doesn't offer `claude-opus-5-5` to this key.", model.Message);
+        Assert.Equal("Anthropic doesn't offer `claude-opus-5-5` to this key (404). Pick another model — the route's model list shows the ones the key can use.", model.Message);
         Assert.IsType<RetryDisposition.Fail>(RequestRetry.Disposition(model));
 
         var limited = await Fail((HttpStatusCode)429, """{"type":"error","error":{"type":"rate_limit_error","message":"Number of request tokens has exceeded your per-minute rate limit"},"request_id":"req_4"}""");
+        Assert.Equal("Anthropic's rate limit for this key was reached (429) — Vision waits and tries again.", limited.Message);
         Assert.IsType<RetryDisposition.UntilAvailable>(RequestRetry.Disposition(limited));
         var overloaded = await Fail((HttpStatusCode)529, """{"type":"error","error":{"type":"overloaded_error","message":"Overloaded"},"request_id":"req_5"}""");
-        Assert.Equal("Anthropic is overloaded right now; Vision waits and tries again.", overloaded.Message);
+        Assert.Equal("Anthropic's API is overloaded right now (529) — Vision waits and tries again.", overloaded.Message);
         Assert.IsType<RetryDisposition.UntilAvailable>(RequestRetry.Disposition(overloaded));
 
         var bad = await Fail(HttpStatusCode.BadRequest, """{"type":"error","error":{"type":"invalid_request_error","message":"messages: roles must alternate between \"user\" and \"assistant\""},"request_id":"req_7"}""");
-        Assert.Equal("Anthropic refused the request: messages: roles must alternate between \"user\" and \"assistant\"", bad.Message);
+        Assert.Equal("Anthropic refused the request (400): messages: roles must alternate between \"user\" and \"assistant\"", bad.Message);
 
         var tooLong = await Fail(HttpStatusCode.BadRequest, """{"type":"error","error":{"type":"invalid_request_error","message":"prompt is too long: 1012345 tokens > 1000000 maximum"},"request_id":"req_6"}""");
         Assert.Equal(LlmErrorKind.Overflow, tooLong.Kind);
@@ -331,7 +404,7 @@ public sealed class AnthropicClientTests
             Hello[0], Hello[1], Hello[5],
             """{"type":"message_delta","delta":{"stop_reason":"refusal","stop_details":{"type":"refusal","category":"cyber","explanation":null}},"usage":{"output_tokens":3}}""",
             Hello[7]))), Hi()));
-        Assert.StartsWith("Claude declined this request (its safety checks stopped the reply: cyber).", refusal.Message);
+        Assert.Equal("claude-opus-5-5 declined this request (its safety check: cyber). Rephrase it, or pick another model for this chat.", refusal.Message);
         Assert.IsType<RetryDisposition.Fail>(RequestRetry.Disposition(refusal));
 
         var cutOff = await Assert.ThrowsAsync<LlmException>(() => Collect(new AnthropicClient(Route(), new FakeHttpHandler(_ => Stream(Hello[..4]))), Hi()));
@@ -372,15 +445,19 @@ public sealed class AnthropicClientTests
         var plan = SubscriptionPlans.Find(SubscriptionPlans.Anthropic)!;
         Assert.Equal(ProviderKind.Anthropic, plan.Kind);
         Assert.Equal("claude-opus-5-5", plan.Recommended.Id);
-        Assert.Equal(["claude-opus-5-5", "claude-sonnet-5-5", "claude-haiku-5-5", "claude-fable-5-1"], plan.Models.Select(m => m.Id));
+        Assert.Equal("Anthropic API (Claude, with an API key)", plan.Name);
+        Assert.Equal(["claude-opus-5-5", "claude-fable-5-1", "claude-sonnet-5-5", "claude-haiku-5-5"], plan.Models.Select(m => m.Id));
         var route = plan.Route(null, "claude-sonnet-5-5");
-        Assert.Equal((ProviderKind.Anthropic, AnthropicClient.DefaultBaseUrl, 1_000_000), (route.Kind, route.BaseUrl, route.ContextWindow));
+        Assert.Equal((ProviderKind.Anthropic, "https://api.anthropic.com/v1", 1_000_000), (route.Kind, route.BaseUrl, route.ContextWindow));
+        Assert.Equal("Anthropic|claude-sonnet-5-5", route.RouteId); // the Mac's route name too
         Assert.IsType<AnthropicClient>(ProviderClients.Create(route));
         Assert.Null(plan.KeyMistake("sk-ant-api03-abcdef"));
-        Assert.StartsWith("That's a Claude subscription sign-in (sk-ant-oat…), not an API key.", plan.KeyMistake("sk-ant-oat01-abcdef"));
-        Assert.Contains("Admin key", plan.KeyMistake("sk-ant-admin01-abcdef"));
-        Assert.Contains("another service's key", plan.KeyMistake("sk-proj-abcdef"));
-        Assert.StartsWith("Anthropic didn't accept the key.", SubscriptionPlans.ExplainError(plan, plan.DefaultRegion, 401,
+        Assert.Equal("That's a Claude subscription sign-in token (sk-ant-oat…), not an API key. A Pro or Max subscription works through Claude Code; for the API, create a key at console.anthropic.com ▸ API Keys.",
+            plan.KeyMistake("sk-ant-oat01-abcdef"));
+        Assert.StartsWith("That's an Admin key", plan.KeyMistake("sk-ant-admin01-abcdef"));
+        Assert.Equal("Anthropic API keys start with sk-ant-. Copy one from console.anthropic.com ▸ API Keys.", plan.KeyMistake("sk-proj-abcdef"));
+        Assert.StartsWith("Anthropic didn't accept the API key", SubscriptionPlans.ExplainError(plan, plan.DefaultRegion, 401,
             """{"type":"error","error":{"type":"authentication_error","message":"invalid x-api-key"}}"""));
+        Assert.Equal(["claude-opus-5-5", "claude-haiku-5-5"], SubscriptionPlans.ChatModels(plan, ["claude-opus-5-5", "text-embedding-x", "claude-haiku-5-5"]));
     }
 }

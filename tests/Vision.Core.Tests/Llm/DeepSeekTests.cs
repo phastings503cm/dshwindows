@@ -71,20 +71,24 @@ public sealed class DeepSeekTests
         Assert.Null(off[1]["reasoning_content"]);
     }
 
-    /// <summary>384K output at most, 1M windows, Flash reads images and V4 Pro doesn't, temperature passed through (it is
-    /// ignored while thinking, not refused).</summary>
+    /// <summary>384K (393,216) output at most, 1M windows, Flash reads images and V4 Pro doesn't, temperature within 0…2 (it is
+    /// ignored while thinking, not refused), no forced tool_choice.</summary>
     [Fact]
     public void LimitsWindowsAndImages()
     {
-        Assert.Equal(384_000, Body(Route(maxTokens: 500_000))["max_tokens"]!.GetValue<int>());
+        Assert.Equal(393_216, Body(Route(maxTokens: 500_000))["max_tokens"]!.GetValue<int>());
         Assert.Equal(64_000, Body(Route(maxTokens: 64_000))["max_tokens"]!.GetValue<int>());
         Assert.Equal(0.3, Body(Route(temperature: 0.3))["temperature"]!.GetValue<double>());
+        Assert.Equal(2.0, Body(Route(temperature: 2.6))["temperature"]!.GetValue<double>());
+        Assert.False(ModelRequestRules.For(Route()).ForcedToolChoice);
         Assert.False(ModelRequestRules.For(Route("deepseek-v4-pro")).AcceptsImages);
         Assert.True(ModelRequestRules.For(Route("deepseek-flash")).AcceptsImages);
+        Assert.True(ModelRequestRules.For(Route("deepseek-v4-flash")).AcceptsImages);
+        Assert.Null(ModelRequestRules.For(Route("deepseek-chat")).AcceptsImages); // not known either way
         Assert.False(AttachmentRoute.OpenAi(Route("deepseek-v4-pro")).Vision);
-        Assert.Equal(1_000_000, FallbackContextWindow.Limit("deepseek-v4-pro"));
-        Assert.Equal(1_000_000, FallbackContextWindow.Limit("deepseek-flash"));
-        Assert.Equal(1_000_000, FallbackContextWindow.Limit("deepseek-v4-flash"));
+        Assert.Equal(1_048_576, FallbackContextWindow.Limit("deepseek-v4-pro"));
+        Assert.Equal(1_048_576, FallbackContextWindow.Limit("deepseek-flash"));
+        Assert.Equal(1_048_576, FallbackContextWindow.Limit("deepseek-v4-flash"));
         Assert.Equal(65_536, FallbackContextWindow.Limit("deepseek-r1:32b")); // the local distills keep theirs
         Assert.False(Route().IsSelfHosted);
         Assert.False(Route().IsPrivateRoute);
@@ -146,19 +150,21 @@ public sealed class DeepSeekTests
         });
 
         var key = await Fail(HttpStatusCode.Unauthorized, Unauthorized);
-        Assert.StartsWith("DeepSeek didn't accept the key.", key.Message);
+        Assert.Equal("DeepSeek didn't accept the API key. Check it's a key from platform.deepseek.com/api_keys (it starts with sk-), copied in one piece.", key.Message);
         Assert.IsType<RetryDisposition.Fail>(RequestRetry.Disposition(key));
 
         var balance = await Fail((HttpStatusCode)402, NoBalance);
-        Assert.Equal("Your DeepSeek balance has run out. Top up at platform.deepseek.com/top_up, then try again.", balance.Message);
+        Assert.Equal("The DeepSeek account has no balance left (402 Insufficient Balance). Top it up at platform.deepseek.com/top_up, then try again.", balance.Message);
         Assert.IsType<RetryDisposition.Fail>(RequestRetry.Disposition(balance));
 
         var model = await Fail(HttpStatusCode.BadRequest, NoSuchModel);
-        Assert.Equal("DeepSeek doesn't serve `deepseek-v4-pro`. Use deepseek-v4-pro or deepseek-flash.", model.Message);
+        Assert.Equal("DeepSeek doesn't serve `deepseek-v4-pro`. The current models are deepseek-flash and deepseek-v4-pro.", model.Message);
 
         var busy = await Fail(HttpStatusCode.ServiceUnavailable, """{"error":{"message":"Server Overloaded","type":"server_error","param":null,"code":"server_error"}}""");
+        Assert.Equal("DeepSeek's servers are overloaded right now (503) — Vision waits and tries again.", busy.Message);
         Assert.IsType<RetryDisposition.UntilAvailable>(RequestRetry.Disposition(busy));
         var slow = await Fail((HttpStatusCode)429, """{"error":{"message":"Rate Limit Reached","type":"rate_limit_error","param":null,"code":"rate_limit_error"}}""");
+        Assert.Equal("DeepSeek's rate limit was reached (429) — Vision waits and tries again.", slow.Message);
         Assert.IsType<RetryDisposition.UntilAvailable>(RequestRetry.Disposition(slow));
     }
 
@@ -179,18 +185,20 @@ public sealed class DeepSeekTests
     {
         var plan = SubscriptionPlans.Find(SubscriptionPlans.DeepSeek)!;
         Assert.Equal("DeepSeek API", plan.Name);
+        Assert.Equal("DeepSeek|deepseek-v4-pro", plan.Route(null, "deepseek-v4-pro").RouteId); // the Mac's route name too
         Assert.Equal("deepseek-v4-pro", plan.Recommended.Id);
         Assert.Contains(plan.Models, m => m.Id == "deepseek-flash");
         Assert.True(plan.ListsModels);
         var route = plan.Route(null, "deepseek-flash");
         Assert.Equal(ProviderKind.OpenAICompat, route.Kind);
         Assert.Equal(Api, route.BaseUrl);
-        Assert.Equal(1_000_000, route.ContextWindow);
+        Assert.Equal(1_048_576, route.ContextWindow);
         Assert.Equal("https://platform.deepseek.com/api_keys", plan.DefaultRegion.KeyPage);
         Assert.Equal(SubscriptionPlans.DeepSeek, SubscriptionPlans.ForBaseUrl(Api + "/")?.Plan.Id);
         Assert.Null(plan.KeyMistake("sk-0123456789abcdef"));
-        Assert.Contains("Anthropic key", plan.KeyMistake("sk-ant-api03-abc"));
-        Assert.Equal("Your DeepSeek balance has run out. Top up at platform.deepseek.com/top_up, then try again.",
-            SubscriptionPlans.ExplainError(plan, plan.DefaultRegion, 402, NoBalance));
+        Assert.Equal("That's an Anthropic key. Choose “Anthropic API (Claude, with an API key)” for it, or copy a DeepSeek key from platform.deepseek.com/api_keys.",
+            plan.KeyMistake("sk-ant-api03-abc"));
+        Assert.Equal("DeepSeek keys start with sk-. Copy the key from platform.deepseek.com/api_keys.", plan.KeyMistake("abc123"));
+        Assert.StartsWith("The DeepSeek account has no balance left", SubscriptionPlans.ExplainError(plan, plan.DefaultRegion, 402, NoBalance));
     }
 }

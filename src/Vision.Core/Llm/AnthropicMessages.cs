@@ -22,13 +22,30 @@ namespace Vision.Core;
 //     when Claude refuses it (the history changed under it — "preserved thinking"), the request goes again without it;
 //   - prompt caching: one breakpoint at the end of the system prompt (tools and system are the stable prefix) and automatic
 //     caching for the growing conversation;
-//   - no temperature for Claude 4.7 and later (sampling parameters were removed), nor while thinking.
+//   - no temperature for Claude 4.7 and later (sampling parameters were removed), nor while thinking;
+//   - Fable 5.1, Opus 5.5, Opus 5 and Sonnet 5.5 ask for Anthropic's server-side fallback (fallbacks: "default"): a request
+//     their safety checks decline re-runs on the model Anthropic recommends, in the same call. A fallback block marks the
+//     hand-over; the declined model's tool calls and thinking before it never ran and are dropped.
 // Wire reference: platform.claude.com/docs — Messages, streaming, extended thinking, prompt caching, errors (2026-10-19).
 
 public static class AnthropicMessages
 {
     /// <summary>The anthropic-version header every request carries.</summary>
     public const string Version = "2023-06-01";
+
+    /// <summary>The beta that turns on <c>fallbacks: "default"</c> (a declined request re-runs on the model Anthropic recommends
+    /// for that refusal category, inside the same call).</summary>
+    public const string FallbackBeta = "server-side-fallback-2026-07-01";
+
+    /// <summary>The models that take <c>fallbacks: "default"</c> on Anthropic's own API: Claude Fable 5.1, Opus 5.5, Opus 5 and
+    /// Sonnet 5.5.</summary>
+    public static bool TakesFallbacks(string model) => BedrockModels.ClaudeVersion(model) switch
+    {
+        ("fable", 5.1) => true,
+        ("opus", 5.5 or 5.0) => true,
+        ("sonnet", 5.5) => true,
+        _ => false,
+    };
 
     /// <summary>What a turn may write when neither the request nor the route says: room to think as well as answer (streaming,
     /// so a large limit costs nothing until it is used).</summary>
@@ -49,8 +66,9 @@ public static class AnthropicMessages
     }
 
     /// <summary>The Messages request body (streaming). With <paramref name="replayReasoning"/> false, stored thinking is not
-    /// sent back — the retry after Claude refused it.</summary>
-    public static JsonObject Request(LlmRequest request, ProviderProfile profile, bool replayReasoning = true)
+    /// sent back — the retry after Claude refused it; with <paramref name="fallbacks"/> false, no server-side fallback is asked
+    /// for — the retry after the key turned the beta down.</summary>
+    public static JsonObject Request(LlmRequest request, ProviderProfile profile, bool replayReasoning = true, bool fallbacks = true)
     {
         var model = ModelId(request, profile);
         var traits = BedrockModels.Traits(model);
@@ -100,6 +118,9 @@ public static class AnthropicMessages
             body["thinking"] = thinking;
         }
         if (plan.Effort is { } effort) body["output_config"] = new JsonObject { ["effort"] = effort };
+        // Not beside Sonnet 5.5's between_tools (that thinking setting takes nothing else).
+        if (fallbacks && TakesFallbacks(model) && body["thinking"]?["type"]?.GetValue<string>() != "between_tools")
+            body["fallbacks"] = "default";
         body["stream"] = true;
         return body;
     }
@@ -401,7 +422,8 @@ public static class AnthropicMessages
 // MARK: - One streamed reply
 
 /// <summary>Accumulates a Messages stream from its server-sent events: text and thinking deltas are passed on as they come,
-/// tool calls and the reply's content blocks are kept until the end.</summary>
+/// tool calls and the reply's content blocks are kept until the end. A <c>fallback</c> block (server-side fallback) marks
+/// where a declined model handed over: the tool calls and thinking before it never ran and are dropped.</summary>
 internal sealed class AnthropicReply
 {
     private sealed class Block
@@ -422,9 +444,16 @@ internal sealed class AnthropicReply
     private string? _refusal;
     private int _input, _cacheRead, _cacheWrite, _output;
     private bool _sawUsage;
+    private string? _refusalCategory;
 
-    /// <summary>The model that answered (message_start).</summary>
+    /// <summary>The model that answered (message_start; the fallback model when one took over).</summary>
     public string? Model { get; private set; }
+
+    /// <summary>Each hand-over, for a line in the chat: the model that declined and the one that carried on.</summary>
+    public List<(string From, string To)> Handovers { get; } = [];
+
+    /// <summary>The index of the last hand-over block (-1 when none): what came before it isn't this reply's.</summary>
+    private int Boundary => _blocks.Where(b => b.Value.Type == "fallback").Select(b => b.Key).DefaultIfEmpty(-1).Max();
 
     private Block At(int index)
     {
@@ -473,6 +502,10 @@ internal sealed class AnthropicReply
                     case "redacted_thinking":
                         block.Data = JsonArgs.String(start, "data");
                         return null;
+                    case "fallback":
+                        Handovers.Add((start["from"] is JsonObject from ? JsonArgs.String(from, "model") ?? "the model" : "the model",
+                                       start["to"] is JsonObject to ? JsonArgs.String(to, "model") ?? "another model" : "another model"));
+                        return null;
                     case "thinking":
                         if (JsonArgs.String(start, "signature") is { Length: > 0 } signature) block.Signature = signature;
                         if (JsonArgs.String(start, "thinking") is { Length: > 0 } thought)
@@ -519,7 +552,10 @@ internal sealed class AnthropicReply
                 {
                     _stopReason = JsonArgs.String(md, "stop_reason") ?? _stopReason;
                     if (md["stop_details"] is JsonObject details)
-                        _refusal = JsonArgs.String(details, "explanation") ?? JsonArgs.String(details, "category");
+                    {
+                        _refusal = JsonArgs.String(details, "explanation");
+                        _refusalCategory = JsonArgs.String(details, "category");
+                    }
                 }
                 if (obj["usage"] is JsonObject delta2) ReadUsage(delta2);
                 return null;
@@ -528,21 +564,20 @@ internal sealed class AnthropicReply
                 return null;
             case "error":
             {
+                // Retried like its HTTP twin (overloaded and rate limits are waited out).
                 var error = obj["error"] as JsonObject;
-                var type = error is null ? null : JsonArgs.String(error, "type");
-                var text = (error is null ? null : JsonArgs.String(error, "message")) ?? payload;
-                var status = type switch
+                var status = (error is null ? null : JsonArgs.String(error, "type")) switch
                 {
                     "overloaded_error" => 529,
                     "rate_limit_error" => 429,
-                    "api_error" => 500,
+                    "invalid_request_error" => 400,
+                    "authentication_error" => 401,
+                    "permission_error" => 403,
+                    "not_found_error" => 404,
                     "request_too_large" => 413,
-                    _ => 400,
+                    _ => 500,
                 };
-                if (AnthropicErrors.OverflowLimit(text) is { } limit) throw LlmException.Overflow(limit, text);
-                if (AnthropicErrors.Explain(status, obj.ToJsonString(), Model ?? "") is { } explained)
-                    throw LlmException.Rejected(status, explained.Message, obj.ToJsonString(), explained.Permanent);
-                throw LlmException.Http(status, obj.ToJsonString());
+                throw AnthropicClient.Error(status, obj.ToJsonString(), Model ?? "");
             }
             default:
                 return null; // ping, and event types added later
@@ -574,11 +609,10 @@ internal sealed class AnthropicReply
             case "model_context_window_exceeded":
                 throw LlmException.Overflow(0, "the model ran out of context window (model_context_window_exceeded)");
             case "refusal":
-                throw LlmException.Rejected(400,
-                    "Claude declined this request (its safety checks stopped the reply" + (_refusal is { Length: > 0 } why ? $": {why}" : "") +
-                    "). Rephrase it, or use another model for it.", "stop_reason: refusal", permanent: true);
+                throw AnthropicErrors.Refusal(_refusalCategory, _refusal, Model);
         }
-        var calls = _blocks.Where(b => b.Value.Type == "tool_use")
+        var from = Boundary + 1;
+        var calls = _blocks.Where(b => b.Key >= from && b.Value.Type == "tool_use")
             .Select(b => new ToolCall(b.Value.Id is { Length: > 0 } id ? id : $"call-{b.Key}", b.Value.Name ?? "", Input(b.Value)))
             .ToList();
         var finish = _stopReason switch
@@ -590,7 +624,7 @@ internal sealed class AnthropicReply
         };
         // Cached input is still input: the gauge wants the whole prompt.
         var usage = _sawUsage ? new LlmUsage(_input + _cacheRead + _cacheWrite, _output, _cacheRead) : null;
-        return new LlmStreamEvent.Done(calls, finish, usage) { ProviderState = State() };
+        return new LlmStreamEvent.Done(calls, finish, usage) { ProviderState = State(from) };
     }
 
     private static string Input(Block block) =>
@@ -598,12 +632,13 @@ internal sealed class AnthropicReply
 
     /// <summary>The reply's content blocks in order, when it holds signed (or redacted) thinking that must go back with it; null
     /// otherwise.</summary>
-    private string? State()
+    private string? State(int from)
     {
-        if (!_blocks.Values.Any(b => (b.Type == "redacted_thinking" && b.Data is not null) || (b.Type == "thinking" && b.Signature is not null)))
+        var kept = _blocks.Where(b => b.Key >= from).Select(b => b.Value).ToList();
+        if (!kept.Any(b => (b.Type == "redacted_thinking" && b.Data is not null) || (b.Type == "thinking" && b.Signature is not null)))
             return null;
         var blocks = new JsonArray();
-        foreach (var block in _blocks.Values)
+        foreach (var block in kept)
         {
             switch (block.Type)
             {

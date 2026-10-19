@@ -96,6 +96,17 @@ public static class BedrockModels
     private static readonly Regex ClaudeNew = new(@"claude-(?<family>opus|sonnet|haiku|fable|mythos)-(?<major>\d+)(?:-(?<minor>\d)(?!\d))?");
     private static readonly Regex ClaudeOld = new(@"claude-(?<major>\d)-(?:(?<minor>\d)-)?(?<family>opus|sonnet|haiku)");
 
+    /// <summary>The family and version a Claude id names ("sonnet", 4.5), or null when it names none.</summary>
+    public static (string Family, double Version)? ClaudeVersion(string modelId)
+    {
+        var id = BaseId(modelId) ?? modelId.Trim().ToLowerInvariant();
+        var m = ClaudeNew.Match(id);
+        if (!m.Success) m = ClaudeOld.Match(id);
+        if (!m.Success) return null;
+        return (m.Groups["family"].Value, int.Parse(m.Groups["major"].Value, CultureInfo.InvariantCulture)
+                                          + (m.Groups["minor"].Success ? int.Parse(m.Groups["minor"].Value, CultureInfo.InvariantCulture) / 10.0 : 0));
+    }
+
     public static BedrockModelTraits Traits(string modelId)
     {
         var id = BaseId(modelId) ?? modelId.Trim().ToLowerInvariant();

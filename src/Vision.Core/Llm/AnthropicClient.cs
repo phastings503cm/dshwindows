@@ -19,8 +19,8 @@ namespace Vision.Core;
 
 public sealed class AnthropicClient : IProviderClient
 {
-    /// <summary>The public API.</summary>
-    public const string DefaultBaseUrl = "https://api.anthropic.com";
+    /// <summary>The public API (a route's base URL; given without the /v1, it is added).</summary>
+    public const string DefaultBaseUrl = "https://api.anthropic.com/v1";
 
     /// <summary>A stream that sends nothing for this long is treated as dead (and retried). Pings come every few seconds, so a
     /// silent minute means the connection is gone even while Claude thinks with its text hidden.</summary>
@@ -103,31 +103,62 @@ public sealed class AnthropicClient : IProviderClient
             {
                 // Something answered, but not the Messages API (a proxy's page, a wrong base URL).
                 throw LlmException.Http((int)response.StatusCode,
-                    $"unrecognised reply (is the base URL Anthropic's API?): {TextUtil.Prefix(other.ToString(), 200)}");
+                    $"unrecognised reply (is the address Anthropic's API, ending in /v1?): {TextUtil.Prefix(other.ToString(), 200)}");
             }
+            foreach (var (from, to) in reply.Handovers)
+                _onNotice?.Invoke($"{from} declined this request — {to} carried on (Anthropic's server-side fallback).");
             yield return reply.Finish();
         }
     }
 
-    /// <summary>Send the turn; the open event-stream response. When Claude refuses the thinking replayed from earlier turns
-    /// (the history changed under its signature, or another model wrote it), the request goes again once without it.</summary>
+    /// <summary>Keys (per address and model) that turned the server-side-fallback beta down: not asked again this run.</summary>
+    private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, bool> NoFallbacks = new(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>For tests: forget which keys turned the fallback beta down.</summary>
+    internal static void ResetLearned() => NoFallbacks.Clear();
+
+    /// <summary>Said once when a key isn't enabled for Anthropic's server-side fallback.</summary>
+    public const string NoFallbackNotice =
+        "Anthropic doesn't offer server-side fallback to this key — Vision carries on without it (a declined request then stops instead of moving to another Claude model).";
+
+    /// <summary>Send the turn; the open event-stream response. When the key isn't enabled for the server-side-fallback beta, the
+    /// request goes again without it (said once). When Claude refuses the thinking replayed from earlier turns (the history
+    /// changed under its signature), the request goes again once without it.</summary>
     private async Task<HttpResponseMessage> OpenStreamAsync(LlmRequest request, string model, CancellationToken cancellationToken)
     {
+        var fallbackKey = $"{Endpoint("messages")}|{model}";
         var replay = true;
+        var fallbacks = !NoFallbacks.ContainsKey(fallbackKey);
         while (true)
         {
-            var body = AnthropicMessages.Request(request, Profile, replay).ToJsonString();
+            var body = AnthropicMessages.Request(request, Profile, replay, fallbacks);
+            var sendsFallbacks = body["fallbacks"] is not null;
             try
             {
-                return await SendAsync(HttpMethod.Post, new Uri(Endpoint("messages")), body, model, cancellationToken).ConfigureAwait(false);
+                return await SendAsync(HttpMethod.Post, new Uri(Endpoint("messages")), body.ToJsonString(), model, cancellationToken,
+                    beta: sendsFallbacks ? AnthropicMessages.FallbackBeta : null).ConfigureAwait(false);
+            }
+            catch (LlmException ex) when (sendsFallbacks && ex.StatusCode == 400 && RejectsFallbackBeta(ex.Body))
+            {
+                NoFallbacks[fallbackKey] = true;
+                fallbacks = false;
+                _onNotice?.Invoke(NoFallbackNotice);
             }
             catch (LlmException ex) when (replay && ex.StatusCode == 400 && RejectsThinking(ex.Body)
                                           && request.Messages.Any(m => m.ProviderState?.StartsWith(AnthropicMessages.StatePrefix, StringComparison.Ordinal) == true))
             {
                 replay = false;
-                _onNotice?.Invoke("Claude couldn't reuse its earlier thinking in this chat (the conversation changed since), so this turn starts its thinking afresh.");
             }
         }
+    }
+
+    /// <summary>"Unexpected value(s) `server-side-fallback-2026-07-01` for the `anthropic-beta` header.", or a refusal of the
+    /// fallbacks field.</summary>
+    internal static bool RejectsFallbackBeta(string body)
+    {
+        // Not just "anthropic-beta": preserved thinking's 400 names that header too.
+        var lower = body.ToLowerInvariant();
+        return lower.Contains("server-side-fallback", StringComparison.Ordinal) || lower.Contains("fallbacks", StringComparison.Ordinal);
     }
 
     /// <summary>"messages.5.content.0: Invalid `signature` in `thinking` block. The block is bound to a different conversation…"</summary>
@@ -139,12 +170,14 @@ public sealed class AnthropicClient : IProviderClient
 
     /// <summary>One request; the response when it succeeded (status 2xx), else the error in plain words.</summary>
     private async Task<HttpResponseMessage> SendAsync(HttpMethod method, Uri url, string? body, string model, CancellationToken cancellationToken,
-                                                      bool stream = true)
+                                                      bool stream = true, string? beta = null)
     {
         using var req = new HttpRequestMessage(method, url);
         if (body is not null) req.Content = new StringContent(body, TextUtil.Utf8NoBom, "application/json");
         if (stream) req.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("text/event-stream"));
         ApplyHeaders(req);
+        if (beta is not null && !req.Headers.Contains("anthropic-beta")) req.Headers.TryAddWithoutValidation("anthropic-beta", beta);
+        else if (beta is not null) req.Headers.TryAddWithoutValidation("anthropic-beta", string.Join(",", req.Headers.GetValues("anthropic-beta").Append(beta)));
         HttpResponseMessage response;
         try
         {
@@ -170,8 +203,9 @@ public sealed class AnthropicClient : IProviderClient
     /// plain words, or the raw reply.</summary>
     internal static LlmException Error(int status, string body, string model)
     {
-        if (status == 413) return LlmException.Overflow(0, "the request is larger than Anthropic accepts (request_too_large)");
-        if (AnthropicErrors.OverflowLimit(body) is { } limit) return LlmException.Overflow(limit, AnthropicErrors.Parse(body).Message);
+        if (status == 413 || AnthropicErrors.Parse(body).Type == "request_too_large")
+            return LlmException.Overflow(0, "request too large for Anthropic's API (HTTP 413)");
+        if (status == 400 && AnthropicErrors.OverflowLimit(body) is { } limit) return LlmException.Overflow(limit, AnthropicErrors.Parse(body).Message);
         if (AnthropicErrors.Explain(status, body, model) is { } explained)
             return LlmException.Rejected(status, explained.Message, body, explained.Permanent);
         return LlmException.Http(status, body);

@@ -315,16 +315,19 @@ public sealed partial record ModelRequestRules
 
     /// <summary>DeepSeek's API: thinking on (the default) or off with <c>thinking.type</c>, and how hard with
     /// <c>reasoning_effort</c> low/high/max (DeepSeek maps medium to high itself; Vision offers what it really does). With
-    /// tools — every Vision turn — each earlier assistant message must carry its <c>reasoning_content</c>. At most 384K output
-    /// tokens; Flash reads images, V4 Pro doesn't.</summary>
+    /// tools — every Vision turn — each earlier assistant message must carry its <c>reasoning_content</c>. At most 384K
+    /// (393,216) output tokens, temperature 0…2 (no effect while thinking), no forced tool_choice (a 400 while thinking);
+    /// Flash reads images, V4 Pro doesn't.</summary>
     private static ModelRequestRules DeepSeekRules(string id)
     {
         var words = new Dictionary<ThinkingLevel, string>(LowHighMax) { [ThinkingLevel.Off] = "" };
+        bool? images = id.StartsWith("deepseek-v4-pro", StringComparison.Ordinal) ? false
+            : id.StartsWith("deepseek-flash", StringComparison.Ordinal) || id.StartsWith("deepseek-v4-flash", StringComparison.Ordinal) ? true
+            : null;
         return new()
         {
-            Provider = KnownProvider.DeepSeek, Thinking = ThinkingControl.Effort(words, withToggle: true), MaxOutputTokens = 384_000,
-            AcceptsImages = id.Contains("flash", StringComparison.Ordinal) || id.Contains("vision", StringComparison.Ordinal),
-            EchoReasoning = true, EchoReasoningEveryTurn = true,
+            Provider = KnownProvider.DeepSeek, Thinking = ThinkingControl.Effort(words, withToggle: true), MaxOutputTokens = 393_216,
+            TemperatureRange = (0, 2), ForcedToolChoice = false, AcceptsImages = images, EchoReasoning = true, EchoReasoningEveryTurn = true,
         };
     }
 

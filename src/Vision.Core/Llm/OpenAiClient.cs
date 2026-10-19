@@ -197,11 +197,14 @@ public sealed partial class OpenAiClient : IProviderClient
                 {
                     resolved = JsonArgs.String(hit, "id") ?? id;
                     limit = ContextWindow(hit);
-                    maxOut = JsonNumbers.TryGetInt(hit["max_tokens"], out var m) ? m : null;
+                    maxOut = JsonNumbers.TryGetInt(hit["max_tokens"], out var m) ? m
+                        : JsonNumbers.TryGetInt(hit["max_output_tokens"], out var o) ? o : null; // DeepSeek
                 }
             }
         }
-        limit ??= await SglangContextLengthAsync(cancellationToken).ConfigureAwait(false);
+        // SGLang's own routes exist only on a server you run: a hosted API (Guardian's proxy, DeepSeek…) isn't asked them before
+        // every turn.
+        if (limit is null && Profile.IsSelfHosted) limit = await SglangContextLengthAsync(cancellationToken).ConfigureAwait(false);
         return new ModelInfo(resolved, limit, maxOut, served);
     }
 
@@ -470,6 +473,9 @@ public sealed partial class OpenAiClient : IProviderClient
                 }
             }
             if (state.Finish == "error") throw LlmException.Http(500, "the server ended the reply with an error");
+            // DeepSeek ran short of capacity mid-reply: an outage to wait out, not an answer.
+            if (state.Finish == "insufficient_system_resource")
+                throw LlmException.Http(503, "the server ran out of capacity before finishing the reply (insufficient_system_resource)");
             // Z.ai's own finish reasons: the window is full, its network failed mid-reply, or its filter stopped the reply.
             if (state.Finish == "model_context_window_exceeded") throw LlmException.Overflow(0, "the model's context window is full (model_context_window_exceeded)");
             if (state.Finish == "network_error") throw LlmException.Sse("the provider's network failed mid-reply (network_error)");
@@ -1096,7 +1102,7 @@ public static class FallbackContextWindow
         // Moonshot's platform (platform.kimi.ai/docs/models, 2026-10-18).
         ["kimi-k3"] = 1_000_000, ["kimi-k2.7-code"] = 262_144, ["kimi-k2.7-code-highspeed"] = 262_144, ["kimi-k2.6"] = 262_144,
         // DeepSeek's API (api-docs.deepseek.com, 2026-10-19): both 1M.
-        ["deepseek-v4-pro"] = 1_000_000, ["deepseek-flash"] = 1_000_000, ["deepseek-v4-flash"] = 1_000_000,
+        ["deepseek-v4-pro"] = 1_048_576, ["deepseek-flash"] = 1_048_576, ["deepseek-v4-flash"] = 1_048_576,
     };
 
     /// <summary>Prefix rules on the base name, checked after the exact table.</summary>
@@ -1109,7 +1115,7 @@ public static class FallbackContextWindow
         ("qwen3.5", 262_144), ("qwen3.6", 262_144), ("qwen3.7", 262_144), ("qwen3.8", 262_144),
         ("qwen3.9", 262_144), ("qwen3-next", 262_144), ("qwen3-coder", 262_144),
         ("qwen3", 32_768), ("qwen2.5", 32_768), ("qwen2-72b", 131_072),
-        ("deepseek-r1", 65_536), ("deepseek-v3", 131_072), ("deepseek-v4", 1_000_000), ("deepseek-flash", 1_000_000), ("deepseek", 65_536),
+        ("deepseek-r1", 65_536), ("deepseek-v3", 131_072), ("deepseek-v4", 1_048_576), ("deepseek-flash", 1_048_576), ("deepseek", 65_536),
         ("gpt-4o", 128_000), ("gpt-4.1", 1_048_576), ("gpt-4", 128_000),
         ("claude-3.5", 200_000), ("claude-3", 100_000), ("claude-", 200_000),
         ("mistral-large", 131_072), ("mistral-small", 131_072),

@@ -81,8 +81,23 @@ public sealed record SubscriptionPlan
         var trimmed = key.Trim();
         if (trimmed.Length == 0) return null;
         if (trimmed.Any(char.IsWhiteSpace)) return "The key has a space or a line break in it — copy it again, just the key.";
-        if (Id == SubscriptionPlans.Anthropic && !trimmed.StartsWith("sk-ant-", StringComparison.Ordinal) && trimmed.StartsWith("sk-", StringComparison.Ordinal))
-            return "That looks like another service's key (OpenAI and DeepSeek keys start with sk-). Anthropic keys start with sk-ant-api.";
+        // DeepSeek and Anthropic: Vision for macOS's words (PlanCatalog.keyMistake).
+        if (Id == SubscriptionPlans.DeepSeek)
+        {
+            if (trimmed.StartsWith("sk-ant-", StringComparison.Ordinal))
+                return "That's an Anthropic key. Choose “Anthropic API (Claude, with an API key)” for it, or copy a DeepSeek key from platform.deepseek.com/api_keys.";
+            if (!trimmed.StartsWith("sk-", StringComparison.Ordinal)) return "DeepSeek keys start with sk-. Copy the key from platform.deepseek.com/api_keys.";
+            return null;
+        }
+        if (Id == SubscriptionPlans.Anthropic)
+        {
+            if (trimmed.StartsWith("sk-ant-oat", StringComparison.Ordinal))
+                return "That's a Claude subscription sign-in token (sk-ant-oat…), not an API key. A Pro or Max subscription works through Claude Code; for the API, create a key at console.anthropic.com ▸ API Keys.";
+            if (trimmed.StartsWith("sk-ant-admin", StringComparison.Ordinal))
+                return "That's an Admin key — it manages the organization but can't send messages. Create a regular API key at console.anthropic.com ▸ API Keys.";
+            if (!trimmed.StartsWith("sk-ant-", StringComparison.Ordinal)) return "Anthropic API keys start with sk-ant-. Copy one from console.anthropic.com ▸ API Keys.";
+            return null;
+        }
         if (KeyPrefix is { } prefix && !trimmed.StartsWith(prefix, StringComparison.Ordinal))
         {
             if (Id == SubscriptionPlans.QwenCoding && trimmed.StartsWith("sk-", StringComparison.Ordinal))
@@ -93,12 +108,6 @@ public sealed record SubscriptionPlan
             return "That's a Coding Plan key (it starts with sk-sp-). Choose \"Qwen — Alibaba Cloud Coding Plan\" for it, or use a pay-as-you-go key here.";
         if (Id == SubscriptionPlans.Zai && trimmed.StartsWith("sk-", StringComparison.Ordinal))
             return "That looks like another service's key. Z.ai keys come from z.ai (or open.bigmodel.cn) and don't start with sk-.";
-        if (Id == SubscriptionPlans.Anthropic && trimmed.StartsWith("sk-ant-oat", StringComparison.Ordinal))
-            return "That's a Claude subscription sign-in (sk-ant-oat…), not an API key. A Pro or Max subscription works through Claude Code; the API needs a key from console.anthropic.com (sk-ant-api…).";
-        if (Id == SubscriptionPlans.Anthropic && trimmed.StartsWith("sk-ant-admin", StringComparison.Ordinal))
-            return "That's an Admin key (sk-ant-admin…), which can't send messages. Make a regular API key (sk-ant-api…) on the same page.";
-        if (Id == SubscriptionPlans.DeepSeek && trimmed.StartsWith("sk-ant-", StringComparison.Ordinal))
-            return "That's an Anthropic key. DeepSeek keys come from platform.deepseek.com.";
         return null;
     }
 }
@@ -281,8 +290,8 @@ public static partial class SubscriptionPlans
         new()
         {
             Id = DeepSeek, Provider = "DeepSeek", Name = "DeepSeek API",
-            Summary = "DeepSeek V4 Pro and V4.1 Flash with 1M context, billed per token from prepaid balance.",
-            Regions = [new(International, "International", "https://api.deepseek.com", "https://platform.deepseek.com/api_keys")],
+            Summary = "DeepSeek-V4 Pro and V4.1 Flash on DeepSeek's own API, paid per token from a prepaid balance.",
+            Regions = [new(International, "International", "https://api.deepseek.com", "https://platform.deepseek.com/api_keys", "API keys", RouteName: "DeepSeek")],
             KeySteps =
             [
                 "Sign in at platform.deepseek.com and top up your balance (Top up).",
@@ -294,38 +303,38 @@ public static partial class SubscriptionPlans
             KeyPrefix = "sk-",
             Models =
             [
-                new("deepseek-v4-pro", "1M context · thinks", 1_000_000),
-                new("deepseek-flash", "1M context · faster, cheaper, reads images", 1_000_000),
+                new("deepseek-v4-pro", "V4 Pro · 1M context · text", 1_048_576),
+                new("deepseek-flash", "V4.1 Flash · 1M context · reads images", 1_048_576),
             ],
             ListsModels = true,
-            Note = "Prepaid balance; prices are lower off-peak. Thinking is on by default — Off in the chat's thinking menu answers fastest.",
+            TermsNote = "Billed per token from the account's prepaid balance (top up at platform.deepseek.com); off-peak hours cost half. DeepSeek's servers are in China: the route isn't private, so Vision masks sensitive details before sending.",
         },
         // Anthropic's API with a key (the Messages API). A Claude Pro/Max subscription is not an API key: it is used through the
         // official Claude Code app, never by lifting its sign-in.
         new()
         {
-            Id = Anthropic, Provider = "Anthropic", Name = "Anthropic API (key)",
-            Summary = "Claude Opus 5.5, Sonnet 5.5, Haiku 5.5 and Fable 5.1 directly from Anthropic, billed per token.",
-            Regions = [new(International, "International", "https://api.anthropic.com", "https://console.anthropic.com/settings/keys")],
+            Id = Anthropic, Provider = "Anthropic", Name = "Anthropic API (Claude, with an API key)",
+            Summary = "Claude Opus, Fable, Sonnet and Haiku on Anthropic's own API — thinking, images, PDFs and prompt caching.",
+            Regions = [new(International, "International", AnthropicClient.DefaultBaseUrl, "https://console.anthropic.com/settings/keys", "API Keys", RouteName: "Anthropic")],
             KeySteps =
             [
                 "Sign in at console.anthropic.com and add credit or a payment method (Billing).",
-                "Open the API keys page — the button below does it.",
+                "Open the API Keys page — the button below does it.",
                 "Create a key.",
                 "Copy it. It's shown only once, so paste it into Vision straight away.",
             ],
-            KeyHint = "Starts with sk-ant-api.",
+            KeyHint = "Starts with sk-ant-api…",
             KeyPrefix = "sk-ant-",
             Models =
             [
-                new("claude-opus-5-5", "1M context · the default Opus", 1_000_000),
-                new("claude-sonnet-5-5", "1M context · fast everyday coding", 1_000_000),
-                new("claude-haiku-5-5", "1M context · quickest, cheapest", 1_000_000),
-                new("claude-fable-5-1", "1M context · most capable, priciest", 1_000_000),
+                new("claude-opus-5-5", "Opus 5.5 · 1M context", 1_000_000),
+                new("claude-fable-5-1", "Fable 5.1 · the most capable · 1M", 1_000_000),
+                new("claude-sonnet-5-5", "Sonnet 5.5 · fast, capable · 1M", 1_000_000),
+                new("claude-haiku-5-5", "Haiku 5.5 · fastest · 1M", 1_000_000),
             ],
             ListsModels = true,
             Kind = ProviderKind.Anthropic,
-            TermsNote = "A Claude Pro or Max subscription doesn't include API access: the API is billed separately at console.anthropic.com. To use your subscription, connect Claude Code instead.",
+            TermsNote = "Billed per token at console.anthropic.com. A Claude Pro or Max subscription doesn't include API access — for a subscription, use Claude Code instead.",
         },
     ];
 
@@ -339,6 +348,11 @@ public static partial class SubscriptionPlans
     /// also holds image, speech and embedding models), anyone else's as listed.</summary>
     public static IReadOnlyList<string> ChatModels(SubscriptionPlan plan, IReadOnlyList<string> listed)
     {
+        if (plan.Id == Anthropic)
+        {
+            var claude = listed.Where(id => id.StartsWith("claude-", StringComparison.OrdinalIgnoreCase)).ToList();
+            return claude.Count == 0 ? plan.Models.Select(m => m.Id).ToList() : claude;
+        }
         if (plan.Id != Zai) return listed;
         string[] notChat = ["embedding", "image", "video", "voice", "asr", "tts", "realtime", "ocr"];
         var chat = listed.Where(id => id.StartsWith("glm-", StringComparison.OrdinalIgnoreCase)
