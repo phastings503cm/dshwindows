@@ -103,6 +103,11 @@ public sealed class GeneralPage : UserControl
             "Screenshots, the window list, UI trees, mouse clicks and keystrokes — for testing an app or game it built. " +
             "Each chat asks before the first use (full-access chats don't). Typing into terminals, the Run box and Explorer is always refused.",
             Ui.Toggle(config.ComputerToolsEnabled, on => config.ComputerToolsEnabled = on), Icons.Mouse));
+        page.Children.Add(Ui.Row("Keep each chat to the apps it started",
+            "A chat's clicks and keystrokes go only to windows of programs it launched itself (and what those launched), so chats " +
+            "working side by side can't touch each other's apps — or yours. Clicks reach apps in the background where they can; " +
+            "when one needs the real mouse, chats take turns and wait while you use it. Ctrl+Alt+. stops them from any app.",
+            Ui.Toggle(config.MachineOwnAppsOnly, on => config.MachineOwnAppsOnly = on), Icons.Shield));
 
         // Windows integration
         page.Children.Add(Ui.Section("Windows"));

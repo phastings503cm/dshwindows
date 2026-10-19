@@ -397,6 +397,25 @@ public sealed partial class SessionVM : ObservableObject
         ContentChanged?.Invoke();
     }
 
+    /// <summary>"Waiting for the mouse…" on the card of the machine tool that waits (and in the plan panel's
+    /// activity line); null takes it away again.</summary>
+    public void ShowMachineWait(string? text)
+    {
+        ToolEntryVM? card = null;
+        for (var i = Entries.Count - 1; i >= 0 && card is null; i--)
+        {
+            if (Entries[i] is ToolEntryVM { IsRunning: true, Name: "mouse" or "keyboard" or "focus_app" } tool) card = tool;
+        }
+        if (text is not null)
+        {
+            if (card is not null) card.Summary = text;
+            if (Running) Activity = text;
+            return;
+        }
+        if (card?.Summary?.StartsWith("Waiting for", StringComparison.Ordinal) == true) card.Summary = null;
+        if (Activity?.StartsWith("Waiting for", StringComparison.Ordinal) == true) Activity = null;
+    }
+
     public void FinishTool(string id, bool ok, string summary, string? output)
     {
         if (Entries.LastOrDefault(e => e.Id == id) is not ToolEntryVM tool) return;

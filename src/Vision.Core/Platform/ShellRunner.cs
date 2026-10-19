@@ -30,6 +30,8 @@ public static class ShellRunner
         {
             process = new Process { StartInfo = shell.CreateStartInfo(command, workingDirectory) };
             if (!process.Start()) return new ShellResult("", -1, false);
+            // The chat this command runs for owns what it starts (see ChatProcesses).
+            ChatProcesses.Record(process.Id);
         }
         catch (Exception ex) when (ex is System.ComponentModel.Win32Exception or InvalidOperationException or IOException)
         {

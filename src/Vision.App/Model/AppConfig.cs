@@ -90,6 +90,8 @@ public sealed partial class AppConfig : ObservableObject
     [ObservableProperty] private string _theme = "system";
     [ObservableProperty] private bool _checkForUpdates = true;
     [ObservableProperty] private bool _computerToolsEnabled = true;
+    /// <summary>Each chat may click and type only in apps it started itself (and what those started).</summary>
+    [ObservableProperty] private bool _machineOwnAppsOnly;
     [ObservableProperty] private int _skillSourcesRaw = (int)SkillSources.All;
     /// <summary>The one-time notice about bringing in Claude Code and Cursor has been shown or used, so it
     /// doesn't come back.</summary>
@@ -524,6 +526,7 @@ public sealed partial class AppConfig : ObservableObject
         public string? Theme { get; set; }
         public bool? CheckForUpdates { get; set; }
         public bool? ComputerToolsEnabled { get; set; }
+        public bool? MachineOwnAppsOnly { get; set; }
         public int? SkillSources { get; set; }
         public bool? ExternalImportOffered { get; set; }
         public List<string>? DisabledSkills { get; set; }
@@ -584,6 +587,7 @@ public sealed partial class AppConfig : ObservableObject
             Theme = stored?.Theme ?? "system";
             CheckForUpdates = stored?.CheckForUpdates ?? true;
             ComputerToolsEnabled = stored?.ComputerToolsEnabled ?? true;
+            MachineOwnAppsOnly = stored?.MachineOwnAppsOnly ?? false;
             SkillSourcesRaw = stored?.SkillSources ?? (int)SkillSources.All;
             ExternalImportOffered = stored?.ExternalImportOffered ?? false;
             foreach (var id in stored?.DisabledSkills ?? []) DisabledSkills.Add(id);
@@ -744,6 +748,7 @@ public sealed partial class AppConfig : ObservableObject
             Theme = Theme,
             CheckForUpdates = CheckForUpdates,
             ComputerToolsEnabled = ComputerToolsEnabled,
+            MachineOwnAppsOnly = MachineOwnAppsOnly ? true : null,
             SkillSources = SkillSourcesRaw,
             ExternalImportOffered = ExternalImportOffered,
             DisabledSkills = DisabledSkills.OrderBy(s => s, StringComparer.Ordinal).ToList(),

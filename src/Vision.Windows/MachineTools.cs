@@ -27,12 +27,19 @@ namespace Vision.Windows;
 public static class MachineTools
 {
     /// <summary>screenshot, list_windows, screen_watch, ui_tree, inspect_process (observe);
-    /// mouse, keyboard, focus_app (control); view_image.</summary>
-    public static IReadOnlyList<IToolExecutor> All() =>
-    [
-        new ScreenshotTool(), new ListWindowsTool(), new ScreenWatchTool(), new UiTreeTool(), new InspectProcessTool(),
-        new MouseTool(), new KeyboardTool(), new FocusAppTool(), new ViewImageTool(),
-    ];
+    /// mouse, keyboard, focus_app (control); view_image — for one chat (<paramref name="chat"/>: its
+    /// name on the glow, its place in line for the real mouse, the apps it started). Each runs inside the
+    /// chat's machine session, which lights the glow.</summary>
+    public static IReadOnlyList<IToolExecutor> All(MachineChat? chat = null)
+    {
+        chat ??= MachineChat.Standalone();
+        IToolExecutor[] tools =
+        [
+            new ScreenshotTool(), new ListWindowsTool(), new ScreenWatchTool(), new UiTreeTool(), new InspectProcessTool(),
+            new MouseTool(chat), new KeyboardTool(chat), new FocusAppTool(chat), new ViewImageTool(),
+        ];
+        return tools.Select(tool => (IToolExecutor)new MachineScoped(tool, chat)).ToList();
+    }
 }
 
 // MARK: - Argument helpers

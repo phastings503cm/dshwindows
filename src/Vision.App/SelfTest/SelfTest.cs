@@ -13,6 +13,7 @@ using Vision.App.Views.Import;
 using Vision.App.Views.Settings;
 using Vision.App.Views.Wizard;
 using Vision.Core;
+using Vision.Windows;
 using MessageRole = Vision.App.Model.MessageRole;
 
 namespace Vision.App;
@@ -123,6 +124,26 @@ public sealed partial class SelfTest
                 await ShowAndCapture(settings, $"settings-{tab.ToString().ToLowerInvariant()}");
             }
 
+            // Settings › General scrolled to Computer use: the switches for the agent's mouse and keyboard.
+            var general = new SettingsWindow(model, SettingsTab.General, null) { Owner = window, Width = 1000, Height = 720 };
+            try
+            {
+                general.WindowStartupLocation = WindowStartupLocation.CenterOwner;
+                general.Show();
+                await Settle(600);
+                general.SelfTestScroll(1);
+                await Settle(500);
+                Capture(general, "settings-general-computer-use");
+            }
+            catch (Exception error)
+            {
+                Fail("settings-general-computer-use", error);
+            }
+            finally
+            {
+                try { general.Close(); } catch (Exception) { }
+            }
+
             // Settings › Model servers with two made-up boxes (nothing is contacted or saved).
             ShowDemoBoxes(model);
             await ShowAndCapture(new SettingsWindow(model, SettingsTab.Spark, null) { Owner = window, Width = 1000, Height = 720 }, "settings-model-servers");
@@ -194,6 +215,8 @@ public sealed partial class SelfTest
 
             await CaptureProviders(window, model);
 
+            await CaptureMachineGlow(window, model, chat);
+
             // What the composer says it will send for a PDF, a Markdown file, a Word file, a scan and a large paste.
             await CaptureAttachments(window, model);
 
@@ -205,6 +228,136 @@ public sealed partial class SelfTest
             Fail("run", error);
         }
         Finish();
+    }
+
+    /// <summary>The machine-in-use glow: pictures of it in its three states, a chat waiting for the mouse, then
+    /// the real overlay on this desktop — click-through everywhere, and absent from screen captures (left out by
+    /// Windows, or stepping aside for each capture over Remote Desktop).</summary>
+    private async Task CaptureMachineGlow(MainWindow owner, AppModel model, SessionVM chat)
+    {
+        try
+        {
+            // A click that needs the real mouse while another chat has it: its card says so.
+            chat.Running = true;
+            chat.StartTool("selftest-mouse", "mouse", "x=412 y=233 button=right");
+            chat.ShowMachineWait(MachineText.Waiting(WaitReason.OtherChat, "Build the game"));
+            model.Select(chat.Id);
+            model.Mode = WorkspaceMode.Chat;
+            await Settle(800);
+            Capture(owner, "chat-waiting-mouse");
+            var card = chat.Entries.OfType<ToolEntryVM>().Last();
+            if (card.Summary != "Waiting for the mouse — \u201CBuild the game\u201D is using it…")
+                throw new InvalidOperationException($"the waiting card says \"{card.Summary}\"");
+            chat.ShowMachineWait(null);
+            if (card.Summary is not null || chat.Activity is not null) throw new InvalidOperationException("the waiting line stayed after the wait");
+            chat.FinishTool("selftest-mouse", true, "Clicked right at (412,233). Screenshot to verify.", null);
+        }
+        catch (Exception error)
+        {
+            Fail("chat-waiting-mouse", error);
+        }
+        finally
+        {
+            chat.Activity = null;
+            chat.Running = false;
+        }
+
+        static MachineSessionInfo S(string id, string title) => new(id, title, DateTimeOffset.Now, DateTimeOffset.Now, false);
+        var states = new (string Name, GlowText Text)[]
+        {
+            ("machine-glow", MachineText.Glow([S("a", "Fix the stock count export"), S("b", "Build the game")],
+                new ArbiterSnapshot("b", "Build the game", true, [new WaitingChat("a", "Fix the stock count export")], false))!),
+            ("machine-glow-background", MachineText.Glow([S("a", "Fix the stock count export"), S("b", "Build the game")], ArbiterSnapshot.Idle)!),
+            ("machine-glow-paused", MachineText.Glow([S("b", "Build the game")], new ArbiterSnapshot("b", "Build the game", false, [], true))!),
+        };
+        foreach (var (name, text) in states)
+        {
+            var preview = new Window
+            {
+                Title = "Machine glow",
+                Content = GlowLook.Preview(text),
+                SizeToContent = SizeToContent.WidthAndHeight,
+                ResizeMode = ResizeMode.NoResize,
+                Owner = owner,
+            };
+            await ShowAndCapture(preview, name);
+        }
+
+        if (MachineGlowController.Current is not { } glow)
+        {
+            Fail("machine glow", new InvalidOperationException("no glow controller was installed"));
+            return;
+        }
+        try
+        {
+            glow.Preview(states[0].Text);
+            await Settle(1200);
+            var windows = glow.Windows;
+            var monitors = Monitors.All();
+            if (windows.Count == 0 || monitors.Count == 0) throw new InvalidOperationException("the glow showed no windows");
+            Note($"machine glow: {windows.Count} windows on {monitors.Count} monitor(s); remote session {Monitors.RemoteSession}; " +
+                 $"left out of captures by Windows {glow.ExcludedFromCapture}; stop key registered {glow.StopKeyRegistered}; label \"{glow.Shown}\"");
+            foreach (var overlay in windows)
+            {
+                if (!OverlayWindows.IsClickThrough(overlay.Handle)) throw new InvalidOperationException($"glow window {overlay.Handle} is not click-through");
+                var rect = OverlayWindows.Rect(overlay.Handle);
+                var (cx, cy) = (rect.X + rect.Width / 2, rect.Y + rect.Height / 2);
+                if (OverlayWindows.WindowAt(cx, cy) == overlay.Handle) throw new InvalidOperationException($"a click at {cx},{cy} would land on the glow");
+            }
+            Capture(windows.First(w => w.Monitor is not null), "machine-glow-label");
+
+            // Screenshots don't contain it: the top edge captures the same with the glow up and gone.
+            var primary = monitors[0];
+            var top = windows.First(w => w.Pin is { } pin && pin.Y == primary.Bounds.Y && pin.X == primary.Bounds.X && pin.Width > pin.Height);
+            var strip = top.Pin!.Value;
+            var shown = ScreenGrab.Region(strip);
+            // The control: the same strip with the glow forced into the capture, to show the check can see it.
+            var shield = CaptureShield.Hide;
+            CaptureShield.Hide = null;
+            OverlayWindows.ExcludeFromCapture(top.Handle, false);
+            await Settle(400);
+            var forced = ScreenGrab.Region(strip);
+            OverlayWindows.ExcludeFromCapture(top.Handle, top.Excluded);
+            CaptureShield.Hide = shield;
+            glow.Preview(null);
+            await Settle(600);
+            var gone = ScreenGrab.Region(strip);
+            if (shown is { } a && gone is { } b && forced is { } c)
+            {
+                var leaked = MeanDifference(a.Pixels, b.Pixels);
+                var visible = MeanDifference(c.Pixels, b.Pixels);
+                Note($"machine glow: top edge in a capture differs from no glow by {leaked:F1} with the glow up (forced into the capture: {visible:F1}; 0-255 per channel)");
+                if (visible > 8 && leaked > visible / 3)
+                    throw new InvalidOperationException($"the glow shows in screen captures (difference {leaked:F1}, forced {visible:F1})");
+                if (visible <= 8) Note("machine glow: the forced capture barely differs either, so the capture check is inconclusive on this desktop");
+            }
+            else
+            {
+                Note("machine glow: the screen could not be captured here, so the capture check was skipped");
+            }
+        }
+        catch (Exception error)
+        {
+            Fail("machine glow", error);
+        }
+        finally
+        {
+            glow.Preview(null);
+        }
+    }
+
+    /// <summary>The mean absolute difference per channel of two BGRX buffers of one size.</summary>
+    private static double MeanDifference(byte[] a, byte[] b)
+    {
+        if (a.Length != b.Length || a.Length == 0) return 255;
+        long total = 0;
+        var samples = 0;
+        for (var i = 0; i < a.Length; i += 4)
+        {
+            total += Math.Abs(a[i] - b[i]) + Math.Abs(a[i + 1] - b[i + 1]) + Math.Abs(a[i + 2] - b[i + 2]);
+            samples += 3;
+        }
+        return total / (double)samples;
     }
 
     /// <summary>The DGX Spark guide's pages with sample state (no network is touched), and the

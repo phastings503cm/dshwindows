@@ -210,6 +210,8 @@ public partial class ChatView : UserControl
                 UpdateGoal();
                 break;
             case nameof(SessionVM.RunningTool):
+            // "Waiting for the mouse…" (see SessionVM.ShowMachineWait) rides on the activity line.
+            case nameof(SessionVM.Activity):
                 UpdateRunningTool();
                 break;
         }
@@ -511,6 +513,9 @@ public partial class ChatView : UserControl
         RunningToolLine.Visibility = tool is null ? Visibility.Collapsed : Visibility.Visible;
         if (tool is null) return;
         RunningToolText.Text = $"{tool.Label.ToLowerInvariant()} {tool.Preview.Replace('\n', ' ')}";
+        // A click or keystroke waiting its turn at the real mouse says so here, where it can be read in full.
+        if (_session?.Activity is { } activity && activity.StartsWith("Waiting for", StringComparison.Ordinal))
+            RunningToolText.Text += " — " + activity;
     }
 
     // MARK: - Composer

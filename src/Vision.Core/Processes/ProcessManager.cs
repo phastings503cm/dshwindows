@@ -49,6 +49,8 @@ public sealed class ProcessManager
         // The process is the sink, so output that arrives before Start returns is kept.
         var handle = _backend.Start(launch, process);
         process.Attach(handle);
+        // The chat this process runs for owns it and what it starts (see ChatProcesses).
+        ChatProcesses.Record(handle.ProcessId);
         lock (_lock)
         {
             PruneLocked();

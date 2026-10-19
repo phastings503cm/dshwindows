@@ -119,6 +119,7 @@ internal sealed class TestWindow : IDisposable
     private Window? _window;
     private Button? _button;
     private TextBox? _box;
+    private CheckBox? _check;
     private Border? _pad;
     private readonly List<(string Kind, int X, int Y)> _padEvents = [];
     private int _clicks;
@@ -127,7 +128,7 @@ internal sealed class TestWindow : IDisposable
     public IntPtr Handle { get; private set; }
     public int Clicks => Volatile.Read(ref _clicks);
 
-    public TestWindow(bool withControls = true, bool animate = false)
+    public TestWindow(bool withControls = true, bool animate = false, double left = 60, double top = 60)
     {
         Title = $"Vision machine test {Guid.NewGuid().ToString("N")[..10]}";
         using var ready = new ManualResetEventSlim();
@@ -145,7 +146,11 @@ internal sealed class TestWindow : IDisposable
                     System.Windows.Automation.AutomationProperties.SetAutomationId(_button, "pressMe");
                     panel.Children.Add(_button);
                     _box = new TextBox { Text = "hello tree", Width = 200 };
+                    System.Windows.Automation.AutomationProperties.SetAutomationId(_box, "box");
                     panel.Children.Add(_box);
+                    _check = new CheckBox { Content = "I agree", Margin = new Thickness(20, 6, 0, 0) };
+                    System.Windows.Automation.AutomationProperties.SetAutomationId(_check, "agree");
+                    panel.Children.Add(_check);
                     // Records where the left button goes down and comes up, for the drag test.
                     _pad = new Border { Width = 240, Height = 60, Margin = new Thickness(0, 8, 0, 0), Background = Brushes.LightGray };
                     _pad.MouseLeftButtonDown += (_, e) =>
@@ -169,9 +174,9 @@ internal sealed class TestWindow : IDisposable
                     Title = Title,
                     Content = panel,
                     Width = 420,
-                    Height = 260,
-                    Left = 60,
-                    Top = 60,
+                    Height = 300,
+                    Left = left,
+                    Top = top,
                     Topmost = true,
                     WindowStartupLocation = WindowStartupLocation.Manual,
                 };
@@ -234,8 +239,21 @@ internal sealed class TestWindow : IDisposable
     /// <summary>Give the text box keyboard focus (within the window).</summary>
     public void FocusBox() => Invoke(() => _box!.Focus());
 
+    /// <summary>Whether the check box is ticked.</summary>
+    public bool Checked() => Invoke(() => _check?.IsChecked == true);
+
+    /// <summary>Whether this window is the foreground window.</summary>
+    public bool IsForeground => WindowFocus.IsForeground(Handle);
+
     /// <summary>What the text box holds now.</summary>
     public string BoxText() => Invoke(() => _box?.Text ?? "");
+
+    /// <summary>The text box's centre in screen pixels.</summary>
+    public (int X, int Y) BoxCenter() => Invoke(() =>
+    {
+        var point = _box!.PointToScreen(new Point(_box.ActualWidth / 2, _box.ActualHeight / 2));
+        return ((int)Math.Round(point.X), (int)Math.Round(point.Y));
+    });
 
     /// <summary>The button's centre in screen pixels.</summary>
     public (int X, int Y) ButtonCenter() => Invoke(() =>
@@ -256,5 +274,99 @@ internal sealed class TestWindow : IDisposable
             // Already shut down.
         }
         _thread.Join(TimeSpan.FromSeconds(5));
+    }
+}
+
+/// <summary>A bare Win32 control as its own top-level window (an EDIT or a BUTTON), on an STA thread whose
+/// dispatcher pumps its messages — the standard controls background input posts to.</summary>
+internal sealed class Win32Control : IDisposable
+{
+    public const uint WS_OVERLAPPEDWINDOW = 0x00CF0000, WS_VISIBLE = 0x10000000;
+    public const uint ES_MULTILINE = 0x0004, ES_AUTOVSCROLL = 0x0040, ES_WANTRETURN = 0x1000;
+    public const uint BS_AUTOCHECKBOX = 0x0003;
+
+    [System.Runtime.InteropServices.DllImport("user32.dll", CharSet = System.Runtime.InteropServices.CharSet.Unicode, SetLastError = true, EntryPoint = "CreateWindowExW")]
+    private static extern IntPtr CreateWindowEx(int exStyle, string className, string? title, uint style, int x, int y, int width, int height,
+                                                IntPtr parent, IntPtr menu, IntPtr instance, IntPtr param);
+
+    [System.Runtime.InteropServices.DllImport("user32.dll")]
+    private static extern bool DestroyWindow(IntPtr window);
+
+    [System.Runtime.InteropServices.DllImport("user32.dll", EntryPoint = "SendMessageW")]
+    private static extern IntPtr SendMessage(IntPtr window, uint message, IntPtr wParam, IntPtr lParam);
+
+    private readonly Thread _thread;
+    private Dispatcher? _dispatcher;
+
+    public IntPtr Handle { get; private set; }
+    public string Title { get; }
+
+    public Win32Control(string className, uint style, string? title = null, int x = 540, int y = 60, int width = 380, int height = 220)
+    {
+        Title = title ?? $"Vision {className.ToLowerInvariant()} test {Guid.NewGuid().ToString("N")[..8]}";
+        using var ready = new ManualResetEventSlim();
+        _thread = new Thread(() =>
+        {
+            _dispatcher = Dispatcher.CurrentDispatcher;
+            Handle = CreateWindowEx(0, className, Title, style | WS_OVERLAPPEDWINDOW | WS_VISIBLE, x, y, width, height,
+                                    IntPtr.Zero, IntPtr.Zero, IntPtr.Zero, IntPtr.Zero);
+            ready.Set();
+            if (Handle != IntPtr.Zero) Dispatcher.Run();
+        })
+        {
+            IsBackground = true,
+            Name = "win32 test control",
+        };
+        _thread.SetApartmentState(ApartmentState.STA);
+        _thread.Start();
+        if (!ready.Wait(TimeSpan.FromSeconds(30)) || Handle == IntPtr.Zero) throw new InvalidOperationException($"could not create a {className} window");
+        Thread.Sleep(300);
+    }
+
+    /// <summary>The control's text (an EDIT's contents, a BUTTON's caption).</summary>
+    public string Text => PostedInput.Text(Handle) ?? "";
+
+    /// <summary>BM_GETCHECK: 1 when a check box is ticked.</summary>
+    public int Check => SendMessage(Handle, Native.BM_GETCHECK, IntPtr.Zero, IntPtr.Zero).ToInt32();
+
+    /// <summary>EM_GETSEL: the selected range of an EDIT.</summary>
+    public (int Start, int End) Selection
+    {
+        get
+        {
+            var packed = SendMessage(Handle, Native.EM_GETSEL, IntPtr.Zero, IntPtr.Zero).ToInt64();
+            return ((int)(packed & 0xFFFF), (int)((packed >> 16) & 0xFFFF));
+        }
+    }
+
+    /// <summary>A point in the middle of the window's client area, in screen pixels.</summary>
+    public (int X, int Y) Center()
+    {
+        var rect = OverlayWindows.Rect(Handle);
+        return (rect.X + rect.Width / 2, rect.Y + rect.Height / 2 + 12);
+    }
+
+    public void Dispose()
+    {
+        try
+        {
+            _dispatcher?.Invoke(() => DestroyWindow(Handle));
+            _dispatcher?.InvokeShutdown();
+        }
+        catch (Exception ex) when (ex is InvalidOperationException or TaskCanceledException)
+        {
+            // Already shut down.
+        }
+        _thread.Join(TimeSpan.FromSeconds(5));
+    }
+}
+
+internal static class Wait
+{
+    /// <summary>Poll until <paramref name="done"/> holds (or a few seconds pass).</summary>
+    public static async Task Until(Func<bool> done, double seconds = 4)
+    {
+        var clock = System.Diagnostics.Stopwatch.StartNew();
+        while (!done() && clock.Elapsed < TimeSpan.FromSeconds(seconds)) await Task.Delay(40);
     }
 }

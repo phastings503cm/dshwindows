@@ -469,3 +469,50 @@ public sealed class ToolLogicTests
         ];
     }
 }
+
+// MARK: - Background input, pure parts
+
+public sealed class PostedInputParamTests
+{
+    [Fact]
+    public void ClientPointsPackIntoTheLowAndHighWords()
+    {
+        var packed = unchecked((uint)PostedInput.PointParam(-5, 10).ToInt64());
+        Assert.Equal(0xFFFBu, packed & 0xFFFF);
+        Assert.Equal(10u, packed >> 16);
+        Assert.Equal(0x00C8_0064u, unchecked((uint)PostedInput.PointParam(100, 200).ToInt64()));
+    }
+
+    [Fact]
+    public void KeyMessagesCarryARepeatOfOneAndTheirTransitionBits()
+    {
+        var down = unchecked((uint)PostedInput.KeyParam(KeyNames.VkReturn, up: false).ToInt64());
+        var up = unchecked((uint)PostedInput.KeyParam(KeyNames.VkReturn, up: true).ToInt64());
+        Assert.Equal(1u, down & 0xFFFF);
+        Assert.Equal(0u, down >> 30);
+        Assert.Equal(3u, up >> 30); // previous state down, transitioning up
+        Assert.Equal(down & 0x00FF_0000, up & 0x00FF_0000); // the same scan code
+        // The navigation cluster is "extended" (bit 24), Enter on the main block isn't.
+        Assert.Equal(0u, (down >> 24) & 1);
+        Assert.Equal(1u, (unchecked((uint)PostedInput.KeyParam(0x23 /* End */, up: false).ToInt64()) >> 24) & 1);
+    }
+
+    [Fact]
+    public void HooksToldInjectedInputApart()
+    {
+        Assert.True(PersonInput.IsHuman(0, mouse: true));
+        Assert.False(PersonInput.IsHuman(Native.LLMHF_INJECTED, mouse: true));
+        Assert.False(PersonInput.IsHuman(Native.LLMHF_INJECTED | Native.LLMHF_LOWER_IL_INJECTED, mouse: true));
+        Assert.True(PersonInput.IsHuman(0x01 /* LLKHF_EXTENDED */, mouse: false));
+        Assert.False(PersonInput.IsHuman(Native.LLKHF_INJECTED, mouse: false));
+    }
+
+    [Fact]
+    public void ControlToolsSayWhatTheyDid()
+    {
+        Assert.Equal("Clicked left at (1,2) (brought x to the front first). Screenshot to verify.",
+                     MouseTool.WithNote("Clicked left at (1,2). Screenshot to verify.", " (brought x to the front first)"));
+        Assert.Equal("Dragged (1,2) → (3,4) (note).", MouseTool.WithNote("Dragged (1,2) → (3,4).", " (note)"));
+        Assert.Equal("same", MouseTool.WithNote("same", ""));
+    }
+}
