@@ -33,6 +33,8 @@ public abstract record SlashCommand
     public sealed record Memory(string? Query) : SlashCommand;
     /// <summary>List the kinds of subagent, the model servers they run on, and what is running.</summary>
     public sealed record Agents : SlashCommand;
+    /// <summary>Show this chat's sensitivity, or set it ("/sensitive on", "/sensitive off").</summary>
+    public sealed record Sensitive(string? Argument) : SlashCommand;
     public sealed record Help : SlashCommand;
 
     public sealed record Info(string Usage, string Summary);
@@ -50,6 +52,7 @@ public abstract record SlashCommand
         new("/remember <note>", "Save a note to long-term memory (searched automatically when it's relevant)"),
         new("/memory [search]", "Open the memory manager, or search what is remembered"),
         new("/agents", "Show the subagent types, the model servers they run on, and what is running now"),
+        new("/sensitive [on|off]", "Show or set whether this chat is Sensitive (private models only, or masked)"),
         new("/help", "List commands"),
     ];
 
@@ -75,6 +78,7 @@ public abstract record SlashCommand
             "/remember" or "/note" => new Remember(rest),
             "/memory" or "/memories" => new Memory(arg),
             "/agents" or "/fleet" => new Agents(),
+            "/sensitive" => new Sensitive(arg),
             "/help" or "/?" or "/commands" => new Help(),
             _ => null,
         };

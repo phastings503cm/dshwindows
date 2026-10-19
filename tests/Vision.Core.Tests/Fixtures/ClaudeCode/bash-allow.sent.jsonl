@@ -1,0 +1,2 @@
+{"type": "user", "message": {"role": "user", "content": [{"type": "text", "text": "SCENARIO:bash\nCMD=mkdir -p made-by-allow && touch made-by-allow/a.txt"}]}, "parent_tool_use_id": null, "session_id": ""}
+{"type": "control_response", "response": {"subtype": "success", "request_id": "fb0c20c6-d9e2-491a-82ea-df81015bc6e6", "response": {"behavior": "allow", "updatedInput": {"command": "mkdir -p made-by-allow && touch made-by-allow/a.txt", "description": "Run the fixture command"}}}}

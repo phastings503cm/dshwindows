@@ -1,0 +1,2 @@
+{"type": "user", "message": {"role": "user", "content": [{"type": "text", "text": "SCENARIO:bash\nCMD=mkdir -p made-by-deny && touch made-by-deny/a.txt"}]}, "parent_tool_use_id": null, "session_id": ""}
+{"type": "control_response", "response": {"subtype": "success", "request_id": "11991521-354f-47b0-8d69-b7a08b48b100", "response": {"behavior": "deny", "message": "The person said no in Vision."}}}

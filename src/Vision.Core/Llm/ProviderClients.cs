@@ -38,6 +38,8 @@ public static class ProviderClients
 
     private static IProviderClient Raw(ProviderProfile profile, HttpMessageHandler? handler, Action<string>? notice)
     {
+        // A Claude Code route has no server to call: its chats run on the claude CLI (see ClaudeCodeRunner).
+        if (ClaudeCodeRoutes.IsClaudeCode(profile)) return new ClaudeCodeClient(profile);
         if (profile.Kind == ProviderKind.Anthropic) return new AnthropicClient(profile, handler, notice);
         if (profile.Kind != ProviderKind.Bedrock) return new OpenAiClient(profile, handler, onNotice: notice);
         var usesApiKey = profile.AwsProfile is null && !string.IsNullOrEmpty(profile.ApiKey);

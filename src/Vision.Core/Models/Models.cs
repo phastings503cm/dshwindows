@@ -238,7 +238,7 @@ public sealed record ProviderProfile
     public bool NeedsApiKey => Kind switch
     {
         ProviderKind.Ollama or ProviderKind.LmStudio => false,
-        ProviderKind.OpenAICompat => !IsLoopbackOrLan,
+        ProviderKind.OpenAICompat => !IsLoopbackOrLan && !ClaudeCodeRoutes.IsClaudeCode(this),
         ProviderKind.Bedrock => AwsProfile is null,
         _ => true,
     };

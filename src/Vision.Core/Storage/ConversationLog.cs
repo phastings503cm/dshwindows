@@ -25,6 +25,13 @@ public sealed record LogSession
     /// Null = not chosen yet (an older chat: it takes the primary when it next sends). The same fields as Vision for macOS.</summary>
     public string? Route { get; set; }
     public string? Thinking { get; set; }
+    /// <summary>The chat is Sensitive (see <see cref="SensitivityPolicy"/>). Null = no (an older chat). The same field as Vision for macOS.</summary>
+    public bool? Sensitive { get; set; }
+    /// <summary>The Claude Code session this chat's turns carry on (--resume), when it has talked to Claude Code.</summary>
+    public string? ClaudeSession { get; set; }
+    /// <summary>What Claude Code last said that session had cost so far (its estimate adds up across turns), so a turn's
+    /// own share can be shown.</summary>
+    public double? ClaudeCost { get; set; }
 }
 
 /// <summary>Per-session conversation store: one JSON file per session under
@@ -99,6 +106,27 @@ public sealed class ConversationLog
         row.Thinking = thinking;
         Persist(id);
     }
+
+    /// <summary>Store whether the chat is Sensitive.</summary>
+    public void SetSensitive(string id, bool sensitive)
+    {
+        bool? stored = sensitive ? true : null;
+        if (!_rows.TryGetValue(id, out var row) || row.Sensitive == stored) return;
+        row.Sensitive = stored;
+        Persist(id);
+    }
+
+    /// <summary>Store the chat's Claude Code session and the cost it had reached (null session = start a new one next time).</summary>
+    public void SetClaudeSession(string id, string? session, double? cost)
+    {
+        if (!_rows.TryGetValue(id, out var row) || (row.ClaudeSession == session && row.ClaudeCost == cost)) return;
+        row.ClaudeSession = session;
+        row.ClaudeCost = cost;
+        Persist(id);
+    }
+
+    /// <summary>One chat's stored metadata (null when there is no such chat).</summary>
+    public LogSession? Row(string id) => _rows.GetValueOrDefault(id);
 
     public IReadOnlyList<LogSession> List() => _rows.Values.OrderByDescending(r => r.UpdatedAt).ToList();
 
