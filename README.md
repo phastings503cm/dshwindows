@@ -405,8 +405,8 @@ it, then the chat), so no single message can make the window slow or hard to scr
 anywhere in the chat, loaded or not, and jumps to each match (Enter for older, Shift+Enter for newer).
 
 **Copy** any message: hover it for its **Copy** button, right-click it for *Copy prompt* / *Copy reply*, or
-click into it and press **Ctrl+C** with nothing selected. A prompt is copied whole, as you sent it, even
-while the chat shows only its first lines; the button says *Copied*.
+click into it and press **Ctrl+C** with nothing selected. A prompt is copied whole, as you sent it (with the
+text of a large paste it carried), even while the chat shows only its first lines; the button says *Copied*.
 
 **Chats without a project** (File › New Chat Without a Project, Ctrl+Shift+N, or the chat button in the
 sidebar — even while a folder is open) are regular conversations: the model is told no project folder

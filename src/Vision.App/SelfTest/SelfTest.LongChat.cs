@@ -167,13 +167,17 @@ public sealed partial class SelfTest
                  $"at the end: {scroller.VerticalOffset >= scroller.ScrollableHeight - 2}");
             if (pager.Items.Count > pager.MaxRows + pager.PageSize) Fail("probe-long-chat", new InvalidOperationException("the live window kept growing"));
 
-            // A scroll up that no input marked as the reader's (UI Automation, a screen reader) also stays where it went.
+            // A scroll up that no input marked as the reader's (UI Automation, a screen reader) also stays away from the end. Where
+            // exactly it lands is the virtualizing panel's (it re-estimates rows it hasn't laid out), so the check is that it
+            // didn't go back to the end and the transcript stopped following.
             var end = scroller.VerticalOffset;
             scroller.ScrollToVerticalOffset(end - 600);
             window.UpdateLayout();
             await Dispatcher.Yield(DispatcherPriority.ApplicationIdle);
-            Note($"probe paging: a scroll up 600 px from the end without input stayed {end - scroller.VerticalOffset:F0} px up; pinned {view.SelfTestPagingPinned}");
-            if (end - scroller.VerticalOffset < 500) Fail("probe-long-chat", new InvalidOperationException("a scroll up from the end snapped back"));
+            var up = scroller.ScrollableHeight - scroller.VerticalOffset;
+            Note($"probe paging: a scroll up 600 px from the end without input stayed {end - scroller.VerticalOffset:F0} px up " +
+                 $"({up:F0} px from the end); pinned {view.SelfTestPagingPinned}");
+            if (up <= 32 || view.SelfTestPagingPinned) Fail("probe-long-chat", new InvalidOperationException("a scroll up from the end snapped back"));
 
             // The very long prompt: collapsed, Copy gives it back whole, Show more opens it in its own box, Show less closes it.
             var longRow = chat.Entries.OfType<MessageEntryVM>().First(m => ReferenceEquals(m.Text, longText) || m.Text.Length == longText.Length);
