@@ -31,8 +31,8 @@ public partial class ChatView : UserControl
     private ScrollViewer? _scroller;
     /// <summary>Follow new output until the user scrolls up to read something.</summary>
     private bool _pinned = true;
-    private readonly ObservableCollection<MessageAttachment> _attachments = [];
-    private readonly Dictionary<string, (string Text, List<MessageAttachment> Attachments)> _drafts = new();
+    private readonly ObservableCollection<ComposerChip> _attachments = [];
+    private readonly Dictionary<string, (string Text, List<ComposerChip> Attachments)> _drafts = new();
     private readonly ThinkingFooter _thinking = new();
     private readonly FilesFooter _files = new();
     private IReadOnlyList<Skill> _slashSkills = [];
@@ -52,7 +52,12 @@ public partial class ChatView : UserControl
         {
             AttachmentList.Visibility = _attachments.Count > 0 ? Visibility.Visible : Visibility.Collapsed;
             UpdateSendState();
+            RefreshChipDeliveries();
         };
+        // Every way text is pasted (Ctrl+V, Shift+Insert, the context menu) and dropped: a very large block becomes a chip.
+        DataObject.AddPastingHandler(Composer, OnComposerPasting);
+        Composer.PreviewDragOver += OnComposerDragOver;
+        Composer.PreviewDrop += OnComposerDrop;
         _gaugeTimer = new DispatcherTimer(TimeSpan.FromMilliseconds(250), DispatcherPriority.Background, (_, _) =>
         {
             _gaugeTimer!.Stop();
@@ -63,12 +68,17 @@ public partial class ChatView : UserControl
         Transcript.Loaded += (_, _) => HookScroller();
         _model.Config.PropertyChanged += (_, e) =>
         {
-            if (e.PropertyName is nameof(AppConfig.ActiveRoute) or nameof(AppConfig.ActiveProvider)) UpdateMeta();
+            if (e.PropertyName is nameof(AppConfig.ActiveRoute) or nameof(AppConfig.ActiveProvider))
+            {
+                UpdateMeta();
+                RefreshChipDeliveries();
+            }
         };
         _model.Host.ContextInfoChanged += () =>
         {
             UpdateMeta();
             UpdateGauge();
+            RefreshChipDeliveries();
         };
         _model.Host.PropertyChanged += (_, e) =>
         {
@@ -263,6 +273,12 @@ public partial class ChatView : UserControl
 
     /// <summary>Attachments waiting in the composer, for the self-test.</summary>
     internal int SelfTestAttachmentCount => _attachments.Count;
+
+    /// <summary>The composer's chips as they read ("PDF · 3 pages · sent as text"), for the self-test.</summary>
+    internal IReadOnlyList<string> SelfTestChipLabels => _attachments.Select(c => (c.ShowsName ? c.Name + "  " : "") + c.Label).ToList();
+
+    /// <summary>Attach a file the way a drop does, for the self-test.</summary>
+    internal void SelfTestStage(string path) => Stage(path);
 
     /// <summary>The transcript's scroll viewer, for the self-test's measurements.</summary>
     internal ScrollViewer? SelfTestScroller
@@ -540,8 +556,8 @@ public partial class ChatView : UserControl
                 if (PasteAttachments()) e.Handled = true;
                 break;
             case Key.Up when modifiers == ModifierKeys.None && Composer.Text.Length == 0:
-                // Recall the last thing you sent, like a shell.
-                if (_session?.Entries.OfType<MessageEntryVM>().LastOrDefault(m => m.IsUser) is { } last)
+                // Recall the last thing you sent, like a shell (not a huge one: that is what the chip is for).
+                if (_session?.Entries.OfType<MessageEntryVM>().LastOrDefault(m => m.IsUser) is { } last && !PastedText.IsLarge(last.Text))
                 {
                     Composer.Text = last.Text;
                     Composer.CaretIndex = Composer.Text.Length;
@@ -558,7 +574,7 @@ public partial class ChatView : UserControl
         if (_session is not { } session) return;
         var text = Composer.Text.Trim();
         if ((text.Length == 0 && _attachments.Count == 0) || session.Running) return;
-        var payload = _attachments.ToList();
+        var payload = _attachments.Select(c => c.Attachment).ToList();
         Composer.Clear();
         _attachments.Clear();
         SlashPopup.IsOpen = false;
@@ -696,7 +712,7 @@ public partial class ChatView : UserControl
 
     private void RemoveAttachment_Click(object sender, RoutedEventArgs e)
     {
-        if ((sender as FrameworkElement)?.DataContext is MessageAttachment attachment) _attachments.Remove(attachment);
+        if ((sender as FrameworkElement)?.DataContext is ComposerChip chip) _attachments.Remove(chip);
     }
 
     /// <summary>Read a file and queue it; images are re-encoded to PNG so any vision model can read them.</summary>
@@ -734,8 +750,107 @@ public partial class ChatView : UserControl
 
     private void Add(MessageAttachment attachment)
     {
-        if (_attachments.Any(a => a.Name == attachment.Name && a.Data.AsSpan().SequenceEqual(attachment.Data))) return;
-        _attachments.Add(attachment);
+        if (_attachments.Any(c => c.Name == attachment.Name && c.Attachment.Data.AsSpan().SequenceEqual(attachment.Data))) return;
+        var chip = new ComposerChip(attachment);
+        _attachments.Add(chip);
+        _ = ReadAsync(chip);
+    }
+
+    /// <summary>Read what is in a file off the UI thread (a PDF page by page, an Office file from its XML, a picture with
+    /// OCR), so the chip can say what will be sent and the message goes out without the wait.</summary>
+    private async Task ReadAsync(ComposerChip chip)
+    {
+        if (chip.Attachment.Digest is not null)
+        {
+            RefreshChipDeliveries();
+            return;
+        }
+        var original = chip.Attachment;
+        var digested = await Task.Run(() => AttachmentReader.Digested(original));
+        // Edited or removed meanwhile: the newer state stands.
+        if (!ReferenceEquals(chip.Attachment, original)) return;
+        chip.Attachment = digested;
+        RefreshChipDeliveries();
+    }
+
+    /// <summary>Each chip's "sent as …" for the route in use now, with the parts a long file will go in.</summary>
+    private void RefreshChipDeliveries()
+    {
+        if (_attachments.Count == 0) return;
+        var route = _model.Host.AttachmentRouteFor();
+        var readable = _attachments.Count(c => c.Attachment.Kind == AttachmentKind.File && c.Attachment.Digest?.Readable == true);
+        var budget = new AttachmentBudget(_model.Host.ContextLimit(), Math.Max(1, readable));
+        foreach (var chip in _attachments)
+        {
+            if (chip.IsReading)
+            {
+                chip.Delivery = "";
+                continue;
+            }
+            var parts = chip.Attachment.Kind == AttachmentKind.File ? chip.PartCount(budget) : 1;
+            chip.Delivery = AttachmentWire.Delivery(chip.Attachment, route, parts).Label();
+        }
+    }
+
+    // MARK: - Large pastes
+
+    /// <summary>A paste over 400 lines or 20,000 characters goes in as a "Pasted text" chip, not as text in the box.</summary>
+    private void OnComposerPasting(object sender, DataObjectPastingEventArgs e)
+    {
+        if (!e.DataObject.GetDataPresent(DataFormats.UnicodeText, autoConvert: true)) return;
+        if (e.DataObject.GetData(DataFormats.UnicodeText, autoConvert: true) is not string text || !PastedText.IsLarge(text)) return;
+        e.CancelCommand();
+        AddPasted(text);
+    }
+
+    private void OnComposerDragOver(object sender, DragEventArgs e)
+    {
+        if (e.Data.GetDataPresent(DataFormats.FileDrop)) return;
+        if (e.Data.GetData(DataFormats.UnicodeText, autoConvert: true) is string text && PastedText.IsLarge(text))
+        {
+            e.Effects = DragDropEffects.Copy;
+            e.Handled = true;
+        }
+    }
+
+    private void OnComposerDrop(object sender, DragEventArgs e)
+    {
+        if (e.Data.GetDataPresent(DataFormats.FileDrop)) return;
+        if (e.Data.GetData(DataFormats.UnicodeText, autoConvert: true) is not string text || !PastedText.IsLarge(text)) return;
+        e.Handled = true;
+        AddPasted(text);
+    }
+
+    /// <summary>Queue a large block of text as an attachment.</summary>
+    internal void AddPasted(string text)
+    {
+        var names = _attachments.Select(c => c.Name).Concat(SentNames());
+        Add(PastedText.Attachment(text, names));
+        FocusComposer();
+    }
+
+    /// <summary>Names of the attachments this chat already sent, so a new paste gets a name of its own.</summary>
+    private IEnumerable<string> SentNames() =>
+        _session?.Entries.OfType<MessageEntryVM>().SelectMany(m => m.Attachments).Select(a => a.Name) ?? [];
+
+    private void EditPasted_Click(object sender, RoutedEventArgs e)
+    {
+        if ((sender as FrameworkElement)?.DataContext is not ComposerChip { IsPasted: true } chip) return;
+        var current = chip.Attachment.Digest?.Text ?? TextUtil.Utf8NoBom.GetString(chip.Attachment.Data);
+        if (TextViewerWindow.Edit(Window.GetWindow(this), "Pasted text", current) is not { } edited || edited == current) return;
+        if (edited.Trim().Length == 0)
+        {
+            _attachments.Remove(chip);
+            return;
+        }
+        chip.Attachment = AttachmentReader.Pasted(edited, chip.Name);
+        RefreshChipDeliveries();
+    }
+
+    private void ShowAllText_Click(object sender, RoutedEventArgs e)
+    {
+        if ((sender as FrameworkElement)?.DataContext is MessageEntryVM message)
+            TextViewerWindow.View(Window.GetWindow(this), $"Your message · {AttachmentFormat.Count(AttachmentFormat.LineCount(message.Text), "line", "lines")}", message.Text);
     }
 
     /// <summary>Ctrl+V with an image or files on the clipboard attaches them instead of pasting text.</summary>

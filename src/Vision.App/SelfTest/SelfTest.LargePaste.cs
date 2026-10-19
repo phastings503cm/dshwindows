@@ -68,8 +68,10 @@ public sealed partial class SelfTest
             {
                 host.ScrollToEnd();
                 window.UpdateLayout();
-                Note($"probe composer: scrolled to its end — offset {host.VerticalOffset:F0} of {host.ScrollableHeight:F0}");
+                Note($"probe composer: scrolled to its end — offset {host.VerticalOffset:F0} of {host.ScrollableHeight:F0}; " +
+                     $"the wheel (48 px a notch) needs {Math.Ceiling(host.ScrollableHeight / 48):N0} notches top to bottom");
             }
+            foreach (var label in view.SelfTestChipLabels) Note($"probe composer chip: {label}");
             Capture(window, "probe-paste-composer");
 
             // 2. The same text as a sent message (or one from a chat saved before large pastes became attachments).
@@ -89,14 +91,26 @@ public sealed partial class SelfTest
             }
             Note($"probe transcript: first layout {layoutMs:N0} ms; extent {scroller.ExtentHeight:F0} viewport {scroller.ViewportHeight:F0} " +
                  $"offset {scroller.VerticalOffset:F0}; {transcriptLag}");
+            // A narrower window re-wraps every row that is on screen.
+            watch.Restart();
+            window.Width -= 160;
+            window.UpdateLayout();
+            var narrowMs = watch.ElapsedMilliseconds;
+            watch.Restart();
+            window.Width += 160;
+            window.UpdateLayout();
+            Note($"probe transcript: resizing the window re-lays it out in {narrowMs:N0} ms and {watch.ElapsedMilliseconds:N0} ms");
 
             // The wheel over the middle of the transcript, as the input system raises it (tunnel, then bubble).
             var start = scroller.VerticalOffset;
             var target = scroller.InputHitTest(new Point(scroller.ActualWidth / 2, scroller.ActualHeight / 2)) as DependencyObject;
             var under = target is null ? "nothing" : Describe(target);
             var moved = await Wheel(target as UIElement, scroller, notches: 10, delta: 120);
+            var perNotch = Math.Abs(start - scroller.VerticalOffset) / 10;
             Note($"probe transcript: 10 wheel notches up over {under} moved it {start - scroller.VerticalOffset:F0} px " +
-                 $"({(moved ? "it scrolls" : "IT DOES NOT SCROLL")})");
+                 $"({(moved ? "it scrolls" : "IT DOES NOT SCROLL")}); top to bottom takes " +
+                 $"{(perNotch > 0 ? Math.Ceiling(scroller.ScrollableHeight / perNotch) : double.PositiveInfinity):N0} notches, " +
+                 $"{scroller.ScrollableHeight / Math.Max(1, scroller.ViewportHeight):N0} screens");
             scroller.ScrollToTop();
             await Settle(300);
             Note($"probe transcript: scrolled to the top — offset {scroller.VerticalOffset:F0}");
@@ -112,18 +126,18 @@ public sealed partial class SelfTest
         }
     }
 
-    /// <summary>A plausible pasted log: timestamped lines of varying width, some long enough to wrap.</summary>
+    /// <summary>A plausible pasted log, about 40 bytes a line (10,214 lines ≈ 412 KB, the paste Patrick reported), with a
+    /// line long enough to wrap every fifty.</summary>
     internal static string ProbeText(int lines)
     {
-        var builder = new StringBuilder(lines * 48);
+        var builder = new StringBuilder(lines * 42);
         var start = new DateTime(2026, 10, 18, 9, 0, 0, DateTimeKind.Utc);
         for (var i = 0; i < lines; i++)
         {
-            var at = start.AddMilliseconds(i * 137).ToString("yyyy-MM-dd HH:mm:ss.fff", CultureInfo.InvariantCulture);
-            builder.Append(at).Append(" INFO  [worker-").Append(i % 7).Append("] request ").Append(4711 + i)
-                .Append(" took ").Append(3 + i * 31 % 900).Append(" ms path=/api/stock/");
-            builder.Append((i % 5) switch { 0 => "reserve", 1 => "levels", 2 => "sku/A-" + i, 3 => "report", _ => "health" });
-            if (i % 9 == 0) builder.Append(" detail=\"").Append(new string('x', 40 + i % 200)).Append('"');
+            builder.Append(start.AddMilliseconds(i * 137).ToString("HH:mm:ss.fff", CultureInfo.InvariantCulture))
+                .Append(" req ").Append(4711 + i).Append(' ').Append(3 + i * 31 % 900).Append(" ms /");
+            builder.Append((i % 5) switch { 0 => "reserve", 1 => "levels", 2 => "sku", 3 => "report", _ => "health" });
+            if (i % 50 == 0) builder.Append(" detail=").Append(new string('x', 160));
             if (i < lines - 1) builder.Append('\n');
         }
         return builder.ToString();

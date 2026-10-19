@@ -188,6 +188,9 @@ public sealed partial class SelfTest
             if (vault is not null) vaultWindow.SelectEntry(vault);
             await ShowAndCapture(vaultWindow, "vault");
 
+            // What the composer says it will send for a PDF, a Markdown file, a Word file, a scan and a large paste.
+            await CaptureAttachments(window, model);
+
             // Last, since it leaves a chat holding 10,000 lines: a very large paste, measured.
             await ProbeLargePaste(window, model);
         }

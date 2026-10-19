@@ -37,6 +37,49 @@ public sealed partial class MessageEntryVM(MessageRole role, string text, string
 
     public bool HasShield => Shield is not null;
 
+    /// <summary>What a user message carried (files, pictures, large pastes), shown as badges under it — names and summaries,
+    /// never content.</summary>
+    [ObservableProperty] [NotifyPropertyChangedFor(nameof(HasAttachments))] private IReadOnlyList<AttachmentBadge> _attachments = [];
+
+    public bool HasAttachments => Attachments.Count > 0;
+
+    // A long user message (a big paste in a chat from before pastes became attachments, or typed text) shows its first
+    // lines and opens in a viewer on demand: laid out in full inside the transcript, a 10,000-line message is one row
+    // hundreds of screens tall that the wheel crawls through 48 pixels at a time, re-wrapped on every resize.
+    private (string Preview, int Lines)? _collapsed;
+    private string? _collapsedFor;
+
+    private (string Preview, int Lines)? CollapsedText
+    {
+        get
+        {
+            if (Role != MessageRole.User) return null;
+            if (!ReferenceEquals(_collapsedFor, Text))
+            {
+                _collapsedFor = Text;
+                _collapsed = PastedText.Collapsed(Text);
+            }
+            return _collapsed;
+        }
+    }
+
+    /// <summary>Whether the transcript shows only the first lines of this message.</summary>
+    public bool IsLong => CollapsedText is not null;
+
+    /// <summary>What the transcript shows: the whole text, or the first lines of a long message.</summary>
+    public string ShownText => CollapsedText?.Preview ?? Text;
+
+    /// <summary>"Show all 10,214 lines" under a long message.</summary>
+    public string ShowAllLabel => CollapsedText is { } c ? $"Show all {AttachmentFormat.Grouped(c.Lines)} lines" : "";
+
+    partial void OnTextChanged(string value)
+    {
+        if (Role != MessageRole.User) return;
+        OnPropertyChanged(nameof(IsLong));
+        OnPropertyChanged(nameof(ShownText));
+        OnPropertyChanged(nameof(ShowAllLabel));
+    }
+
     public bool IsUser => Role == MessageRole.User;
     public bool IsAssistant => Role == MessageRole.Assistant;
     public bool IsNotice => Role == MessageRole.Notice;
@@ -209,9 +252,9 @@ public sealed partial class SessionVM : ObservableObject
 
     // MARK: - Mutation
 
-    public string AppendMessage(MessageRole role, string text, DateTimeOffset? at = null)
+    public string AppendMessage(MessageRole role, string text, DateTimeOffset? at = null, IReadOnlyList<AttachmentBadge>? attachments = null)
     {
-        var entry = new MessageEntryVM(role, text, at: at);
+        var entry = new MessageEntryVM(role, text, at: at) { Attachments = attachments ?? [] };
         Entries.Add(entry);
         UpdatedAt = DateTimeOffset.Now;
         ContentChanged?.Invoke();
@@ -219,6 +262,12 @@ public sealed partial class SessionVM : ObservableObject
     }
 
     public void Note(string text, MessageRole role = MessageRole.Notice) => AppendMessage(role, text);
+
+    /// <summary>Replace the badges under a user message (once its attachments are prepared and saved).</summary>
+    public void SetAttachments(string entryId, IReadOnlyList<AttachmentBadge> badges)
+    {
+        if (Entries.LastOrDefault(e => e.Id == entryId) is MessageEntryVM message) message.Attachments = badges;
+    }
 
     /// <summary>Append streamed assistant text, opening a new bubble if none is live.</summary>
     public void AppendDelta(string chunk)
