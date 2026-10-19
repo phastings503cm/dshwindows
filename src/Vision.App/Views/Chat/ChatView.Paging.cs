@@ -40,6 +40,7 @@ public partial class ChatView
         // Show more / Show less on a long message: the reader is reading it, so the transcript stops following its end.
         Transcript.AddHandler(MessageBody.ToggledEvent, new RoutedEventHandler((_, _) => _pinned = false));
         InitCopy();
+        InitFind();
     }
 
     /// <summary>What the transcript shows for <paramref name="session"/>: the pager rows around its window, then the footers.</summary>

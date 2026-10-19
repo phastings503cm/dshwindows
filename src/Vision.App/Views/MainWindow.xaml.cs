@@ -674,6 +674,7 @@ public partial class MainWindow : Window
         "Ctrl+Shift+K\tCredentials vault",
         "Ctrl+,\tSettings",
         "",
+        "In the chat: Ctrl+F finds text anywhere in it (Enter: older match, Shift+Enter: newer); Ctrl+C in a message with nothing selected copies the whole message.",
         "In the terminal: Ctrl+Shift+C / Ctrl+Shift+V copy and paste; Ctrl+C copies when text is selected.",
     }));
 
