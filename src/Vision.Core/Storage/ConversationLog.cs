@@ -25,6 +25,9 @@ public sealed record LogSession
     /// Null = not chosen yet (an older chat: it takes the primary when it next sends). The same fields as Vision for macOS.</summary>
     public string? Route { get; set; }
     public string? Thinking { get; set; }
+    /// <summary>Where the chat was imported from (Claude Code, Codex, OpenClaw, Claude.ai, ChatGPT, Guardian); null for one
+    /// that began here. A re-import skips a chat whose source and id are already here.</summary>
+    public ChatOrigin? Imported { get; set; }
 }
 
 /// <summary>Per-session conversation store: one JSON file per session under
@@ -101,6 +104,19 @@ public sealed class ConversationLog
     }
 
     public IReadOnlyList<LogSession> List() => _rows.Values.OrderByDescending(r => r.UpdatedAt).ToList();
+
+    public bool Contains(string id) => _rows.ContainsKey(id);
+
+    public LogSession? Session(string id) => _rows.GetValueOrDefault(id);
+
+    /// <summary>Store an imported chat as it was: its own title, times and rows (each keeps the time the source recorded), and
+    /// where it came from.</summary>
+    public void Import(LogSession session, IReadOnlyList<LogItemRow> rows)
+    {
+        _rows[session.Id] = session;
+        _items[session.Id] = rows.Select((r, i) => r with { SessionId = session.Id, Seq = i }).ToList();
+        Persist(session.Id);
+    }
 
     public IReadOnlyList<LogItemRow> LoadItems(string id) => _items.TryGetValue(id, out var list) ? list : [];
 
