@@ -1155,6 +1155,24 @@ public sealed partial class AgentHost : ObservableObject
     public AttachmentStore AttachmentStoreFor(string sessionId) =>
         AttachmentStore.ForChat(sessionId, AttachmentsRootForTesting ?? AppPaths.Attachments);
 
+    /// <summary>The text of each large paste a user message carried (saved with its chat), for Copy (10-19 #13).</summary>
+    public IReadOnlyList<string> PastedTexts(string sessionId, MessageEntryVM message)
+    {
+        var pasted = message.Attachments.Where(b => b.IsPasted && b.Stored is not null).ToList();
+        if (pasted.Count == 0) return [];
+        var store = AttachmentStoreFor(sessionId);
+        return pasted.Select(b => store.EntryNamed(b.Stored!) is { } entry ? store.TextOf(entry) : null).OfType<string>().ToList();
+    }
+
+    /// <summary>A prompt from the Prompts timeline as it was sent, with the text of the large pastes it carried (Copy).</summary>
+    public string PromptCopyText(PromptRecord record)
+    {
+        if (Session(record.ChatId) is { } vm && EntryIdFor(record, vm) is { } id
+            && vm.Entries.LastOrDefault(e => e.Id == id) is MessageEntryVM { IsUser: true } row)
+            return TranscriptCopy.WithPastes(record.Text, PastedTexts(vm.Id, row));
+        return record.Text;
+    }
+
     /// <summary>Tests: keep chats' attachments here instead of the data folder.</summary>
     public string? AttachmentsRootForTesting { get; set; }
 

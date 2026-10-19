@@ -113,7 +113,9 @@ public sealed class RunPanelHost : UserControl
 
 /// <summary>What the panels and windows do with a prompt that needs the main window: jump to it in its chat, or drop its
 /// quote into the composer.</summary>
-public sealed record PromptActions(Action<PromptRecord> Jump, Action<PromptRecord> AddToComposer);
+/// <param name="CopyText">What Copy puts on the clipboard for a prompt: as it was sent, with the text of the large pastes it
+/// carried (10-19 #13); the record's own text when not given.</param>
+public sealed record PromptActions(Action<PromptRecord> Jump, Action<PromptRecord> AddToComposer, Func<PromptRecord, string>? CopyText = null);
 
 /// <summary>The Prompts tab: every prompt the open chat has sent, newest first under day headings, with its outcome, when,
 /// how long against the estimate; select one for the whole of it, its evidence and the actions (copy, add to composer, jump
@@ -399,7 +401,7 @@ internal static class PromptRows
         var buttons = new WrapPanel { Margin = new Thickness(0, 10, 0, 0) };
         foreach (var button in new[]
                  {
-                     Small("Copy", () => Copy(record.Text), "Copy the prompt"),
+                     CopyButton(() => actions.CopyText?.Invoke(record) ?? record.Text),
                      Small("Add to composer", () => actions.AddToComposer(record), "Quote it in the composer, with how it ended, to talk about it"),
                      Small("Jump to it", () => actions.Jump(record), "Show it in the transcript (double-click a row does the same)"),
                      Small("Results…", () => PromptResultsWindow.Show(owner, record, chatTitle), "Its results and completion notes"),
@@ -433,6 +435,26 @@ internal static class PromptRows
         {
             // Another app holds the clipboard.
         }
+    }
+
+    /// <summary>"Copy" that says "Copied" for a moment once the prompt is on the clipboard (10-19 #13).</summary>
+    public static Button CopyButton(Func<string> text)
+    {
+        Button? button = null;
+        var timer = new System.Windows.Threading.DispatcherTimer { Interval = Vision.App.Views.Chat.CopyButton.CopiedFor };
+        timer.Tick += (_, _) =>
+        {
+            timer.Stop();
+            if (button is not null) button.Content = "Copy";
+        };
+        button = Small("Copy", () =>
+        {
+            var ok = Vision.App.Views.Chat.ChatView.SetClipboard(text());
+            button!.Content = ok ? "✓ Copied" : "Couldn't copy";
+            timer.Stop();
+            timer.Start();
+        }, "Copy the prompt as it was sent (with any large paste it carried)");
+        return button;
     }
 
     public static Button Small(string text, Action action, string? tooltip = null)

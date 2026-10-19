@@ -298,7 +298,7 @@ public partial class MainWindow : Window
     public void RestoreActivityMenu(ActivityMenu menu) => ActivityPopup.Child = menu;
 
     /// <summary>What the Prompts panel and All prompts do with a prompt: jump to it in its chat, or quote it in the composer.</summary>
-    private PromptActions PromptActions => new(JumpToPrompt, AddPromptToComposer);
+    private PromptActions PromptActions => new(JumpToPrompt, AddPromptToComposer, Model.Host.PromptCopyText);
 
     private void JumpToPrompt(PromptRecord record)
     {

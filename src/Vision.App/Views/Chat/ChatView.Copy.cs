@@ -26,10 +26,17 @@ public partial class ChatView
         _ => null,
     };
 
+    /// <summary><see cref="CopyText"/>, with the text of the large pastes a prompt carried as attachments after what was typed.</summary>
+    private string? CopyTextFor(object? row) =>
+        row is MessageEntryVM { IsUser: true, HasAttachments: true } prompt && _session is { } session
+            && _model.Host.PastedTexts(session.Id, prompt) is { Count: > 0 } pasted
+            ? TranscriptCopy.WithPastes(TranscriptCopy.Prompt(prompt.Text), pasted)
+            : CopyText(row);
+
     private void OnCopyMessage(object sender, ExecutedRoutedEventArgs e)
     {
         var row = e.Parameter ?? (e.OriginalSource as FrameworkElement)?.DataContext;
-        if (CopyText(row) is not { Length: > 0 } text) return;
+        if (CopyTextFor(row) is not { Length: > 0 } text) return;
         var ok = SetClipboard(text);
         var source = e.OriginalSource as DependencyObject;
         (source as CopyButton ?? (source is null ? null : CopyButton.InRow(source)))?.ShowCopied(ok);

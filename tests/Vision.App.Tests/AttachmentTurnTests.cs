@@ -103,6 +103,12 @@ public sealed class AttachmentTurnTests : IDisposable
             Assert.Contains("[Attached: pasted-text.txt — ", replay.First(m => m.Role == Core.MessageRole.User).Content);
             Assert.Contains("read it with read_attachment {\"name\": \"pasted-text.txt\"}", replay.First(m => m.Role == Core.MessageRole.User).Content);
 
+            // Copy (10-19 #13): the prompt comes back with the paste's text after what was typed — the transcript's Copy and
+            // Prompts' alike.
+            Assert.Equal([Log10k()], host.PastedTexts(vm.Id, message));
+            var record = vm.PromptHistory.Single();
+            Assert.Equal("What went wrong?\n\n" + Log10k(), host.PromptCopyText(record));
+
             // The saved text goes with the chat.
             var folder = host.AttachmentStoreFor(vm.Id).Directory;
             Assert.True(Directory.Exists(folder));
