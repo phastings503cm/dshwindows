@@ -56,7 +56,7 @@ public sealed partial class SelfTest
             zai.Loaded += (_, _) => zai.ShowZaiDemo();
             await ShowAndCapture(zai, "route-editor-zai");
             await ShowAndCapture(new ProviderEditorWindow(model, new ProviderProfile(ProviderKind.OpenAICompat, "Moonshot",
-                "https://api.moonshot.ai/v1", "kimi-k2.7-code") { Temperature = 0.6 }) { Owner = window, Height = 900 }, "route-editor-kimi");
+                "https://api.moonshot.ai/v1", "kimi-k2.7-code") { Temperature = 0.6 }) { Owner = window, Height = 1200 }, "route-editor-kimi");
         }
         catch (Exception error)
         {
@@ -92,7 +92,7 @@ public sealed partial class SelfTest
 
             // A setting the Z.ai route's server refused, as Settings › AI Models shows it (with Forget).
             RequestAdaptationStore.Shared.Learn(new RequestChange.Drop("temperature"), RequestAdaptationStore.Key(zaiRoute.BaseUrl, zaiRoute.Model));
-            await ShowAndCapture(new SettingsWindow(model, SettingsTab.Models, null) { Owner = window, Width = 1000, Height = 720 }, "settings-models-learned");
+            await ShowAndCapture(new SettingsWindow(model, SettingsTab.Models, null) { Owner = window, Width = 1000, Height = 1000 }, "settings-models-learned");
         }
         catch (Exception error)
         {
