@@ -6,3 +6,6 @@
 *.png binary
 *.ico binary
 *.bmp binary
+
+# The subagent-pool fixtures are byte-identical with Vision for macOS's copy (MANIFEST.sha256 checks them): never rewritten.
+tests/Vision.Core.Tests/Fixtures/SubagentPool/** -text

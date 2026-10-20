@@ -53,7 +53,7 @@ public sealed class SubagentPlacementTests : IDisposable
         Assert.Null(run.Placement);
         Assert.Equal((1_200L, 300L), (run.PromptTokens, run.CompletionTokens));
         Assert.Equal("review the diff", run.Prompt);
-        Assert.Equal(["Started (general)", "waiting for a free server", "Running on kimi-k2 · kimi", "writing the report", "Finished — report delivered"],
+        Assert.Equal(["Started (general)", "waiting for a free server", "Running on kimi-k2 · kimi — least busy", "writing the report", "Finished — report delivered"],
             run.Log.Select(l => l.Text));
     }
 
@@ -86,7 +86,7 @@ public sealed class SubagentPlacementTests : IDisposable
         Assert.Equal("main", run.Route);
         Assert.StartsWith("tried first: spark-2: ", run.Placement);
         Assert.Contains("didn't answer", run.Placement);
-        Assert.Contains(run.Log, l => l.Text.StartsWith("Running on model-main · main — tried first: spark-2", StringComparison.Ordinal));
+        Assert.Contains(run.Log, l => l.Text.StartsWith("Running on model-main · main — least busy — tried first: spark-2", StringComparison.Ordinal));
     }
 
     [Fact]
@@ -97,8 +97,9 @@ public sealed class SubagentPlacementTests : IDisposable
         fleet.Configure([FleetTestSupport.Server("main", Worker(), primary: true), FleetTestSupport.Server("spark-2", Worker())]);
         var roster = new AgentRoster();
         await new AgentTool().ExecuteAsync("""{"description":"scan","prompt":"p","agent_type":"gpu"}""", Context(new ScriptedClient(), fleet, roster, catalog), default);
-        Assert.Equal("its agent file asks for “spark-9”, but no model server by that name is set up (Settings › AI Models: tick “Subagent” for that route)",
+        Assert.Equal("its agent file asks for “spark-9”, but no model server by that name is set up (Settings ▸ AI Models: turn on “Use for subagents” for that route)",
             roster.All.Single().Placement);
+        Assert.Equal("fallback", roster.All.Single().PlacementReason);
 
         // Asking for one that exists but is taken is a different sentence.
         var busy = new AgentFleet { UsePrimaryWhenWorkersBusy = true };

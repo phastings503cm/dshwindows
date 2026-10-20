@@ -49,22 +49,30 @@ public static class SensitivityPolicy
 
     /// <summary>How a Sensitive chat may use <paramref name="route"/>, with the shield on or off (Settings › AI Models ›
     /// Sensitive data). Only asked for Sensitive chats: an ordinary chat may use every route.</summary>
-    public static RouteAdmission Admission(ProviderProfile route, bool shieldOn)
+    public static RouteAdmission Admission(ProviderProfile route, bool shieldOn) =>
+        Admission(Label(route), ReadsFilesDirectly(route), GuardianRoutes.IsGuardian(route), route.Kind == ProviderKind.Bedrock,
+            route.IsPrivateRoute, shieldOn);
+
+    /// <summary>The same rule from plain facts about a route (a subagent pool's routes — see <see cref="SubagentPool"/>).</summary>
+    public static RouteAdmission Admission(string name, bool readsFilesDirectly, bool guardian, bool bedrock, bool isPrivate, bool shieldOn)
     {
-        var name = Label(route);
-        if (ReadsFilesDirectly(route))
+        if (readsFilesDirectly)
             return new RouteAdmission.Refused($"{name} reads your files itself and sends them to its own service, so the " +
                 "sensitive-data shield can't mask anything on the way. Sensitive chats can't use it — choose a private model " +
                 "(your own hardware, Guardian, Amazon Bedrock in your AWS account), or turn Sensitive off for this chat.");
-        if (GuardianRoutes.IsGuardian(route)) return new RouteAdmission.Private("Guardian, your organisation's own server");
-        if (route.Kind == ProviderKind.Bedrock) return new RouteAdmission.Private("Amazon Bedrock in your own AWS account");
-        if (route.IsPrivateRoute) return new RouteAdmission.Private("your own hardware");
+        if (guardian) return new RouteAdmission.Private("Guardian, your organisation's own server");
+        if (bedrock) return new RouteAdmission.Private("Amazon Bedrock in your own AWS account");
+        if (isPrivate) return new RouteAdmission.Private("your own hardware");
         if (!shieldOn)
             return new RouteAdmission.Refused($"{name} is an online service and the sensitive-data shield is switched off, so " +
                 "nothing would be masked before sending. Turn the shield on (Settings › AI Models › Sensitive data), choose a " +
                 "private model, or turn Sensitive off for this chat.");
         return new RouteAdmission.Masked();
     }
+
+    /// <summary>May see a Sensitive chat as it is — own hardware, Guardian, Bedrock in your account (never Claude Code). The one
+    /// definition of "private" for subagent servers too: a sensitive task runs only on such a server.</summary>
+    public static bool IsPrivate(ProviderProfile route) => Admission(route, shieldOn: false) is RouteAdmission.Private;
 
     /// <summary>The error a Sensitive chat shows when its model is refused (also what a turn throws); null when allowed.</summary>
     public static string? RefusalMessage(ProviderProfile route, bool shieldOn) =>

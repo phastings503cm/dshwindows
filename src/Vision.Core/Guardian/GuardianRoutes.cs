@@ -84,8 +84,10 @@ public static class GuardianRoutes
     /// another model while the list loads; one in the list kept from last time (<paramref name="models"/>) keeps that entry's
     /// facts meanwhile — its window, and whether it is interactive-only, so a task list resumed at launch can't run on it
     /// unattended before Guardian answers.</summary>
+    /// <param name="subagents">Guardian's models enlisted for subagents (model id → subagents at a time, 0 = the default):
+    /// such a model's route is a subagent server.</param>
     public static ProviderProfile? LiveRoute(string? routeId, string address, IReadOnlyList<GuardianModel>? models, string? orgId, string token,
-        bool known = true)
+        bool known = true, IReadOnlyDictionary<string, int>? subagents = null)
     {
         if (ModelOfRouteId(routeId) is not { } id) return null;
         var model = models?.FirstOrDefault(m => string.Equals(m.Id, id, StringComparison.Ordinal))
@@ -93,6 +95,11 @@ public static class GuardianRoutes
         if (model is null) return null;
         var route = Route(address, model, orgId);
         route.ApiKey = token;
+        if (subagents is not null && subagents.TryGetValue(id, out var parallel))
+        {
+            route.SubagentWorker = true;
+            route.SubagentParallel = parallel > 0 ? parallel : null;
+        }
         return route;
     }
 

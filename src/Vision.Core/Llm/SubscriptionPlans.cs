@@ -48,6 +48,10 @@ public sealed record SubscriptionPlan
     public string? KeyPrefix { get; init; }
     /// <summary>The plan's terms allow only interactive use: the route is made interactive-only.</summary>
     public bool InteractiveOnly { get; init; }
+    /// <summary>A monthly subscription (Kimi Code, the Qwen Coding Plan, Z.ai's plan) rather than pay-as-you-go: a subagent
+    /// server on it costs nothing more per task (a region may say otherwise: <see cref="PlanRegion.IsSubscription"/>). The
+    /// same values as Vision for macOS.</summary>
+    public bool IsSubscription { get; init; }
     /// <summary>What the guide calls the choice between regions: "Region", or "Endpoint" (Z.ai).</summary>
     public string RegionLabel { get; init; } = "Region";
     /// <summary>Checking the key takes a one-token reply even when /models answers (Z.ai lists models for any valid key, on any
@@ -141,7 +145,7 @@ public static partial class SubscriptionPlans
         // glm-4.6 (text), glm-5.3-flash / -flashx (vision).
         new()
         {
-            Id = Zai, Provider = "Z.ai", Name = "Z.ai (GLM)",
+            Id = Zai, IsSubscription = true, Provider = "Z.ai", Name = "Z.ai (GLM)",
             Summary = "GLM-5.3 and the other GLM models — with a GLM Coding Plan, or pay-as-you-go.",
             Regions = ZaiEndpoints.All.Select(e => new PlanRegion(e.RawValue(), e.Name(), e.BaseUrl(), e.IsChina() ? BigModelKeys : ZaiKeys,
                 "API Keys", e.RouteName(), e.Detail(), e.IsCoding())).ToList(),
@@ -168,7 +172,7 @@ public static partial class SubscriptionPlans
         },
         new()
         {
-            Id = KimiCode, Provider = "Kimi", Name = "Kimi Code (subscription)",
+            Id = KimiCode, IsSubscription = true, Provider = "Kimi", Name = "Kimi Code (subscription)",
             Summary = "Kimi's coding subscription: K2.8 with up to 1M context, and K3.",
             Regions =
             [
@@ -235,7 +239,7 @@ public static partial class SubscriptionPlans
         },
         new()
         {
-            Id = QwenCoding, Provider = "Alibaba Cloud", Name = "Qwen — Alibaba Cloud Coding Plan",
+            Id = QwenCoding, IsSubscription = true, Provider = "Alibaba Cloud", Name = "Qwen — Alibaba Cloud Coding Plan",
             Summary = "Alibaba's coding subscription: Qwen3.7 Plus and other coding models, for use in coding tools.",
             Regions =
             [

@@ -139,22 +139,35 @@ public sealed class SensitiveDelegationTests : IDisposable
     [Fact]
     public void TheToolsDescribeTheServersAndTheSensitiveParameter()
     {
-        IReadOnlyList<SubagentServer> servers = [new("Spark 2", true), new("Kimi Code", false)];
-        Assert.Equal("Subagent servers: Spark 2 (private), Kimi Code (not private)", SubagentServers.Describe(servers));
-        var agent = new AgentTool(null, servers).Spec;
-        Assert.Contains("Subagent servers: Spark 2 (private), Kimi Code (not private).", agent.Description);
+        SubagentRouteFacts Spark(string name, string url, bool enlisted = true) => new()
+        {
+            Name = name, Model = "qwen3", Kind = SubagentKind.OpenAICompatible, BaseUrl = url, Private = true, PrivateAddress = true, SelfHosted = true,
+            Enlisted = enlisted,
+        };
+        var chat = Spark("Spark 1", "http://spark1:8000/v1", enlisted: false);
+        var kimi = new SubagentRouteFacts { Name = "Kimi Code", Model = "kimi-for-coding", Kind = SubagentKind.OpenAICompatible, BaseUrl = "https://api.kimi.com/coding/v1", PlanProvider = "Kimi", PlanSubscription = true };
+        var pool = SubagentPool.Build([chat, Spark("Spark 2", "http://spark2:8000/v1"), kimi], chat, true, false, true, false, true);
+        var agent = new AgentTool(null, pool).Spec;
+        Assert.Contains("\n\n" + SubagentPool.CatalogueHeader + "\n- spark-2: OpenAI-compatible server · qwen3 · private · local · standard · images · 2 at a time\n" +
+                        "- kimi-code: Kimi · kimi-for-coding · not private · subscription · standard · images · 2 at a time\n" +
+                        "- primary: this chat's own model (qwen3 on Spark 1) · used when the others are busy", agent.Description);
         Assert.Contains("Servers that aren't private must not receive sensitive data. Describe their tasks in general terms — no names, credentials, personal or client details; the app also masks what it detects.", agent.Description);
         var schema = JsonNode.Parse(agent.Parameters)!;
         Assert.Equal("boolean", schema["properties"]!["sensitive"]!["type"]!.GetValue<string>());
         Assert.Equal("Set true when the task needs sensitive data (personal data, credentials, client details). It then runs only on a private server.",
             schema["properties"]!["sensitive"]!["description"]!.GetValue<string>());
-        var delegateSchema = JsonNode.Parse(new DelegateTool(null, servers).Spec.Parameters)!;
+        Assert.Equal(SubagentServers.ServerParameter, schema["properties"]!["server"]!["description"]!.GetValue<string>());
+        var delegateSchema = JsonNode.Parse(new DelegateTool().Spec.Parameters)!;
         Assert.Equal("boolean", delegateSchema["properties"]!["tasks"]!["items"]!["properties"]!["sensitive"]!["type"]!.GetValue<string>());
         Assert.Equal("boolean", delegateSchema["properties"]!["sensitive"]!["type"]!.GetValue<string>());
-        Assert.Contains("Kimi Code (not private)", new DelegateTool(null, servers).Spec.Description);
+        // The servers are listed once, in the agent tool: delegate only says how to pick one.
+        Assert.DoesNotContain("Kimi Code", new DelegateTool().Spec.Description);
         // Only private servers: no warning needed.
-        Assert.DoesNotContain("must not receive", new AgentTool(null, [new("Spark 2", true)]).Spec.Description);
-        Assert.Equal("", SubagentServers.Section([]));
+        var privateOnly = SubagentPool.Build([chat, Spark("Spark 2", "http://spark2:8000/v1")], chat, true, false, true, false, true);
+        Assert.DoesNotContain("must not receive", new AgentTool(null, privateOnly).Spec.Description);
+        Assert.Contains("All of them are private.", new AgentTool(null, privateOnly).Spec.Description);
+        // Nothing besides the chat's own model: no catalogue at all.
+        Assert.DoesNotContain("Subagent servers", new AgentTool(null, SubagentPool.Build([chat], chat, true, false, true, false, true)).Spec.Description);
         Assert.DoesNotContain("Subagent servers", new AgentTool().Spec.Description);
     }
 }

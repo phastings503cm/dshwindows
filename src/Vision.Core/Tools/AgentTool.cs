@@ -10,13 +10,13 @@ namespace Vision.Core;
 // report. The child inherits the parent's permission gate, shell, workspace and policy; it does NOT
 // inherit the agent tools themselves (no nested subagents). What it *is* depends on its agent type
 // (see AgentDefinition): a read-only explorer, a planner, a reviewer, an implementer, or one the user
-// defined. Where it *runs* depends on the fleet: with several model servers, subagents go to the
-// workers (least loaded first) and fall back to the primary, and a server that fails hands the task to
-// another one. A task marked sensitive runs only on a private server.
+// defined. Where it *runs* is the chat's pool (SubagentPool): the main agent may name a server with
+// `server` (waited for up to 2 minutes when busy), else the least busy one runs it, the chat's own model
+// as overflow; a server that fails hands the task to another one. A server that runs its own agent
+// (Claude Code) works the task as one job in the chat's folder. A task marked sensitive runs only on a
+// private server.
 
-/// <summary>A server subagents may run on, as the model is told about it.</summary>
-public sealed record SubagentServer(string Label, bool IsPrivate);
-
+/// <summary>The words the main agent is told about subagent servers, in the agent and delegate tools (the same as the Mac).</summary>
 public static class SubagentServers
 {
     /// <summary>What the model is told about servers that aren't private.</summary>
@@ -28,20 +28,11 @@ public static class SubagentServers
     public const string SensitiveParameter =
         "Set true when the task needs sensitive data (personal data, credentials, client details). It then runs only on a private server.";
 
-    /// <summary>"Subagent servers: Spark 2 (private), Kimi Code (not private)" — empty when there are none.</summary>
-    public static string Describe(IReadOnlyList<SubagentServer>? servers) =>
-        servers is { Count: > 0 }
-            ? "Subagent servers: " + string.Join(", ", servers.Select(s => $"{s.Label} ({(s.IsPrivate ? "private" : "not private")})"))
-            : "";
-
-    /// <summary>The lines for a tool description or the system prompt: the servers, and the guidance when some aren't private.</summary>
-    public static string Section(IReadOnlyList<SubagentServer>? servers)
-    {
-        if (servers is not { Count: > 0 }) return "";
-        var text = Describe(servers) + ".";
-        if (servers.Any(s => !s.IsPrivate)) text += " " + Guidance;
-        return text;
-    }
+    /// <summary>The description of the <c>server</c> parameter.</summary>
+    public const string ServerParameter =
+        "Where this task runs: an id from the subagent servers listed in the agent tool, or \"primary\" for this chat's own model. " +
+        "Leave it out to let Vision pick the least busy. A chosen server that is busy is waited for up to 2 minutes; after that, " +
+        "or if it can't take the task, another server runs it and the report says so.";
 }
 
 public sealed class AgentTool : IToolExecutor
@@ -51,19 +42,26 @@ public sealed class AgentTool : IToolExecutor
     public ToolSpec Spec { get; }
 
     /// <summary>A subagent's default step budget; agent types may set their own.</summary>
-    private const int DefaultMaxSteps = 30;
+    internal const int DefaultMaxSteps = 30;
     /// <summary>How many times a task moves to another server after its server fails.</summary>
     private const int MaxFailovers = 2;
 
-    public AgentTool(AgentCatalog? catalog = null, IReadOnlyList<SubagentServer>? servers = null) =>
-        Spec = SpecFor(catalog ?? AgentCatalog.Default, servers);
+    /// <param name="pool">The chat's subagent servers, listed in the description (null = not said).</param>
+    public AgentTool(AgentCatalog? catalog = null, SubagentPool? pool = null) =>
+        Spec = SpecFor(catalog ?? AgentCatalog.Default, pool);
 
-    public static ToolSpec SpecFor(AgentCatalog catalog, IReadOnlyList<SubagentServer>? servers = null) => new(ToolName,
+    /// <summary>The description: what a subagent is, the agent types, and — with servers besides the chat's own model — the
+    /// stable catalogue of them (<see cref="SubagentPool.Describe"/>; how busy they are comes back in results instead).</summary>
+    public static ToolSpec SpecFor(AgentCatalog catalog, SubagentPool? pool = null) => new(ToolName,
         "Spawn a subagent to work a self-contained task (e.g. 'find every usage of X and report the call sites'). It works autonomously in a bounded loop and returns a final report. Prefer this over doing long exploration yourself when the task is well-scoped. " +
         "Pick agent_type for a specialist — " + catalog.Describe() + ". Omit it for the general worker. " +
         "Several agent calls in one turn run at the same time. Set run_in_background to true to launch it in the background and keep working: check on it with agent_status (you're also told automatically when one finishes) and stop one with agent_stop. To fan out many independent tasks in one go, use `delegate`." +
-        (SubagentServers.Section(servers) is { Length: > 0 } section ? " " + section : ""),
-        """{"type":"object","properties":{"description":{"type":"string","description":"What to name this subagent"},"prompt":{"type":"string","description":"The complete task for the subagent. It cannot ask you questions and cannot see this conversation — everything it needs goes here."},"agent_type":{"type":"string","description":"The kind of subagent (default: general)"},"run_in_background":{"type":"boolean","description":"Start it in the background and return at once (default false: wait for its report)"},"step":{"type":"string","description":""" + JsonArgs.Quote(StepParameter) + """},"sensitive":{"type":"boolean","description":""" + JsonArgs.Quote(SubagentServers.SensitiveParameter) + """}},"required":["description","prompt"]}""");
+        (SubagentPool.Describe(pool) is { } catalogue ? "\n\n" + catalogue : ""),
+        Parameters);
+
+    /// <summary>The parameters (the same as the Mac's; compared structurally by the shared fixture).</summary>
+    public static readonly string Parameters =
+        """{"type":"object","properties":{"description":{"type":"string","description":"What to name this subagent"},"prompt":{"type":"string","description":"The complete task for the subagent. It cannot ask you questions and cannot see this conversation — everything it needs goes here."},"agent_type":{"type":"string","description":"The kind of subagent (default: general)"},"server":{"type":"string","description":""" + JsonArgs.Quote(SubagentServers.ServerParameter) + """},"run_in_background":{"type":"boolean","description":"Start it in the background and return at once (default false: wait for its report)"},"step":{"type":"string","description":""" + JsonArgs.Quote(StepParameter) + """},"sensitive":{"type":"boolean","description":""" + JsonArgs.Quote(SubagentServers.SensitiveParameter) + """}},"required":["description","prompt"]}""";
 
     /// <summary>The <c>step</c> argument of agent and delegate's tasks: which plan step the subagent works, so the plan, the
     /// Now card and the activity menu show it there (the same words on the Mac).</summary>
@@ -90,6 +88,10 @@ public sealed class AgentTool : IToolExecutor
         var typeName = JsonArgs.String(args, "agent_type");
         if (catalog.Find(typeName) is not { } definition)
             return $"Error: unknown agent_type '{typeName}'. Available: {catalog.Describe()}.";
+        // Where the main agent wants it: checked before anything starts.
+        var choice = ServerChoice(JsonArgs.String(args, "server"), context);
+        if (choice?.Error is { } wrongServer) return wrongServer;
+        var pin = choice?.Entry;
         var sensitive = JsonArgs.Bool(args, "sensitive", false);
         var step = StepArgument(args);
 
@@ -100,25 +102,45 @@ public sealed class AgentTool : IToolExecutor
             // The background run belongs to the pool (Stop / agent_stop cancel it), not to this call.
             var (job, error) = pool.Launch(description, async ct =>
             {
-                var outcome = await RunCoreAsync(prompt, description, definition, background: true, context, ct, sensitive, step).ConfigureAwait(false);
-                return (outcome.Ok, outcome.Report);
+                var outcome = await RunCoreAsync(prompt, description, definition, background: true, context, ct, sensitive, step, pin).ConfigureAwait(false);
+                // A task that ran elsewhere than the main agent picked says so in front of its report.
+                return (outcome.Ok, outcome.FallbackLine() is { } moved ? moved + "\n\n" + outcome.Report : outcome.Report);
             });
             if (job is null) return "Error: " + (error ?? "can't start another background agent.");
-            return $"Started background agent {job.Id} “{description}”. It works while you continue — you'll be told automatically when it finishes; agent_status {{\"id\":\"{job.Id}\",\"wait_seconds\":120}} waits for it, agent_stop stops it.";
+            return WithLoad($"Started background agent {job.Id} “{description}”. It works while you continue — you'll be told automatically when it finishes; agent_status {{\"id\":\"{job.Id}\",\"wait_seconds\":120}} waits for it, agent_stop stops it.", context);
         }
 
-        var result = await RunCoreAsync(prompt, description, definition, background: false, context, cancellationToken, sensitive, step).ConfigureAwait(false);
-        return Present(description, result);
+        var result = await RunCoreAsync(prompt, description, definition, background: false, context, cancellationToken, sensitive, step, pin).ConfigureAwait(false);
+        return WithLoad(Present(description, result), context);
     }
 
-    /// <summary>The report as the parent sees it. The first line keeps a fixed shape; a specialist type or a
-    /// named server is added on a line of its own.</summary>
+    /// <summary>What a <c>server</c> argument names in this chat (null when it isn't given).</summary>
+    internal static SubagentPool.Choice? ServerChoice(string? raw, ToolContext context)
+    {
+        if (string.IsNullOrWhiteSpace(raw)) return null;
+        var pool = context.FleetPool ?? SubagentPool.From(context.Fleet?.Servers ?? []);
+        return SubagentPool.Match(raw, pool);
+    }
+
+    /// <summary><paramref name="text"/>, then — after a blank line — how busy each of the chat's subagent servers is now (when it
+    /// has any besides its own model). Results only: descriptions stay stable for the prompt cache.</summary>
+    internal static string WithLoad(string text, ToolContext context) => LoadLine(context) is { } line ? text + "\n\n" + line : text;
+
+    /// <summary>"Subagent servers now: dgx-spark 1/2 busy · primary 0/4 busy." (null without servers besides the chat's own).</summary>
+    internal static string? LoadLine(ToolContext context) =>
+        context.Fleet is { } fleet && context.FleetPool is { HasWorkers: true } pool
+            ? SubagentPool.LoadLine(pool, fleet.Loads(pool, context.FleetHome))
+            : null;
+
+    /// <summary>The report as the parent sees it. The first line keeps a fixed shape; a specialist type or a named server is
+    /// added on a line of its own, and a task that ran elsewhere than the main agent picked says so.</summary>
     internal static string Present(string description, SubagentOutcome outcome)
     {
         var head = outcome.Ok ? $"Subagent '{description}' finished." : $"Subagent '{description}' failed: {outcome.Report}";
         var details = outcome.Details();
         var text = new StringBuilder(head);
         if (details.Length > 0) text.Append('\n').Append(details);
+        if (outcome.FallbackLine() is { } moved) text.Append('\n').Append(moved);
         if (outcome.Ok) text.Append("\n\n").Append(outcome.Report);
         return text.ToString();
     }
@@ -132,10 +154,11 @@ public sealed class AgentTool : IToolExecutor
     }
 
     /// <summary>The whole life of one subagent: wait for a server, run, fail over if the server dies,
-    /// and keep the roster current. A <paramref name="sensitive"/> task runs only on a private server.</summary>
+    /// and keep the roster current. A <paramref name="sensitive"/> task runs only on a private server; <paramref name="pin"/>
+    /// is the server the main agent picked (<c>server</c>).</summary>
     internal static async Task<SubagentOutcome> RunCoreAsync(string prompt, string description, AgentDefinition definition,
                                                              bool background, ToolContext context, CancellationToken cancellationToken,
-                                                             bool sensitive = false, string? step = null)
+                                                             bool sensitive = false, string? step = null, SubagentPool.Entry? pin = null)
     {
         var roster = context.Roster;
         var runId = roster?.Begin(description, definition.Name, background, prompt, step);
@@ -145,10 +168,23 @@ public sealed class AgentTool : IToolExecutor
         var failovers = 0;
         string? firstServer = null;
         // The report names the server only when there was a choice of servers; a lone one is just "the model".
-        var choice = context.Fleet is { } known && known.Servers.Count > 1;
-        string? Named(string? label) => choice ? label : null;
+        var poolIds = context.FleetPool?.WorkerRouteIds;
+        var choice = context.Fleet is { } known && known.ChoiceCount(context.FleetHome, poolIds) > 1;
+        string? Named(string? handle) => choice ? handle : null;
+        // The pinned server's fleet id: the chat's own server for "primary".
+        var pinnedId = pin is null ? null
+            : pin.IsPrimary ? context.FleetHome?.Id ?? context.Fleet?.Servers.FirstOrDefault(s => s.IsPrimary)?.Id ?? pin.RouteId
+            : pin.RouteId;
         var task = prompt;
+        string? movedNote = null;
+        (PlacementReason? Reason, string? Note) placement = (null, null);
         var trace = new AttemptTrace();
+        SubagentOutcome Outcome(bool ok, string report, string? server) =>
+            new(ok, report, definition.Name, Named(server), clock.Elapsed)
+            {
+                Failovers = failovers, Reason = placement.Reason, Note = placement.Note,
+                Pinned = placement.Reason == PlacementReason.Fallback ? pin?.Id : null,
+            };
         try
         {
             while (true)
@@ -157,35 +193,52 @@ public sealed class AgentTool : IToolExecutor
                 FleetTarget target;
                 if (context.Fleet is { } fleet)
                 {
-                    if (runId is not null) roster!.Note(runId, "waiting for a free server");
+                    if (runId is not null)
+                        roster!.Note(runId, pin is not null ? $"waiting for {pin.Id}, which the primary picked (up to {SubagentPlacement.WaitWords(fleet.PinWait)})" : "waiting for a free server");
                     try
                     {
-                        lease = await fleet.AcquireAsync(definition.Server, cancellationToken, sensitive, context.Unattended, context.FleetHome).ConfigureAwait(false);
+                        lease = await fleet.AcquireAsync(new FleetRequest
+                        {
+                            Pinned = pinnedId, Preferred = definition.Server, Sensitive = sensitive, Unattended = context.Unattended,
+                            Home = context.FleetHome, Pool = poolIds, SensitiveChat = context.SensitiveChat,
+                        }, cancellationToken).ConfigureAwait(false);
                     }
                     catch (FleetUnavailableException unavailable)
                     {
                         if (runId is not null) roster!.Finish(runId, AgentRunStatus.Failed, unavailable.Message);
-                        return new SubagentOutcome(false, unavailable.Message, definition.Name, Named(firstServer), clock.Elapsed) { Failovers = failovers };
+                        return Outcome(false, unavailable.Message, firstServer);
                     }
                     target = lease.Target;
-                    firstServer ??= lease.Label;
+                    firstServer ??= lease.Handle;
                     if (runId is not null && choice) roster!.SetServer(runId, lease.Label);
-                    if (runId is not null) roster!.SetPlacement(runId, lease.Label, target.Model, PlacementNote(definition, lease, fleet));
+                    placement = Placement(lease, movedNote, choice || pin is not null);
+                    if (runId is not null)
+                        roster!.SetPlacement(runId, lease.Label, target.Model, reason: placement.Reason?.Code(),
+                            note: PlacementNote(definition, lease, fleet, placement.Note));
                 }
                 else
                 {
+                    // No fleet: it would run on the chat's own model — for a sensitive task, only if that is private (as a
+                    // Sensitive chat counts it: own hardware, Guardian, Bedrock in your account).
+                    if (sensitive && !(context.Client is IProviderClient provider && SensitivityPolicy.IsPrivate(provider.Profile)))
+                    {
+                        if (runId is not null) roster!.Finish(runId, AgentRunStatus.Failed, NoPrivateServerException.Text);
+                        return Outcome(false, NoPrivateServerException.Text, null);
+                    }
                     target = new FleetTarget(context.Client, context.Model, context.ContextWindow);
                     if (runId is not null) roster!.SetPlacement(runId, ThisChatsModel, context.Model);
                 }
 
                 try
                 {
-                    // With one server there is nowhere to fail over to: wait it out as long as the main agent would.
-                    var (ok, report) = await RunEngineAsync(prompt, definition, target, context, runId, boundedRetries: choice, trace,
-                        cancellationToken).ConfigureAwait(false);
+                    var (ok, report) = target.External is { } external
+                        // An engine of its own (Claude Code): one job in the chat's folder, its report back like any.
+                        ? await RunExternalAsync(external, prompt, definition, target, context, runId, trace, cancellationToken).ConfigureAwait(false)
+                        // With one server there is nowhere to fail over to: wait it out as long as the main agent would.
+                        : await RunEngineAsync(prompt, definition, target, context, runId, boundedRetries: choice, trace, cancellationToken).ConfigureAwait(false);
                     lease?.Dispose();
                     if (runId is not null) roster!.Finish(runId, ok ? AgentRunStatus.Done : AgentRunStatus.Failed, report);
-                    return new SubagentOutcome(ok, report, definition.Name, Named(lease?.Label ?? firstServer), clock.Elapsed) { Failovers = failovers };
+                    return Outcome(ok, report, lease?.Handle ?? firstServer);
                 }
                 catch (OperationCanceledException)
                 {
@@ -199,6 +252,7 @@ public sealed class AgentTool : IToolExecutor
                     lease.Fail(error);
                     lease.Dispose();
                     failovers++;
+                    movedNote = SubagentPlacement.MovedNote(lease.Handle, error.Message);
                     // The task starts again from the top on the next server — after work that already changed things, it
                     // has to look before it repeats a step (a migration, a commit, a deploy).
                     if (trace.Mutated) prompt = InterruptedNote + task;
@@ -209,7 +263,7 @@ public sealed class AgentTool : IToolExecutor
                     lease?.Fail(error);
                     lease?.Dispose();
                     if (runId is not null) roster!.Finish(runId, AgentRunStatus.Failed, error.Message);
-                    return new SubagentOutcome(false, error.Message, definition.Name, Named(lease?.Label ?? firstServer), clock.Elapsed) { Failovers = failovers };
+                    return Outcome(false, error.Message, lease?.Handle ?? firstServer);
                 }
             }
         }
@@ -223,19 +277,66 @@ public sealed class AgentTool : IToolExecutor
     /// <summary>Where a subagent runs when there is no fleet: the chat's own client.</summary>
     public const string ThisChatsModel = "this chat's model";
 
-    /// <summary>Why a subagent runs where it does when that isn't the obvious place: its agent file asked for a server it didn't
-    /// get, or servers tried first couldn't take it. Null when it runs where it was meant to.</summary>
-    internal static string? PlacementNote(AgentDefinition definition, FleetLease lease, AgentFleet fleet)
+    /// <summary>How the lease's server was chosen, as the roster and the report say it: after a failover, a fallback "moved
+    /// here"; with no choice of servers (and no pick), nothing.</summary>
+    internal static (PlacementReason? Reason, string? Note) Placement(FleetLease lease, string? movedNote, bool choice)
+    {
+        if (movedNote is not null) return (PlacementReason.Fallback, movedNote);
+        if (!choice) return (null, null);
+        return (lease.Reason, lease.Reason == PlacementReason.Fallback ? lease.Note : null);
+    }
+
+    /// <summary>Why a subagent runs where it does when that isn't the obvious place: the main agent's pick or its agent file
+    /// asked for a server it didn't get, or servers tried first couldn't take it. Null when it runs where it was meant to.</summary>
+    internal static string? PlacementNote(AgentDefinition definition, FleetLease lease, AgentFleet fleet, string? note = null)
     {
         var notes = new List<string>();
-        if (definition.Server is { Length: > 0 } wanted && !AgentFleet.Matches(lease.Server, wanted))
+        if (note is not null)
         {
-            notes.Add(fleet.Servers.Any(s => AgentFleet.Matches(s, wanted))
-                ? $"its agent file asks for “{wanted}”, which was busy or not answering"
-                : $"its agent file asks for “{wanted}”, but no model server by that name is set up (Settings › AI Models: tick “Subagent” for that route)");
+            notes.Add(note);
+        }
+        else if (definition.Server is { Length: > 0 } wanted && !AgentFleet.Matches(lease.Server, wanted))
+        {
+            notes.Add(fleet.Servers.Any(s => AgentFleet.Matches(s, wanted)) ? SubagentPlacement.AgentFileBusy(wanted) : SubagentPlacement.AgentFileMissing(wanted));
         }
         if (lease.Skipped.Count > 0) notes.Add("tried first: " + string.Join("; ", lease.Skipped));
         return notes.Count == 0 ? null : string.Join(" · ", notes);
+    }
+
+    /// <summary>A task on a server that runs its own agent (Claude Code): one job in the chat's folder, under the chat's
+    /// permissions (Plan only for a read-only type), its steps on the roster, its report back like any subagent's.</summary>
+    private static async Task<(bool Ok, string Report)> RunExternalAsync(IExternalSubagent external, string prompt, AgentDefinition definition,
+                                                                          FleetTarget target, ToolContext context, string? runId,
+                                                                          AttemptTrace trace, CancellationToken cancellationToken)
+    {
+        var note = ClaudeCodeSubagent.Note;
+        if (definition.Prompt is { Length: > 0 } typePrompt) note += "\n\n" + typePrompt;
+        var roster = context.Roster;
+        var job = new ExternalSubagentJob
+        {
+            Prompt = prompt,
+            SystemNote = note,
+            Workspace = context.Workspace,
+            Preset = definition.IsReadOnly ? PermissionPreset.Plan : context.Policy.Preset,
+            ReadOnly = definition.IsReadOnly,
+            MaxSteps = definition.MaxSteps ?? DefaultMaxSteps,
+            Activity = (text, step) =>
+            {
+                if (runId is not null) roster?.Note(runId, text, step);
+            },
+            NoteMutation = () => trace.Mutated = true,
+            RequestPermission = context.RequestPermission,
+        };
+        var result = await external.RunAsync(job, cancellationToken).ConfigureAwait(false);
+        if (result.Mutated) trace.Mutated = true;
+        if (runId is not null && roster is not null)
+        {
+            roster.AddTokens(runId, result.PromptTokens, result.CompletionTokens);
+            if (result.CostUsd is { } cost)
+                roster.Note(runId, "≈ " + (cost < 0.01 ? "under $0.01" : "$" + cost.ToString("0.00", System.Globalization.CultureInfo.InvariantCulture))
+                                   + " at API prices (paid by your Claude plan)");
+        }
+        return (result.Ok, result.Report);
     }
 
     /// <summary>The model settings a subagent sends: a target on another route uses that route's own (null = its provider's
@@ -359,8 +460,22 @@ public sealed class AgentTool : IToolExecutor
 internal sealed record SubagentOutcome(bool Ok, string Report, string AgentType, string? Server, TimeSpan Elapsed)
 {
     public int Failovers { get; init; }
+    /// <summary>How its server was chosen (null when there was no choice).</summary>
+    public PlacementReason? Reason { get; init; }
+    /// <summary>Why it ran where it did, for a fallback.</summary>
+    public string? Note { get; init; }
+    /// <summary>The server the main agent picked, when it ran somewhere else.</summary>
+    public string? Pinned { get; init; }
 
-    /// <summary>"(explore · on spark-2 · 34s)" — empty for a plain general agent on the only server.</summary>
+    /// <summary>"Ran on bedrock instead of spark-2: spark-2 stayed busy for 2 minutes." — when it didn't run where the main
+    /// agent picked.</summary>
+    public string? FallbackLine() =>
+        Reason == PlacementReason.Fallback && Pinned is { } pinned && Server is { } server && server != pinned && Note is { } note
+            ? $"Ran on {server} instead of {pinned}: {note}."
+            : null;
+
+    /// <summary>"(explore agent · on spark-2 · 34s)" — the server as the main agent names it; empty for a plain general agent on
+    /// the only server.</summary>
     public string Details()
     {
         var parts = new List<string>();
@@ -375,7 +490,7 @@ internal sealed record SubagentOutcome(bool Ok, string Report, string AgentType,
 // MARK: - delegate (parallel fan-out)
 
 /// <summary>Runs several independent subtasks at once, each in its own subagent, and returns every report
-/// together. With more than one model server the tasks spread across them.</summary>
+/// together. With more than one model server the tasks spread across them; a task (or all of them) may name its server.</summary>
 public sealed class DelegateTool : IToolExecutor
 {
     public const string ToolName = "delegate";
@@ -386,18 +501,18 @@ public sealed class DelegateTool : IToolExecutor
     private const int DefaultParallel = 6;
     private const int ReportChars = 8_000;
 
-    public DelegateTool(AgentCatalog? catalog = null, IReadOnlyList<SubagentServer>? servers = null)
-    {
-        var types = (catalog ?? AgentCatalog.Default).Describe();
-        var sensitive = JsonArgs.Quote(SubagentServers.SensitiveParameter);
+    /// <summary>The description names the agent types; the servers are listed once, in the agent tool.</summary>
+    public DelegateTool(AgentCatalog? catalog = null) =>
         Spec = new ToolSpec(ToolName,
             "Run several independent subtasks at the same time, each by its own subagent, and get all their reports back together. Use it to fan work out — investigate three modules, review four files, implement three unrelated changes — instead of doing them one after another. Subtasks cannot talk to each other or see this conversation, so each prompt must be complete; make sure they don't edit the same files. " +
-            "Give each an agent_type: " + types + ". When several model servers are configured the tasks are spread across them." +
-            (SubagentServers.Section(servers) is { Length: > 0 } section ? " " + section : ""),
-            """{"type":"object","properties":{"tasks":{"type":"array","minItems":1,"maxItems":12,"items":{"type":"object","properties":{"description":{"type":"string","description":"A short name for the subtask"},"prompt":{"type":"string","description":"The complete task"},"agent_type":{"type":"string","description":"The kind of subagent (default: general)"},"step":{"type":"string","description":""" + JsonArgs.Quote(AgentTool.StepParameter) + """},"sensitive":{"type":"boolean","description":""" + sensitive + """}},"required":["description","prompt"]},"description":"The subtasks to run in parallel"},"max_parallel":{"type":"integer","description":"At most this many at once (default 6)"},"sensitive":{"type":"boolean","description":""" + JsonArgs.Quote("The default for every task. " + SubagentServers.SensitiveParameter) + """}},"required":["tasks"]}""");
-    }
+            "Give each an agent_type: " + (catalog ?? AgentCatalog.Default).Describe() + ". Without a server, tasks spread across the subagent servers by load; give a task `server` (an id listed in the agent tool) to choose where it runs.",
+            Parameters);
 
-    private sealed record Task1(string Description, string Prompt, AgentDefinition Definition, bool Sensitive, string? Step);
+    /// <summary>The parameters (the same as the Mac's; compared structurally by the shared fixture).</summary>
+    public static readonly string Parameters =
+        """{"type":"object","properties":{"tasks":{"type":"array","minItems":1,"maxItems":12,"items":{"type":"object","properties":{"description":{"type":"string","description":"A short name for the subtask"},"prompt":{"type":"string","description":"The complete task"},"agent_type":{"type":"string","description":"The kind of subagent (default: general)"},"server":{"type":"string","description":""" + JsonArgs.Quote(SubagentServers.ServerParameter + " (This task only.)") + """},"step":{"type":"string","description":""" + JsonArgs.Quote(AgentTool.StepParameter) + """},"sensitive":{"type":"boolean","description":""" + JsonArgs.Quote(SubagentServers.SensitiveParameter + " (This task only.)") + """}},"required":["description","prompt"]},"description":"The subtasks to run in parallel"},"max_parallel":{"type":"integer","description":"At most this many at once (default 6)"},"server":{"type":"string","description":""" + JsonArgs.Quote(SubagentServers.ServerParameter + " (Every task without its own.)") + """},"sensitive":{"type":"boolean","description":""" + JsonArgs.Quote(SubagentServers.SensitiveParameter + " (Every task.)") + """}},"required":["tasks"]}""";
+
+    private sealed record Task1(string Description, string Prompt, AgentDefinition Definition, bool Sensitive, string? Step, SubagentPool.Entry? Pin);
 
     public async Task<ToolResult> ExecuteAsync(string arguments, ToolContext context, CancellationToken cancellationToken)
     {
@@ -414,6 +529,9 @@ public sealed class DelegateTool : IToolExecutor
 
         var catalog = context.AgentTypes ?? AgentCatalog.Default;
         var allSensitive = JsonArgs.Bool(args, "sensitive", false);
+        // Where the main agent wants them: every server named is checked before any task starts.
+        var allChoice = AgentTool.ServerChoice(JsonArgs.String(args, "server"), context);
+        if (allChoice?.Error is { } wrongServer) return wrongServer;
         var tasks = new List<Task1>();
         var index = 0;
         foreach (var node in array)
@@ -425,9 +543,15 @@ public sealed class DelegateTool : IToolExecutor
             var typeName = JsonArgs.String(item, "agent_type");
             if (catalog.Find(typeName) is not { } definition)
                 return $"Error: task {index} has an unknown agent_type '{typeName}'. Available: {catalog.Describe()}.";
+            var pin = allChoice?.Entry;
+            if (AgentTool.ServerChoice(JsonArgs.String(item, "server"), context) is { } own)
+            {
+                if (own.Error is { } error) return $"Error: task {index}: " + (error.StartsWith("Error: ", StringComparison.Ordinal) ? error["Error: ".Length..] : error);
+                pin = own.Entry;
+            }
             var description = (JsonArgs.String(item, "description") ?? "").Trim();
             tasks.Add(new Task1(description.Length > 0 ? description : $"task {index}", prompt, definition,
-                JsonArgs.Bool(item, "sensitive", allSensitive), AgentTool.StepArgument(item)));
+                JsonArgs.Bool(item, "sensitive", allSensitive), AgentTool.StepArgument(item), pin));
         }
 
         var parallel = Math.Clamp(JsonArgs.Int(args, "max_parallel", DefaultParallel), 1, MaxTasks);
@@ -438,7 +562,7 @@ public sealed class DelegateTool : IToolExecutor
             try
             {
                 return await AgentTool.RunCoreAsync(task.Prompt, task.Description, task.Definition, background: false, context,
-                    cancellationToken, task.Sensitive, task.Step).ConfigureAwait(false);
+                    cancellationToken, task.Sensitive, task.Step, task.Pin).ConfigureAwait(false);
             }
             finally
             {
@@ -449,11 +573,14 @@ public sealed class DelegateTool : IToolExecutor
 
         var done = outcomes.Count(o => o.Ok);
         var text = new StringBuilder($"Delegated {tasks.Count} task{(tasks.Count == 1 ? "" : "s")}: {done} finished, {tasks.Count - done} failed.\n");
+        // How busy each server is now, after the header (results only: the descriptions stay stable).
+        if (AgentTool.LoadLine(context) is { } load) text.Append('\n').Append(load).Append('\n');
         for (var i = 0; i < tasks.Count; i++)
         {
             var outcome = outcomes[i];
             var details = outcome.Details();
             text.Append($"\n## {i + 1}. {tasks[i].Description} — {(outcome.Ok ? "finished" : "failed")}{(details.Length > 0 ? " " + details : "")}\n");
+            if (outcome.FallbackLine() is { } moved) text.Append(moved).Append('\n');
             var report = outcome.Report;
             text.Append(report.Length > ReportChars ? report[..ReportChars] + "\n[… report truncated]" : report).Append('\n');
         }

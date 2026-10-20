@@ -221,6 +221,10 @@ public sealed class Engine
     public AgentFleet? Fleet { get; init; }
     /// <summary>This chat's own server, the fleet's primary for its subagents (null = the configured primary).</summary>
     public FleetServer? FleetHome { get; init; }
+    /// <summary>This chat's subagent servers (see <see cref="SubagentPool"/>; null = every server the fleet has).</summary>
+    public SubagentPool? FleetPool { get; init; }
+    /// <summary>The chat is Sensitive: a subagent server that only sees it masked gets no pictures.</summary>
+    public bool SensitiveChat { get; init; }
     /// <summary>The chat runs unattended (its task list, a /goal): its subagents keep off servers whose plan allows only
     /// interactive use.</summary>
     public bool Unattended { get; init; }
@@ -357,6 +361,8 @@ public sealed class Engine
             VaultGrants = VaultGrants,
             Fleet = Fleet,
             FleetHome = FleetHome,
+            FleetPool = FleetPool,
+            SensitiveChat = SensitiveChat,
             Unattended = Unattended,
             Roster = Roster,
             AgentTypes = AgentTypes,

@@ -1,0 +1,467 @@
+{
+ "about": "Handles, context labels, speed and tier hints, providers, machines, retry words (brief §2.1).",
+ "handles": [
+  {
+   "name": "a plain name",
+   "routes": [
+    {
+     "name": "DGX Spark",
+     "model": "qwen3-coder"
+    }
+   ],
+   "expect": [
+    "dgx-spark"
+   ]
+  },
+  {
+   "name": "three Guardian models take the long form",
+   "routes": [
+    {
+     "name": "Guardian",
+     "model": "claude-haiku-5-5"
+    },
+    {
+     "name": "Guardian",
+     "model": "claude-sonnet-5-5"
+    },
+    {
+     "name": "Guardian",
+     "model": "claude-opus-5-5"
+    }
+   ],
+   "expect": [
+    "guardian-claude-haiku-5-5",
+    "guardian-claude-sonnet-5-5",
+    "guardian-claude-opus-5-5"
+   ]
+  },
+  {
+   "name": "two Claude Code models",
+   "routes": [
+    {
+     "name": "Claude Code",
+     "model": "opus"
+    },
+    {
+     "name": "Claude Code",
+     "model": "sonnet"
+    }
+   ],
+   "expect": [
+    "claude-code-opus",
+    "claude-code-sonnet"
+   ]
+  },
+  {
+   "name": "primary is reserved",
+   "routes": [
+    {
+     "name": "Primary",
+     "model": "qwen"
+    },
+    {
+     "name": "DGX Spark",
+     "model": "x"
+    }
+   ],
+   "expect": [
+    "primary-route",
+    "dgx-spark"
+   ]
+  },
+  {
+   "name": "no name: the model",
+   "routes": [
+    {
+     "name": "",
+     "model": "qwen3:8b"
+    }
+   ],
+   "expect": [
+    "qwen3-8b"
+   ]
+  },
+  {
+   "name": "nothing usable in the name",
+   "routes": [
+    {
+     "name": "✨",
+     "model": "m"
+    }
+   ],
+   "expect": [
+    "route"
+   ]
+  },
+  {
+   "name": "still clashing after the long form",
+   "routes": [
+    {
+     "name": "Spark",
+     "model": "a b"
+    },
+    {
+     "name": "Spark",
+     "model": "a-b"
+    }
+   ],
+   "expect": [
+    "spark-a-b",
+    "spark-a-b-2"
+   ]
+  },
+  {
+   "name": "long names are capped at 32",
+   "routes": [
+    {
+     "name": "My Very Long DGX Spark Server Name In The Lab",
+     "model": "m"
+    }
+   ],
+   "expect": [
+    "my-very-long-dgx-spark-server-na"
+   ]
+  },
+  {
+   "name": "different spellings, one slug",
+   "routes": [
+    {
+     "name": "Spark 2",
+     "model": "m"
+    },
+    {
+     "name": "spark-2",
+     "model": "m"
+    }
+   ],
+   "expect": [
+    "spark-2-m",
+    "spark-2-m-2"
+   ]
+  },
+  {
+   "name": "Settings order decides",
+   "routes": [
+    {
+     "name": "Bedrock",
+     "model": "a"
+    },
+    {
+     "name": "Spark",
+     "model": "b"
+    },
+    {
+     "name": "Bedrock",
+     "model": "c"
+    }
+   ],
+   "expect": [
+    "bedrock-a",
+    "spark",
+    "bedrock-c"
+   ]
+  }
+ ],
+ "context": [
+  {
+   "tokens": 262144,
+   "expect": "256K"
+  },
+  {
+   "tokens": 200000,
+   "expect": "200K"
+  },
+  {
+   "tokens": 128000,
+   "expect": "125K"
+  },
+  {
+   "tokens": 1048576,
+   "expect": "1M"
+  },
+  {
+   "tokens": 1000000,
+   "expect": "1M"
+  },
+  {
+   "tokens": 131072,
+   "expect": "128K"
+  },
+  {
+   "tokens": 32768,
+   "expect": "32K"
+  },
+  {
+   "tokens": 8000,
+   "expect": "8K"
+  },
+  {
+   "tokens": 0,
+   "expect": null
+  }
+ ],
+ "speed": [
+  {
+   "model": "claude-haiku-5-5",
+   "expect": "fast"
+  },
+  {
+   "model": "gemini-2.5-flash",
+   "expect": "fast"
+  },
+  {
+   "model": "gpt-5-mini",
+   "expect": "fast"
+  },
+  {
+   "model": "qwen3:8b",
+   "expect": "fast"
+  },
+  {
+   "model": "llama-3.1-8b-instruct",
+   "expect": "fast"
+  },
+  {
+   "model": "glm-4.5-air",
+   "expect": "fast"
+  },
+  {
+   "model": "claude-opus-5-5",
+   "expect": "thorough"
+  },
+  {
+   "model": "claude-fable-5-1",
+   "expect": "thorough"
+  },
+  {
+   "model": "deepseek-reasoner",
+   "expect": "thorough"
+  },
+  {
+   "model": "qwen3.8-max",
+   "expect": "thorough"
+  },
+  {
+   "model": "kimi-k2-thinking",
+   "expect": "thorough"
+  },
+  {
+   "model": "o3-pro",
+   "expect": "thorough"
+  },
+  {
+   "model": "claude-sonnet-5-5",
+   "expect": "standard"
+  },
+  {
+   "model": "qwen3-coder-30b",
+   "expect": "standard"
+  },
+  {
+   "model": "gemini-2.5-pro",
+   "expect": "fast"
+  },
+  {
+   "model": "sonnet",
+   "expect": "standard"
+  }
+ ],
+ "tier": [
+  {
+   "kind": "claude-code",
+   "planSubscription": null,
+   "privateAddress": true,
+   "expect": "subscription"
+  },
+  {
+   "kind": "guardian",
+   "planSubscription": null,
+   "privateAddress": false,
+   "expect": "org"
+  },
+  {
+   "kind": "openai-compatible",
+   "planSubscription": true,
+   "privateAddress": false,
+   "expect": "subscription"
+  },
+  {
+   "kind": "openai-compatible",
+   "planSubscription": false,
+   "privateAddress": false,
+   "expect": "api"
+  },
+  {
+   "kind": "bedrock",
+   "planSubscription": null,
+   "privateAddress": true,
+   "expect": "api"
+  },
+  {
+   "kind": "openai-compatible",
+   "planSubscription": null,
+   "privateAddress": true,
+   "expect": "local"
+  },
+  {
+   "kind": "ollama",
+   "planSubscription": null,
+   "privateAddress": true,
+   "expect": "local"
+  },
+  {
+   "kind": "anthropic",
+   "planSubscription": false,
+   "privateAddress": false,
+   "expect": "api"
+  },
+  {
+   "kind": "openrouter",
+   "planSubscription": null,
+   "privateAddress": false,
+   "expect": "api"
+  }
+ ],
+ "provider": [
+  {
+   "kind": "guardian",
+   "planProvider": null,
+   "expect": "Guardian"
+  },
+  {
+   "kind": "claude-code",
+   "planProvider": null,
+   "expect": "Claude Code"
+  },
+  {
+   "kind": "bedrock",
+   "planProvider": null,
+   "expect": "Amazon Bedrock"
+  },
+  {
+   "kind": "anthropic",
+   "planProvider": "Anthropic",
+   "expect": "Anthropic API"
+  },
+  {
+   "kind": "ollama",
+   "planProvider": null,
+   "expect": "Ollama"
+  },
+  {
+   "kind": "lmstudio",
+   "planProvider": null,
+   "expect": "LM Studio"
+  },
+  {
+   "kind": "openrouter",
+   "planProvider": null,
+   "expect": "OpenRouter"
+  },
+  {
+   "kind": "openai",
+   "planProvider": "OpenAI",
+   "expect": "OpenAI"
+  },
+  {
+   "kind": "openai",
+   "planProvider": null,
+   "expect": "OpenAI"
+  },
+  {
+   "kind": "openai-compatible",
+   "planProvider": "Kimi",
+   "expect": "Kimi"
+  },
+  {
+   "kind": "openai-compatible",
+   "planProvider": null,
+   "expect": "OpenAI-compatible server"
+  }
+ ],
+ "machine": [
+  {
+   "kind": "openai-compatible",
+   "baseURL": " HTTP://Spark2.local:8002/v1/ ",
+   "routeID": "Spark 2|qwen",
+   "selfHosted": true,
+   "expect": "http://spark2.local:8002/v1"
+  },
+  {
+   "kind": "openai-compatible",
+   "baseURL": "https://api.kimi.ai/coding/v1",
+   "routeID": "Kimi Code|kimi-for-coding",
+   "selfHosted": false,
+   "expect": "route:Kimi Code|kimi-for-coding"
+  },
+  {
+   "kind": "ollama",
+   "baseURL": "http://127.0.0.1:11434/v1",
+   "routeID": "Ollama|qwen3:8b",
+   "selfHosted": true,
+   "expect": "http://127.0.0.1:11434/v1"
+  },
+  {
+   "kind": "openai",
+   "baseURL": "http://spark.local:8000/v1",
+   "routeID": "Spark as OpenAI|qwen",
+   "selfHosted": true,
+   "expect": "http://spark.local:8000/v1"
+  },
+  {
+   "kind": "bedrock",
+   "baseURL": "https://bedrock-runtime.us-east-1.amazonaws.com",
+   "routeID": "Amazon Bedrock|claude-sonnet-5-5",
+   "selfHosted": false,
+   "expect": "route:Amazon Bedrock|claude-sonnet-5-5"
+  },
+  {
+   "kind": "guardian",
+   "baseURL": "https://guardian.503cm.com/v1",
+   "routeID": "Guardian|claude-haiku-5-5",
+   "selfHosted": true,
+   "expect": "route:Guardian|claude-haiku-5-5"
+  },
+  {
+   "kind": "claude-code",
+   "baseURL": "claude-code://local",
+   "routeID": "Claude Code|sonnet",
+   "selfHosted": true,
+   "expect": "route:Claude Code|sonnet"
+  }
+ ],
+ "retry": [
+  {
+   "seconds": 45,
+   "expect": "45s"
+  },
+  {
+   "seconds": 44.2,
+   "expect": "45s"
+  },
+  {
+   "seconds": 119,
+   "expect": "119s"
+  },
+  {
+   "seconds": 120,
+   "expect": "2m"
+  },
+  {
+   "seconds": 900,
+   "expect": "15m"
+  },
+  {
+   "seconds": 3600,
+   "expect": "60m"
+  },
+  {
+   "seconds": 7199,
+   "expect": "2h"
+  },
+  {
+   "seconds": 7200,
+   "expect": "2h"
+  }
+ ]
+}

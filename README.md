@@ -190,8 +190,9 @@ screenshots in them are from its repository (MIT, see `SWAPPER-SCREENSHOTS-LICEN
 
 **Settings › AI Models** lists every model route, each with an **On** switch and its roles:
 
-- **Primary** (exactly one) answers you: the main agent talks to it.
-- **Subagent** — subagents run there (below).
+- **Primary** (exactly one) is the model new chats start with (each chat can pick its own, which leads that chat).
+- **Subagent** — chats on other models can hand it side tasks (below). Any route can be one — the primary,
+  Amazon Bedrock, a plan, Guardian's models, Claude Code.
 - **Backup** — *use if the primary fails*. When the primary doesn't answer a turn before saying anything
   (no connection, a timeout, 401/403, 404, 408, 429 or a server error), the same request goes to each
   backup in turn, and the chat says *Spark didn't answer (HTTP 503), so this turn ran on Kimi Code.*
@@ -213,9 +214,9 @@ while you are signed in to Guardian — Guardian's models under **Guardian** (se
 **Each chat has its own model.** Picking a model in the menu under the composer changes that chat only
 (it is stored with the conversation): two projects open side by side can run on two different servers
 at once. A new chat starts with what its project's chats last chose, else the primary — the primary is
-what new projects start with and the main server subagents fall back to. Everything a chat does — its
-turns, retries, `/goal`, its task list, compaction, its subagents when no subagent server is free —
-uses that chat's model. The thinking menu offers only the levels the chat's model takes (GLM-5.3: Low,
+what new chats and projects start with, and leads nothing else. Everything a chat does — its turns,
+retries, `/goal`, its task list, compaction, its subagents when no subagent server is free — uses that
+chat's model. The thinking menu offers only the levels the chat's model takes (GLM-5.3: Low,
 High, Max; Kimi K2.6: Off, On; Kimi K2.7 Code: none — it always thinks).
 
 When a server refuses a setting it doesn't take ("invalid temperature: only 1 is allowed for this
@@ -225,26 +226,62 @@ Only optional settings are ever left out this way (temperature, thinking, max_to
 refusal that points at the messages, the tools or the model is reported as it is, and a lesson of that kind
 saved by an earlier build is dropped when the file is read.
 
-### Two or more model servers
+### Subagent servers: each chat's model leads its own pool
 
-Add a second DGX Spark (or any other OpenAI-compatible server) as another route in **Settings ›
-AI Models** and tick **Subagent** on it. The route you are chatting with stays the *primary* — the main
-agent talks to it — and the ticked routes become *workers*: subagents (`agent`, `delegate`, background
-agents) run on the workers, least busy first and several at a time (the count is set per server),
-while the main agent carries on with the primary. When every worker is busy, subagents may use the
-primary too (a checkbox in the same place turns that off). A worker that stops answering is skipped for
-a minute and its task moves to another server (told, if the task had already changed things, to look
-before repeating a step), so one Spark going down doesn't lose a job; with a single server, a subagent
-waits out an outage as long as the main agent does. One machine counts as one worker however many of its
-models are listed, and editing a route never makes it the main model. Each worker
-is asked which model it is serving right now, so a Spark that swapped models is still used correctly.
-The Plan panel shows where each subagent runs, and `/agents` lists the servers with how busy each is.
+Tick **Subagent** on any route in **Settings › AI Models** — a second DGX Spark, Amazon Bedrock, a
+subscription plan, the Anthropic API, Claude Code — or, signed in to Guardian, on one of Guardian's models
+(the **Guardian** group under the routes, or *Use for subagents* in Settings › Guardian; nothing is saved
+as a route). **Each chat's own model is the primary for its subagents**: its *pool* is every route ticked
+"Subagent" except the chat's own machine, one route per machine (a Spark serves one model at a time; the
+row says *· the same machine as Spark 1: a chat uses only the first of them*), without Guardian while
+signed out, without what a Sensitive chat may not use, and without plans for interactive use only while
+the chat works unattended (its task list, a `/goal`). So a chat on Spark B can hand work to Spark A, and a
+chat on Spark A to Spark B. The setting *When those are all busy, let subagents use the chat's own model
+too* decides whether the chat's model takes overflow.
+
+**The primary picks.** The `agent` tool's description lists the chat's subagent servers, one line each, so
+the model can choose:
+
+```
+- dgx-spark: OpenAI-compatible server · qwen3-coder-30b · 256K context · private · local · fast · 2 at a time
+- bedrock: Amazon Bedrock · claude-sonnet-5-5 · 1M context · private · api · images · 4 at a time
+- claude-code-sonnet: Claude Code · sonnet · 200K context · not private · subscription · standard · runs its own agent in this chat's folder · 2 at a time
+- primary: this chat's own model (qwen3.8 on Spark A) · used when the others are busy
+```
+
+`agent` and `delegate` take an optional `server` (an id from that list, or `primary`; for `delegate`, per
+task or for every task). Without one, the least busy server runs the task. A chosen server that is busy is
+waited for up to 2 minutes; after that — or if it isn't answering, isn't private for a sensitive task, or
+is for interactive use only — another server runs it and the result says *Ran on bedrock instead of
+dgx-spark: dgx-spark stayed busy for 2 minutes.* A name that isn't in the chat's pool is an error before
+anything runs (with why, when it is an enlisted route this chat can't use). How busy each server is comes
+back with every `agent`, `delegate` and `agent_status` result, never in the description, so the prompt
+cache holds. The activity menu, the plan's step chips and `/agents` show where each task went and why:
+*picked by the primary*, *set by its agent type* (an agent file's `server:`), *least busy* or *fallback*.
+
+**Claude Code** as a subagent server works each task as one `claude -p` job in the chat's folder (its scratch
+folder without a project), on your Claude plan, with the chat's permissions (*Plan only* for a read-only
+agent type), no session saved and the agent type's step budget; its last message and the list of tool calls
+it made come back as the report. Stopping the task stops the CLI. It is never private, so it never takes a
+sensitive task and is never in a Sensitive chat's pool; a usage limit keeps tasks off it until the limit
+resets (else 15 minutes). A chat that runs *on* Claude Code uses Claude Code's own subagents. **Guardian's
+models** use your live sign-in (billed to your organisation's Guardian account) and, like Amazon Bedrock in
+your AWS account, count as private for sensitive tasks.
+
+A server that stops answering is skipped for a minute and its task moves to another server (told, if the
+task had already changed things, to look before repeating a step), so one Spark going down doesn't lose a
+job; with a single server, a subagent waits out an outage as long as the main agent does. Each server is
+asked which model it is serving right now, so a Spark that swapped models is still used correctly.
+
+*Changed in this release:* a route that is the primary **and** ticked "Subagent" now also serves chats on
+other models (before, that tick did nothing); Guardian's models and Claude Code can be enlisted; the main
+agent's system prompt no longer lists the servers (the `agent` tool does).
 
 The main agent is told which servers are private. Servers that aren't private must not receive
 sensitive data: the agent describes their tasks in general terms, and sets `sensitive: true` on `agent`
-or `delegate` when a task needs the real details — that task then runs only on a private server (or on a
-private primary, when subagents may use it); with none free, the agent is told to do it itself or
-rewrite the task without them.
+or `delegate` when a task needs the real details — that task then runs only on a private server (your own
+hardware, Guardian, Bedrock in your account; the chat's own model when it is private and may take
+subagents); with none free, the agent is told to do it itself or rewrite the task without them.
 
 ### Sensitive data
 
@@ -378,7 +415,8 @@ Vision gets whatever your Guardian role allows:
   plan terms come with it). The list is read again on every sign-in, on an organization switch and every 15
   minutes, and kept for the next launch (without the token). Signing out takes them out of the menus; a chat that
   was on one keeps it and says *Sign in to Guardian to use this model.* — signing in again renews the token for
-  every chat on them. **Use as my primary model** and *Use for subagents* save a Guardian route in those roles.
+  every chat on them. **Use as my primary model** saves a Guardian route as the primary; *Use for subagents* lets
+  chats on other models hand side tasks to the model without saving a route (see *Subagent servers*).
   The page shows each spend, token and request limit, what is left and when it resets.
 - **Prompt history** — every prompt, task and `/goal` goes to your Guardian Prompt Notebook when it starts and
   again with how it ended. Guardian isn't private, so the copy that goes up is masked like a request to a model
@@ -423,7 +461,8 @@ Code** puts *Claude Code · Opus*, *Sonnet* and *Haiku* in every chat's model me
   your plan, unless Claude Code is set up with an API key (`ANTHROPIC_API_KEY`), which the chat then says it bills.
 
 Vision's own one-off requests on it (a summary, a skill draft) go to Claude Code as a single request with
-Vision's instructions and no tools; it is never a backup or a subagent server. **Sensitive chats can't use it** — it reads your files itself, so the
+Vision's instructions and no tools; it is never a backup. Ticked **Subagent**, it takes other chats' side tasks, one
+`claude -p` job each (see *Subagent servers*). **Sensitive chats can't use it** — it reads your files itself, so the
 shield can't stand between them and Anthropic. Advanced: the `claude` path to use, and *Run Claude Code inside
 WSL* for one installed in Linux.
 
@@ -669,7 +708,7 @@ Press Stop to give up. Nothing already done is lost: tool calls that ran stay in
 | `/swap [box] [model]` | Lists every Spark Swapper box's models, or switches one: the box behind the primary model, or the box named. |
 | `/skills` · `/skill <name>` · `/skill new <what>` · `/<name> args` | List skills, select one for this chat, have the model write one, or run one. |
 | `/remember <note>` · `/memory [search]` | Save a note to long-term memory, or open the remembered-notes window (with a search word: list the matches). |
-| `/agents` | The kinds of subagent, the model servers they run on, and what is running now. |
+| `/agents` | The kinds of subagent, this chat's model and its subagent servers (how busy each is, and the enlisted ones it can't use, with why), and what is running now. |
 | `/sensitive [on\|off]` | Shows or sets whether this chat is Sensitive: then it uses only private models (your own hardware, Guardian, Amazon Bedrock in your AWS account) or others through the shield; engines that read files themselves, like Claude Code, are refused with the reason. |
 | `/help` | Lists these. |
 

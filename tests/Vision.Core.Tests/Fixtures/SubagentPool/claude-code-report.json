@@ -1,0 +1,86 @@
+{
+ "about": "A Claude Code subagent job's report (ClaudeCodeSubagent.report): its last reply, then the tool calls it made in Vision's tool names with each call's preview. stream: a real capture of claude 2.1.299 (Vision for Windows' Fixtures/ClaudeCode/read-edit.jsonl), run in workspace /work/proj2.",
+ "stream": "read-edit.jsonl",
+ "workspace": "/work/proj2",
+ "expect": {
+  "ok": true,
+  "report": "Edited hello.txt.\n\nClaude Code's tool calls: read_file hello.txt; edit hello.txt.",
+  "mutated": true,
+  "promptTokens": 16500,
+  "completionTokens": 126
+ },
+ "reportCases": [
+  {
+   "reply": "Edited hello.txt.",
+   "toolLog": [
+    "read_file hello.txt",
+    "edit hello.txt"
+   ],
+   "hitTurnLimit": false,
+   "expect": "Edited hello.txt.\n\nClaude Code's tool calls: read_file hello.txt; edit hello.txt."
+  },
+  {
+   "reply": "  \n",
+   "toolLog": [],
+   "hitTurnLimit": false,
+   "expect": "(Claude Code worked on this without a written reply.)"
+  },
+  {
+   "reply": "",
+   "toolLog": [
+    "run_shell_command swift test (failed)"
+   ],
+   "hitTurnLimit": true,
+   "expect": "It reached its step limit before finishing. (Claude Code worked on this without a written reply.)\n\nClaude Code's tool calls: run_shell_command swift test (failed)."
+  },
+  {
+   "reply": "Done.",
+   "toolLog": [
+    "read_file f0.swift",
+    "read_file f1.swift",
+    "read_file f2.swift",
+    "read_file f3.swift",
+    "read_file f4.swift",
+    "read_file f5.swift",
+    "read_file f6.swift",
+    "read_file f7.swift",
+    "read_file f8.swift",
+    "read_file f9.swift",
+    "read_file f10.swift",
+    "read_file f11.swift",
+    "read_file f12.swift",
+    "read_file f13.swift",
+    "read_file f14.swift",
+    "read_file f15.swift",
+    "read_file f16.swift",
+    "read_file f17.swift",
+    "read_file f18.swift",
+    "read_file f19.swift",
+    "read_file f20.swift",
+    "read_file f21.swift",
+    "read_file f22.swift",
+    "read_file f23.swift",
+    "read_file f24.swift",
+    "read_file f25.swift",
+    "read_file f26.swift",
+    "read_file f27.swift",
+    "read_file f28.swift",
+    "read_file f29.swift",
+    "read_file f30.swift",
+    "read_file f31.swift",
+    "read_file f32.swift",
+    "read_file f33.swift",
+    "read_file f34.swift",
+    "read_file f35.swift",
+    "read_file f36.swift",
+    "read_file f37.swift",
+    "read_file f38.swift",
+    "read_file f39.swift",
+    "read_file f40.swift",
+    "read_file f41.swift"
+   ],
+   "hitTurnLimit": false,
+   "expect": "Done.\n\nClaude Code's tool calls: read_file f0.swift; read_file f1.swift; read_file f2.swift; read_file f3.swift; read_file f4.swift; read_file f5.swift; read_file f6.swift; read_file f7.swift; read_file f8.swift; read_file f9.swift; read_file f10.swift; read_file f11.swift; read_file f12.swift; read_file f13.swift; read_file f14.swift; read_file f15.swift; read_file f16.swift; read_file f17.swift; read_file f18.swift; read_file f19.swift; read_file f20.swift; read_file f21.swift; read_file f22.swift; read_file f23.swift; read_file f24.swift; read_file f25.swift; read_file f26.swift; read_file f27.swift; read_file f28.swift; read_file f29.swift; read_file f30.swift; read_file f31.swift; read_file f32.swift; read_file f33.swift; read_file f34.swift; read_file f35.swift; read_file f36.swift; read_file f37.swift; read_file f38.swift; read_file f39.swift; … and 2 more."
+  }
+ ]
+}

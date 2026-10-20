@@ -446,8 +446,12 @@ public sealed class QueuePanel : UserControl
                 var lines = new StackPanel();
                 lines.Children.Add(text);
                 foreach (var agent in chat.Agents.Where(a => a.IsRunning && a.Assignment == step.Content))
-                    lines.Children.Add(Ui.Text($"↳ {agent.Description} · {agent.PlacementLabel ?? "waiting for a model server"}", 10.5,
-                        brushKey: "AccentTextFillColorPrimaryBrush", wrap: false));
+                {
+                    var chip = Ui.Text($"↳ {agent.Description} · {agent.PlacementLabel ?? "waiting for a model server"}", 10.5,
+                        brushKey: "AccentTextFillColorPrimaryBrush", wrap: false);
+                    chip.ToolTip = AgentHelp(agent);
+                    lines.Children.Add(chip);
+                }
                 row.Children.Add(lines);
                 steps.Children.Add(row);
             }
@@ -458,6 +462,7 @@ public sealed class QueuePanel : UserControl
         {
             var line = Ui.Text($"↳ {agent.Description} ({agent.AgentType}) · {agent.PlacementLabel ?? "waiting for a model server"}", 10.5,
                 brushKey: "AccentTextFillColorPrimaryBrush", wrap: false);
+            line.ToolTip = AgentHelp(agent);
             line.Margin = new Thickness(22, 2, 0, 0);
             panel.Children.Add(line);
         }
@@ -975,6 +980,12 @@ public sealed class QueuePanel : UserControl
         button.Margin = new Thickness(0, 0, 6, 0);
         return button;
     }
+
+    /// <summary>A working subagent's tooltip: what it is doing, where it runs, and why there ("picked by the primary", "least busy",
+    /// "fallback — …").</summary>
+    private static string AgentHelp(AgentRunInfo agent) =>
+        $"{agent.Description} ({agent.AgentType}) — {agent.Activity}" + (agent.PlacementLabel is { } where ? "\nRuns on " + where : "")
+        + (agent.PlacementReasonLabel is { } why ? " · " + why : "") + (agent.Placement is { } note ? "\n" + note : "");
 
     private static void AutomationName(DependencyObject element, string name) =>
         System.Windows.Automation.AutomationProperties.SetName(element, name);

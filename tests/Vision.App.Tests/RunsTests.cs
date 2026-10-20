@@ -471,7 +471,7 @@ public sealed class RunsTests : IDisposable
             var run = Assert.Single(chat.Agents);
             Assert.Equal(("Kimi Code", "kimi-for-coding", "kimi-for-coding on Kimi Code"), (run.Route, run.Model, run.PlacementLabel));
             Assert.Null(run.Placement);
-            Assert.Contains(run.Log, l => l.Text == "Running on kimi-for-coding · Kimi Code");
+            Assert.Contains(run.Log, l => l.Text == "Running on kimi-for-coding · Kimi Code — least busy");
         }
         finally
         {

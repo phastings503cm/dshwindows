@@ -78,9 +78,21 @@ public static class Menus
         var config = model.Config;
         var chosen = session is null ? config.ActiveRoute : model.Host.ChatRouteId(session);
         if (session is not null) menu.Items.Add(Header("This chat's model"));
+        // Guardian's models ticked for subagents (no saved route) are listed with the other subagent servers.
+        var guardianSubagents = model.Guardian.MenuModels
+            .Where(m => config.GuardianSubagents.ContainsKey(m.Id) && config.Providers.All(p => p.RouteId != GuardianRoutes.LiveRouteId(m.Id))).ToList();
+        var subagentsShown = guardianSubagents.Count == 0;
+        void ShowGuardianSubagents(bool header)
+        {
+            if (subagentsShown) return;
+            subagentsShown = true;
+            if (header) menu.Items.Add(Header(RouteRole.Subagent.Title()));
+            foreach (var guardianModel in guardianSubagents) menu.Items.Add(GuardianItem(model, session, chosen, guardianModel));
+        }
         foreach (var (role, routes) in RouteRoster.Groups(config.Providers, config.ActiveRoute))
         {
-            menu.Items.Add(Header(role == RouteRole.Primary && session is not null ? "Primary (new projects start with it)" : role.Title()));
+            if (role > RouteRole.Subagent) ShowGuardianSubagents(header: true);
+            menu.Items.Add(Header(role == RouteRole.Primary && session is not null ? "Primary (new chats start with it)" : role.Title()));
             foreach (var provider in routes)
             {
                 var route = provider.RouteId;
@@ -107,18 +119,20 @@ public static class Menus
                 if (route == chosen) item.FontWeight = FontWeights.SemiBold;
                 menu.Items.Add(item);
             }
+            if (role == RouteRole.Subagent) ShowGuardianSubagents(header: false);
         }
-        AddGuardianModels(menu, model, session, chosen);
+        ShowGuardianSubagents(header: true);
+        AddGuardianModels(menu, model, session, chosen, guardianSubagents);
         if (session is not null && chosen is not null && chosen != config.ActiveRoute
             && config.Providers.FirstOrDefault(p => p.RouteId == chosen) is { } chatRoute)
         {
             menu.Items.Add(new Separator());
-            var primary = Item("Make this the primary (for new projects and the fleet)", () =>
+            var primary = Item("Make this the primary (for new chats)", () =>
             {
                 config.MakePrimary(chatRoute.RouteId);
                 model.Host.ResetRouteCache();
             }, Icons.Chat);
-            primary.ToolTip = "The primary is what new projects start with, and the main server subagents fall back to. Other chats keep their own models.";
+            primary.ToolTip = "The primary is what new chats and projects start with. Each chat's own model leads its subagents; other chats keep their own models.";
             menu.Items.Add(primary);
         }
         menu.Items.Add(new Separator());
@@ -132,7 +146,7 @@ public static class Menus
     /// <summary>The "Guardian" section: the signed-in account's models (those not already saved as routes above), each a click
     /// away for this chat — or, without a chat, made the primary. Signed out, a chat on a Guardian model says so and offers the
     /// sign-in.</summary>
-    private static void AddGuardianModels(ContextMenu menu, AppModel model, SessionVM? session, string? chosen)
+    private static void AddGuardianModels(ContextMenu menu, AppModel model, SessionVM? session, string? chosen, IReadOnlyList<GuardianModel> listedAbove)
     {
         var guardian = model.Guardian;
         var config = model.Config;
@@ -148,39 +162,46 @@ public static class Menus
             menu.Items.Add(waiting);
             return;
         }
-        var models = guardian.MenuModels.Where(m => config.Providers.All(p => p.RouteId != GuardianRoutes.LiveRouteId(m.Id))).ToList();
-        if (models.Count == 0) return;
-        menu.Items.Add(Header("Guardian"));
-        foreach (var guardianModel in models)
+        var all = guardian.MenuModels.Where(m => config.Providers.All(p => p.RouteId != GuardianRoutes.LiveRouteId(m.Id))).ToList();
+        var models = all.Where(m => !listedAbove.Contains(m)).ToList();
+        if (models.Count > 0)
         {
-            var routeId = GuardianRoutes.LiveRouteId(guardianModel.Id);
-            // Guardian's label with the id when they differ, as on the Mac: "Claude Opus 5.5 (claude-opus-5-5)".
-            var title = GuardianRoutes.MenuTitle(guardianModel);
-            var picked = guardianModel;
-            var item = Item(title, () =>
-            {
-                if (session is not null)
-                {
-                    model.Host.SetChatRoute(session, routeId);
-                    return;
-                }
-                guardian.UseModel(picked, RouteUse.Primary);
-            }, Icons.Shield, isChecked: routeId == chosen);
-            item.ToolTip = $"{guardianModel.Id} through your Guardian account" +
-                           (guardianModel.ContextWindow is > 0 and var window ? $" ({ShortTokens(window)} context{(guardianModel.InteractiveOnly == true ? ", interactive use only" : "")}). " : ". ") +
-                           (session is not null
-                               ? routeId == chosen ? "This chat's model. " : "Use this model in this chat (other chats keep theirs; new chats in this project start with it). "
-                               : "Make this the primary model. ") +
-                           "Not private — sensitive details are masked before anything is sent.";
-            if (routeId == chosen) item.FontWeight = FontWeights.SemiBold;
-            menu.Items.Add(item);
+            menu.Items.Add(Header("Guardian"));
+            foreach (var guardianModel in models) menu.Items.Add(GuardianItem(model, session, chosen, guardianModel));
         }
-        if (session is not null && models.FirstOrDefault(m => GuardianRoutes.LiveRouteId(m.Id) == chosen) is { } current)
+        if (session is not null && all.FirstOrDefault(m => GuardianRoutes.LiveRouteId(m.Id) == chosen) is { } current)
         {
-            var primary = Item("Make this the primary (for new projects and the fleet)", () => guardian.UseModel(current, RouteUse.Primary), Icons.Chat);
+            var primary = Item("Make this the primary (for new chats)", () => guardian.UseModel(current, RouteUse.Primary), Icons.Chat);
             primary.ToolTip = "Saves this Guardian model as a route in Settings › AI Models and makes it the primary. Other chats keep their own models.";
             menu.Items.Add(primary);
         }
+    }
+
+    /// <summary>One of Guardian's models (no saved route): a click away for this chat — or, without a chat, made the primary.</summary>
+    private static MenuItem GuardianItem(AppModel model, SessionVM? session, string? chosen, GuardianModel guardianModel)
+    {
+        var guardian = model.Guardian;
+        var routeId = GuardianRoutes.LiveRouteId(guardianModel.Id);
+        // Guardian's label with the id when they differ, as on the Mac: "Claude Opus 5.5 (claude-opus-5-5)".
+        var title = GuardianRoutes.MenuTitle(guardianModel);
+        var item = Item(title, () =>
+        {
+            if (session is not null)
+            {
+                model.Host.SetChatRoute(session, routeId);
+                return;
+            }
+            guardian.UseModel(guardianModel, RouteUse.Primary);
+        }, Icons.Shield, isChecked: routeId == chosen);
+        item.ToolTip = $"{guardianModel.Id} through your Guardian account" +
+                       (guardianModel.ContextWindow is > 0 and var window ? $" ({ShortTokens(window)} context{(guardianModel.InteractiveOnly == true ? ", interactive use only" : "")}). " : ". ") +
+                       (session is not null
+                           ? routeId == chosen ? "This chat's model. " : "Use this model in this chat (other chats keep theirs; new chats in this project start with it). "
+                           : "Make this the primary model. ") +
+                       (model.Config.GuardianSubagents.ContainsKey(guardianModel.Id) ? "Chats on other models hand it side tasks too. " : "") +
+                       "Not private — sensitive details are masked before anything is sent.";
+        if (routeId == chosen) item.FontWeight = FontWeights.SemiBold;
+        return item;
     }
 
     /// <summary>Per-chat thinking level: only the levels the chat's model takes (GLM-5.3: Low, High, Max; Kimi K2.6: Off, On;

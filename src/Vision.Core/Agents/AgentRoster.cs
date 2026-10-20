@@ -21,8 +21,13 @@ public sealed record AgentRunInfo(string Id, string Description, string AgentTyp
     /// configured?" has an answer.</summary>
     public string? Route { get; init; }
     public string? Model { get; init; }
-    /// <summary>Why it runs where it does when that isn't where it was asked to ("its agent file asks for “spark-2”, …").</summary>
+    /// <summary>Why it runs where it does when that isn't where it was asked to ("spark-2 stayed busy for 2 minutes").</summary>
     public string? Placement { get; init; }
+    /// <summary>How its server was chosen: a <see cref="PlacementReason"/> code ("picked", "agent-file", "least-busy",
+    /// "fallback"); null when there was no choice.</summary>
+    public string? PlacementReason { get; init; }
+    /// <summary>"picked by the primary", "least busy" … (null when there was no choice).</summary>
+    public string? PlacementReasonLabel => SubagentPlacement.LabelOf(PlacementReason);
     /// <summary>The plan step it is working (see <see cref="PlanAssignment"/>).</summary>
     public string? Assignment { get; init; }
     /// <summary>The plan step the agent tool's <c>step</c> argument named (a number or the step's text), as given.</summary>
@@ -119,15 +124,25 @@ public sealed class AgentRoster
 
     public void SetServer(string id, string label) => Update(id, r => r with { Server = label });
 
-    /// <summary>Where it runs now: the route, the model, and — when that isn't where it was asked to run — why.</summary>
-    public void SetPlacement(string id, string route, string model, string? note = null)
+    /// <summary>Where it runs now: the route, the model, how it was chosen (a <see cref="Core.PlacementReason"/> code) and — when
+    /// that isn't where it was asked to run — why.</summary>
+    public void SetPlacement(string id, string route, string model, string? reason = null, string? note = null)
     {
         var at = _clock.GetUtcNow();
         Update(id, r =>
         {
             var moved = r.Route is not null && r.Route != route;
-            var line = (moved ? "Moved to " : "Running on ") + $"{model} · {route}" + (note is null ? "" : " — " + note);
-            return r with { Route = route, Model = model, Placement = note ?? r.Placement, Log = Appending(r.Log, new AgentRunLine(at, line)) };
+            var line = (moved ? "Moved to " : "Running on ") + $"{model} · {route}"
+                       + (SubagentPlacement.LabelOf(reason) is { } label ? " — " + label : "")
+                       + (note is null ? "" : " — " + note);
+            return r with
+            {
+                Route = route,
+                Model = model,
+                PlacementReason = reason ?? r.PlacementReason,
+                Placement = reason is not null ? note : note ?? r.Placement,
+                Log = Appending(r.Log, new AgentRunLine(at, line)),
+            };
         });
     }
 

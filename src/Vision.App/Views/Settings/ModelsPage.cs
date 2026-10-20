@@ -37,6 +37,8 @@ public sealed class ModelsPage : UserControl
 {
     private readonly AppModel _model;
     private readonly StackPanel _list = new();
+    /// <summary>Guardian's models that have no saved route, while signed in: primary, subagent server, how many at a time.</summary>
+    private readonly StackPanel _guardianRows = new();
     private readonly StackPanel _fleet = new();
     private readonly TextBlock _status = Ui.Secondary("");
     private readonly StackPanel _privacy = new();
@@ -80,8 +82,10 @@ public sealed class ModelsPage : UserControl
         page.Children.Add(_status);
         page.Children.Add(Ui.Section("Your models"));
         page.Children.Add(_list);
-        var roles = Ui.Secondary("Primary answers you. Subagents take side tasks in parallel. Backups take over if the primary stops answering. " +
-                                 "Private models may see sensitive data; the others get it masked.");
+        page.Children.Add(_guardianRows);
+        var roles = Ui.Secondary("Primary is what new chats start with — each chat can pick its own model, which leads that chat. Subagents take its " +
+                                 "side tasks in parallel. Backups take over if a chat's model stops answering. Private models may see sensitive data; " +
+                                 "the others get it masked.");
         roles.Margin = new Thickness(2, 6, 0, 10);
         page.Children.Add(roles);
         page.Children.Add(_fleet);
@@ -91,6 +95,11 @@ public sealed class ModelsPage : UserControl
         Rebuild();
         BuildPrivacy();
         model.Config.Providers.CollectionChanged += (_, _) => Rebuild();
+        // Signed in or out, or a new model list: Guardian's group and the subagent servers change.
+        model.Guardian.PropertyChanged += (_, e) =>
+        {
+            if (e.PropertyName is nameof(GuardianService.Models) or nameof(GuardianService.Client)) Dispatcher.BeginInvoke(Rebuild);
+        };
     }
 
     private void Rebuild()
@@ -99,7 +108,106 @@ public sealed class ModelsPage : UserControl
         var config = _model.Config;
         foreach (var provider in config.Providers.ToList()) _list.Children.Add(RouteRow(provider));
         if (config.Providers.Count == 0) _list.Children.Add(Ui.Card(Ui.Secondary("No models yet. Add one, or run the setup wizard.")));
+        RebuildGuardian();
         RebuildFleet();
+    }
+
+    // MARK: - Use for subagents
+
+    /// <summary>What "Subagent" does for any route.</summary>
+    public const string SubagentHelp =
+        "Use for subagents: chats on other models can hand side tasks to this one. A chat never uses its own model's machine as a subagent server.";
+
+    /// <summary>… for Claude Code.</summary>
+    public const string ClaudeCodeSubagentHelp =
+        "Use for subagents: each task runs as one claude -p job in the chat's folder, on your Claude plan. Never for Sensitive chats.";
+
+    /// <summary>… for a Guardian model.</summary>
+    public const string GuardianSubagentHelp =
+        "Use for subagents: billed to your organisation's Guardian account; needs you signed in to Guardian.";
+
+    private static string SubagentHelpFor(ProviderProfile route) =>
+        ClaudeCodeRoutes.IsClaudeCode(route) ? ClaudeCodeSubagentHelp : GuardianRoutes.IsGuardian(route) ? GuardianSubagentHelp : SubagentHelp;
+
+    /// <summary>The first enlisted route listed before <paramref name="route"/> on the same machine (a Spark serves one model at a
+    /// time, so a chat uses only the first of them), or null.</summary>
+    private string? SameMachineAs(ProviderProfile route)
+    {
+        static string MachineOf(ProviderProfile r) => SubagentPool.Machine(SubagentRouteFacts.From(r, enlisted: true));
+        var machine = MachineOf(route);
+        foreach (var other in _model.Config.Providers)
+        {
+            if (other.RouteId == route.RouteId) return null;
+            if (other.IsEnabled && other.SubagentWorker && MachineOf(other) == machine) return AgentHost.RouteLabel(other);
+        }
+        return null;
+    }
+
+    private static ComboBox ParallelBox(int current, Action<int> chosen)
+    {
+        var parallel = new ComboBox { Width = 54, Margin = new Thickness(0, 0, 4, 4), ToolTip = "How many subagents may work on this server at the same time" };
+        for (var n = 1; n <= 8; n++) parallel.Items.Add(n);
+        parallel.SelectedItem = Math.Clamp(current, 1, 8);
+        parallel.SelectionChanged += (_, _) =>
+        {
+            if (parallel.SelectedItem is int value) chosen(value);
+        };
+        return parallel;
+    }
+
+    /// <summary>Guardian's models without a saved route, while signed in: each can be made the primary (saved as a route) or
+    /// ticked for subagents (the Guardian map — nothing is saved).</summary>
+    private void RebuildGuardian()
+    {
+        _guardianRows.Children.Clear();
+        var guardian = _model.Guardian;
+        var config = _model.Config;
+        if (!guardian.IsSignedIn) return;
+        var models = guardian.MenuModels.Where(m => config.Providers.All(p => p.RouteId != GuardianRoutes.LiveRouteId(m.Id))).ToList();
+        if (models.Count == 0) return;
+        _guardianRows.Children.Add(Ui.Section("Guardian"));
+        foreach (var guardianModel in models) _guardianRows.Children.Add(GuardianRow(guardianModel));
+    }
+
+    private Border GuardianRow(GuardianModel guardianModel)
+    {
+        var guardian = _model.Guardian;
+        var config = _model.Config;
+        var controls = new WrapPanel();
+        var asPrimary = new RadioButton { Content = "Primary", GroupName = "primary-route", IsChecked = false, Margin = new Thickness(0, 0, 16, 4) };
+        asPrimary.ToolTip = "Save it as a route and make it the primary model (new chats start with it).";
+        asPrimary.Checked += (_, _) =>
+        {
+            guardian.UseModel(guardianModel, RouteUse.Primary);
+            Dispatcher.BeginInvoke(Rebuild);
+        };
+        controls.Children.Add(asPrimary);
+        var enlisted = config.GuardianSubagents.TryGetValue(guardianModel.Id, out var parallel);
+        var worker = new CheckBox { Content = "Subagent", IsChecked = enlisted, Margin = new Thickness(0, 0, 6, 4), ToolTip = GuardianSubagentHelp };
+        worker.Click += (_, _) =>
+        {
+            guardian.SetSubagent(guardianModel.Id, worker.IsChecked == true);
+            Rebuild();
+        };
+        controls.Children.Add(worker);
+        if (enlisted)
+        {
+            controls.Children.Add(ParallelBox(parallel > 0 ? parallel : 2, chosen => config.SetGuardianSubagent(guardianModel.Id, true, chosen)));
+            controls.Children.Add(WithMargin(Ui.Secondary("at a time", 12), new Thickness(0, 4, 12, 4)));
+        }
+        else
+        {
+            controls.Children.Add(WithMargin(new Border(), new Thickness(0, 0, 10, 0)));
+        }
+        controls.Children.Add(new CheckBox
+        {
+            Content = "Backup", IsEnabled = false, Margin = new Thickness(0, 0, 16, 4),
+            ToolTip = "Make it the primary once (it is saved as a route) to use it as a backup too.",
+        });
+        var detail = $"{guardianModel.Id} · through your Guardian account · private (your organisation's own server)"
+                     + (guardianModel.ContextWindow is { } window ? $" · {window:N0} ctx" : "")
+                     + (guardianModel.InteractiveOnly == true ? " · interactive use only" : "");
+        return Ui.Row(GuardianRoutes.MenuTitle(guardianModel), detail, null, Icons.Shield, below: controls);
     }
 
     /// <summary>One model: its switch, what and where it is, its role, its privacy, how it did when last tested.</summary>
@@ -179,13 +287,15 @@ public sealed class ModelsPage : UserControl
             Dispatcher.BeginInvoke(Rebuild);
         };
         controls.Children.Add(asPrimary);
+        // Every route can serve other chats' subagents — the primary and Claude Code too (a chat never uses its own machine).
+        var claudeCode = ClaudeCodeRoutes.IsClaudeCode(provider);
         var worker = new CheckBox
         {
             Content = "Subagent",
-            IsChecked = provider.SubagentWorker && !primary,
-            IsEnabled = enabled && !primary,
+            IsChecked = provider.SubagentWorker,
+            IsEnabled = enabled,
             Margin = new Thickness(0, 0, 6, 4),
-            ToolTip = "Use this server for subagents: side tasks the main model hands out run here, in parallel with the main model.",
+            ToolTip = SubagentHelpFor(provider),
         };
         worker.Click += (_, _) =>
         {
@@ -193,26 +303,21 @@ public sealed class ModelsPage : UserControl
             Changed();
         };
         controls.Children.Add(worker);
-        if (provider.SubagentWorker && !primary && enabled)
+        if (provider.SubagentWorker && enabled)
         {
-            var parallel = new ComboBox { Width = 54, Margin = new Thickness(0, 0, 4, 4), ToolTip = "How many subagents may work on this server at the same time" };
-            for (var n = 1; n <= 8; n++) parallel.Items.Add(n);
-            parallel.SelectedItem = Math.Clamp(provider.SubagentParallel ?? 2, 1, 8);
-            parallel.SelectionChanged += (_, _) =>
+            controls.Children.Add(ParallelBox(provider.SubagentParallel ?? 2, chosen =>
             {
-                if (parallel.SelectedItem is not int chosen) return;
                 provider.SubagentParallel = chosen;
                 config.Persist();
                 _model.Host.RefreshFleet();
-            };
-            controls.Children.Add(parallel);
+            }));
             controls.Children.Add(WithMargin(Ui.Secondary("at a time", 12), new Thickness(0, 4, 12, 4)));
-            // A second model on the main model's own machine (a Spark serves one at a time) adds no worker: say so.
-            if (_model.Host.WorkerRoutes.All(w => w.RouteId != provider.RouteId))
+            // A second route on a machine already enlisted (a Spark serves one model at a time): a chat uses only the first.
+            if (SameMachineAs(provider) is { } first)
             {
-                var same = Ui.Secondary("(the same server as the main model, so not used)", 12);
+                var same = Ui.Secondary($"· the same machine as {first}: a chat uses only the first of them", 12);
                 same.Margin = new Thickness(0, 4, 12, 4);
-                same.ToolTip = "A server that is already the main model's runs one model at a time; a second route on it would only queue behind it.";
+                same.ToolTip = "A server you run yourself serves one model at a time; a second route on it would only queue behind the first.";
                 controls.Children.Add(same);
             }
         }
@@ -223,10 +328,12 @@ public sealed class ModelsPage : UserControl
         var backup = new CheckBox
         {
             Content = "Backup",
-            IsChecked = provider.IsBackup && !primary,
-            IsEnabled = enabled && !primary,
+            IsChecked = provider.IsBackup && !primary && !claudeCode,
+            IsEnabled = enabled && !primary && !claudeCode,
             Margin = new Thickness(0, 0, 16, 4),
-            ToolTip = "Use if the primary fails: a turn the primary can't answer runs here instead (the chat says so).",
+            ToolTip = claudeCode
+                ? "Claude Code runs a turn with its own agent and tools, so it can't stand in for another model mid-turn."
+                : "Use if the primary fails: a turn the primary can't answer runs here instead (the chat says so).",
         };
         backup.Click += (_, _) =>
         {
@@ -295,32 +402,53 @@ public sealed class ModelsPage : UserControl
         return element;
     }
 
-    /// <summary>How the main model and the subagent servers are arranged.</summary>
+    /// <summary>How the subagent servers are arranged: each chat's own model leads, and these take its side tasks.</summary>
     private void RebuildFleet()
     {
         _fleet.Children.Clear();
         var config = _model.Config;
-        var workers = _model.Host.WorkerRoutes;
-        var main = config.Providers.FirstOrDefault(p => p.RouteId == config.ActiveRoute);
-        if (main is null || config.Providers.Count < 2) return;
+        if (config.Providers.Count == 0) return;
+        var enlisted = _model.Host.EnlistedRoutes;
         var text = new StackPanel();
-        if (workers.Count == 0)
+        if (enlisted.Count == 0)
         {
-            text.Children.Add(Ui.Text("Several servers? Put them all to work", 13, FontWeights.SemiBold));
-            var tip = Ui.Secondary($"{main.Name} is the primary. Tick “Subagent” on another server — a second DGX Spark, say — and the primary hands side tasks to it, so they run in parallel instead of queueing.");
+            text.Children.Add(Ui.Text("Several models? Put them all to work", 13, FontWeights.SemiBold));
+            var tip = Ui.Secondary("Each chat's own model leads. Tick “Subagent” on other models — a second DGX Spark, Amazon Bedrock, Guardian, Claude Code — " +
+                                   "and a chat's model can hand side tasks to them, choosing one by name or letting Vision pick the least busy.");
             tip.Margin = new Thickness(0, 3, 0, 0);
             text.Children.Add(tip);
         }
         else
         {
-            text.Children.Add(Ui.Text($"{main.Name} is the primary · subagents run on {string.Join(", ", workers.Select(w => AgentHost.RouteLabel(w) + $" ({w.SubagentParallel ?? 2} at a time{(w.IsPrivateRoute ? "" : ", not private")})"))}", 13, FontWeights.SemiBold));
-            var also = Ui.Check("When those are all busy, let subagents use the primary too", config.SubagentsUsePrimary, on =>
+            text.Children.Add(Ui.Text("Each chat's own model leads · subagents can run on:", 13, FontWeights.SemiBold));
+            var chips = new WrapPanel { Margin = new Thickness(0, 6, 0, 0) };
+            foreach (var route in enlisted)
+            {
+                var facts = SubagentRouteFacts.From(route, enlisted: true);
+                var entry = SubagentPool.EntryFor(facts, AgentHost.RouteLabel(route), primary: false);
+                var words = $"{AgentHost.RouteLabel(route)} · {entry.Parallel} at a time · {(entry.IsPrivate ? "private" : "not private")} · {entry.Tier.Word()}";
+                var chip = new Border
+                {
+                    Child = Ui.Text(words, 12, wrap: false),
+                    Padding = new Thickness(8, 3, 8, 3),
+                    Margin = new Thickness(0, 0, 6, 6),
+                    CornerRadius = new CornerRadius(10),
+                    ToolTip = SubagentHelpFor(route),
+                };
+                chip.SetResourceReference(Border.BackgroundProperty, "SubtleFillColorSecondaryBrush");
+                chips.Children.Add(chip);
+            }
+            text.Children.Add(chips);
+            var also = Ui.Check("When those are all busy, let subagents use the chat's own model too", config.SubagentsUsePrimary, on =>
             {
                 config.SubagentsUsePrimary = on;
                 _model.Host.RefreshFleet();
             });
-            also.Margin = new Thickness(0, 6, 0, 0);
+            also.Margin = new Thickness(0, 4, 0, 0);
             text.Children.Add(also);
+            var claude = Ui.Secondary("A chat on Claude Code uses Claude Code's own subagents.");
+            claude.Margin = new Thickness(0, 6, 0, 0);
+            text.Children.Add(claude);
         }
         var card = Ui.Card(text);
         card.Margin = new Thickness(0, 0, 0, 10);

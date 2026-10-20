@@ -39,9 +39,14 @@ public sealed record ToolContext
     /// <summary>The model servers subagents run on (workers first, the primary as overflow). Null = a
     /// subagent uses this run's own client.</summary>
     public AgentFleet? Fleet { get; init; }
-    /// <summary>This chat's own server, which stands in for the fleet's primary (see <see cref="AgentFleet.AcquireAsync"/>).
+    /// <summary>This chat's own server, which stands in for the fleet's primary (see <see cref="AgentFleet.AcquireAsync(FleetRequest, CancellationToken)"/>).
     /// Null = the configured primary.</summary>
     public FleetServer? FleetHome { get; init; }
+    /// <summary>This chat's subagent servers — the routes its model may hand side tasks to, and itself as "primary" (see
+    /// <see cref="SubagentPool"/>). Null = every server the fleet has.</summary>
+    public SubagentPool? FleetPool { get; init; }
+    /// <summary>The chat is Sensitive: a subagent server that only sees it masked gets no pictures.</summary>
+    public bool SensitiveChat { get; init; }
     /// <summary>The run is unattended (a chat's task list, a /goal carrying on by itself): its subagents never go to a server
     /// whose plan allows only interactive use.</summary>
     public bool Unattended { get; init; }
@@ -131,10 +136,10 @@ public sealed class ToolRegistry
     public static IReadOnlyList<IToolExecutor> BackgroundAgentTools() => [new AgentStatusTool(), new AgentStopTool()];
 
     /// <summary>The built-in tool set. The agent tool is only offered at the top level: subagents
-    /// don't spawn subagents (keeps the permission surface and cost predictable). <paramref name="servers"/>
-    /// are the subagent servers the agent tools describe, with their privacy.</summary>
+    /// don't spawn subagents (keeps the permission surface and cost predictable). <paramref name="pool"/>
+    /// is the chat's subagent servers, which the agent tool lists.</summary>
     public static ToolRegistry Standard(int depth = 0, AgentShell? shell = null, AgentCatalog? agents = null,
-                                        IReadOnlyList<SubagentServer>? servers = null)
+                                        SubagentPool? pool = null)
     {
         var tools = new List<IToolExecutor>
         {
@@ -144,8 +149,8 @@ public sealed class ToolRegistry
         };
         if (depth == 0)
         {
-            tools.Add(new AgentTool(agents, servers));
-            tools.Add(new DelegateTool(agents, servers));
+            tools.Add(new AgentTool(agents, pool));
+            tools.Add(new DelegateTool(agents));
         }
         return new ToolRegistry(tools);
     }

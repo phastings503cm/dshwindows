@@ -6,8 +6,8 @@ namespace Vision.App.Model;
 // MARK: - Which model a chat talks to, and what it may see
 //
 // The roster around the primary model: backups that take a turn over when the primary stops answering, the
-// sensitive-data shield on every route that isn't private (its report shows as a chip on the reply), what the main
-// agent is told about the subagent servers and their privacy, and the plans whose terms allow only interactive use.
+// sensitive-data shield on every route that isn't private (its report shows as a chip on the reply), the chat's pool of
+// subagent servers (what its agent tool lists), and the plans whose terms allow only interactive use.
 
 public sealed partial class AgentHost
 {
@@ -93,17 +93,13 @@ public sealed partial class AgentHost
     }
 
     /// <summary>Changes when what a chat's engine is built with around the model does (the shield's settings, the backups,
-    /// the subagent servers and their privacy), so the engine is rebuilt exactly then.</summary>
-    private string RoutingStamp(ProviderProfile chatRoute)
+    /// the chat's subagent pool — never how busy its servers are), so the engine, and the prompt cache with it, is rebuilt
+    /// exactly then.</summary>
+    private string RoutingStamp(ProviderProfile chatRoute, SubagentPool pool)
     {
         var backups = string.Join(",", RouteRoster.Backups(Config.Providers, chatRoute.RouteId).Select(b => b.RouteId + (b.IsPrivateRoute ? "+p" : "")));
-        var servers = string.Join(",", SubagentServersNow().Select(s => s.Label + (s.IsPrivate ? "+p" : "")));
-        return $"{Config.Privacy}|{chatRoute.IsPrivateRoute}|{chatRoute.IsInteractiveOnly}|{backups}|{servers}";
+        return $"{Config.Privacy}|{chatRoute.IsPrivateRoute}|{chatRoute.IsInteractiveOnly}|{backups}|{pool.Signature}";
     }
-
-    /// <summary>The subagent servers (workers) as the model is told about them, with their privacy.</summary>
-    private IReadOnlyList<SubagentServer> SubagentServersNow() =>
-        WorkerRoutes.Select(r => new SubagentServer(RouteLabel(r), r.IsPrivateRoute)).ToList();
 
     // MARK: Interactive-only plans
 

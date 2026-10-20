@@ -341,7 +341,8 @@ public sealed class PlanPanel : UserControl
             {
                 var who = Ui.Text($"↳ {agent.Description} · {agent.PlacementLabel ?? "waiting for a model server"}", 11, brushKey: "AccentTextFillColorPrimaryBrush", wrap: false);
                 who.TextTrimming = TextTrimming.CharacterEllipsis;
-                who.ToolTip = $"{agent.Description} ({agent.AgentType}) — {agent.Activity}" + (agent.Placement is { } note ? "\n" + note : "");
+                who.ToolTip = $"{agent.Description} ({agent.AgentType}) — {agent.Activity}" + (agent.PlacementReasonLabel is { } why ? " · " + why : "")
+                              + (agent.Placement is { } note ? "\n" + note : "");
                 lines.Children.Add(who);
             }
             dock.Children.Add(lines);
@@ -403,16 +404,16 @@ public sealed class PlanPanel : UserControl
         return dock;
     }
 
-    /// <summary>With more than one model server: how busy each is.</summary>
+    /// <summary>With subagent servers enlisted: how busy each is (and each chat's own model while subagents run on it).</summary>
     private UIElement? FleetLine()
     {
         var servers = Host.Fleet.Snapshot();
-        if (servers.Count < 2) return null;
+        if (!servers.Any(s => !s.IsHome)) return null;
         var parts = servers.Select(s => $"{(s.Healthy ? "●" : "○")} {s.Label} {s.InFlight}/{s.MaxParallel}");
         var line = Ui.Text(string.Join("   ", parts), 11, brushKey: "TextFillColorTertiaryBrush");
         line.Margin = new Thickness(2, 0, 0, 6);
         line.ToolTip = string.Join("\n", servers.Select(s =>
-            $"{(s.IsPrimary ? "Main" : "Worker")} · {s.Label}: {s.InFlight} of {s.MaxParallel} busy, {s.Completed} done" +
+            $"{(s.IsHome ? "A chat's own model" : "Subagents")} · {s.Label}: {s.InFlight} of {s.MaxParallel} busy, {s.Completed} done" +
             (s.Failed > 0 ? $", {s.Failed} failed" : "") + (s.Healthy ? "" : " — not answering")));
         return line;
     }
@@ -452,6 +453,8 @@ public sealed class PlanPanel : UserControl
         var where = string.Join(" · ", new[] { run.AgentType, run.PlacementLabel ?? run.Server, run.Background ? "background" : null,
             run.TotalTokens > 0 ? $"{run.TotalTokens:N0} tokens" : null }.Where(t => !string.IsNullOrEmpty(t)));
         var sub = Ui.Text(where, 11, brushKey: "TextFillColorTertiaryBrush", wrap: false);
+        // Where it went and why: picked by the primary, least busy, set by its agent type, or a fallback.
+        if (run.PlacementReasonLabel is { } reason) sub.ToolTip = where + " · " + reason;
         sub.Margin = new Thickness(23, 1, 0, 0);
         panel.Children.Add(sub);
         if (run.Assignment is { } step)

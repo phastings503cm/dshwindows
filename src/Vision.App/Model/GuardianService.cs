@@ -71,6 +71,8 @@ public sealed partial class GuardianService : ObservableObject
         {
             host.GuardianAccount = AccountEndpoint;
             host.GuardianSignInRequired += OnSignInRequired;
+            // Guardian's models can be subagent servers too (ticked in Settings › AI Models or here).
+            host.GuardianModelIds = () => MenuModels.Select(m => m.Id).ToList();
         }
         // Signed in, the account's models can be picked in any chat without being saved as routes.
         if (config is not null) config.LiveRoute = LiveRoute;
@@ -86,8 +88,38 @@ public sealed partial class GuardianService : ObservableObject
     /// sign-in or another org applies at once. Null when signed out or not a model the account offers.</summary>
     public ProviderProfile? LiveRoute(string routeId) =>
         Client is { Session: { } session } client
-            ? GuardianRoutes.LiveRoute(routeId, client.Address, Models, client.OrgId, session.Token, known: _modelsKnown)
+            ? GuardianRoutes.LiveRoute(routeId, client.Address, Models, client.OrgId, session.Token, known: _modelsKnown, subagents: _config?.GuardianSubagents)
             : null;
+
+    // Signing in or out and a new model list change which Guardian models can take subagents' tasks.
+    partial void OnModelsChanged(IReadOnlyList<GuardianModel> value) => _host?.RefreshFleet();
+
+    partial void OnClientChanged(GuardianClient? value) => _host?.RefreshFleet();
+
+    /// <summary>Whether Guardian's model <paramref name="modelId"/> takes subagents' side tasks: a saved route for it keeps its own
+    /// "Subagent" tick (which wins), else the Guardian map says.</summary>
+    public bool IsSubagent(string modelId) =>
+        _config.Providers.FirstOrDefault(p => p.RouteId == GuardianRoutes.LiveRouteId(modelId)) is { } saved
+            ? saved.SubagentWorker
+            : _config.GuardianSubagents.ContainsKey(modelId);
+
+    /// <summary>Let Guardian's model <paramref name="modelId"/> take subagents' side tasks, or stop — on its saved route when it has
+    /// one, else in the Guardian map (nothing is saved as a route). Billed to the organisation's Guardian account.</summary>
+    public void SetSubagent(string modelId, bool on)
+    {
+        if (_config.Providers.FirstOrDefault(p => p.RouteId == GuardianRoutes.LiveRouteId(modelId)) is { } saved)
+        {
+            var changed = saved.DeepCopy();
+            changed.SubagentWorker = on;
+            _config.Store(changed);
+            _config.Persist();
+        }
+        else
+        {
+            _config.SetGuardianSubagent(modelId, on);
+        }
+        _host?.RefreshFleet();
+    }
 
     /// <summary>The account's models the model menu offers (none while signed out).</summary>
     public IReadOnlyList<GuardianModel> MenuModels => IsSignedIn ? Models : [];
@@ -386,6 +418,12 @@ public sealed partial class GuardianService : ObservableObject
     {
         if (Client is not { Session: { } session } client) return null;
         var config = _config;
+        // For subagents a Guardian model needs no route of its own: it is ticked in the Guardian map (a saved one keeps its flag).
+        if (use == RouteUse.Subagent && config.ActiveRoute is not null)
+        {
+            SetSubagent(model.Id, true);
+            return config.UsableRoute(GuardianRoutes.LiveRouteId(model.Id));
+        }
         var route = GuardianRoutes.Route(client.Address, model, client.OrgId);
         if (use == RouteUse.Subagent) route.SubagentWorker = true;
         if (use == RouteUse.Backup) route.Backup = true;

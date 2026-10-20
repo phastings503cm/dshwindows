@@ -390,7 +390,7 @@ public sealed partial class AgentHost : ObservableObject
 
     // MARK: - Engine
 
-    private Engine BuildEngine(SessionVM vm, IProviderClient client, int window, ThinkingLevel? thinking, SkillState skillState)
+    private Engine BuildEngine(SessionVM vm, IProviderClient client, int window, ThinkingLevel? thinking, SkillState skillState, SubagentPool pool)
     {
         var sessionId = vm.Id;
         // A chat without a project is a regular conversation: it works in a scratch folder of its own, made on first use.
@@ -422,11 +422,7 @@ public sealed partial class AgentHost : ObservableObject
         if (VaultPrompt.Section(Vault.All, shell.Kind) is { Length: > 0 } vaultSection) prompt += "\n\n" + vaultSection;
         if (vm.Preset == PermissionPreset.Plan)
             prompt += "\n\n--- Plan mode ---\nDo not modify anything. Research and produce a plan, then call `exit_plan_mode` with it and stop.";
-        // With servers for subagents: which they are, which are private, and what that means for what they may be told.
-        var servers = SubagentServersNow();
-        if (SubagentServers.Section(servers) is { Length: > 0 } serverSection)
-            prompt += "\n\n--- Subagent servers ---\n" + serverSection +
-                      " When a task needs sensitive data, set `sensitive: true` on agent or delegate: it then runs only on a private server.";
+        // The chat's subagent servers are listed once, in the agent tool's description (cached with the tools), not here.
         _systemPrompts[sessionId] = prompt;
 
         // Background processes: the model's own long-running programs (game engines, dev servers,
@@ -435,7 +431,7 @@ public sealed partial class AgentHost : ObservableObject
         // in a chat still asks (the engine's gate). Both count as built-ins, so a plugin can't take
         // over their names.
         var agents = CatalogFor(vm);
-        var builtins = ToolRegistry.Standard(0, shell, agents, servers).Adding(ExtraTools.Processes());
+        var builtins = ToolRegistry.Standard(0, shell, agents, pool).Adding(ExtraTools.Processes());
         if (Config.ComputerToolsEnabled) builtins = builtins.Adding(ExtraTools.Machine(MachineChatFor(vm)));
         // A regular chat has no project, so no project plugins: only the user's own.
         var extra = new List<IToolExecutor>(PluginLoader.Tools(plain ? UserPlugins() : Plugins, builtins.Names));
@@ -492,8 +488,11 @@ public sealed partial class AgentHost : ObservableObject
             VaultGrants = VaultGrantsFor(sessionId),
             BackgroundAgents = BackgroundPool(sessionId),
             Fleet = Fleet,
-            // This chat's subagents fall back to this chat's own model, never to another chat's (the workers are shared).
+            // This chat's subagents fall back to this chat's own model, never to another chat's (the workers are shared), and go
+            // only to the servers in its pool.
             FleetHome = FleetHome(vm, profile),
+            FleetPool = pool,
+            SensitiveChat = vm.Sensitive,
             Unattended = IsUnattended(sessionId),
             Roster = RosterFor(sessionId),
             AgentTypes = agents,
@@ -1101,9 +1100,11 @@ public sealed partial class AgentHost : ObservableObject
         var thinking = vm.Thinking;
         var skillState = BuildSkillState(vm);
         var shell = Config.ResolvedAgentShell;
+        // The chat's subagent servers: its model leads them (the engine is rebuilt when the pool changes — never with load).
+        var subagentPool = SubagentPoolFor(vm, profile, IsUnattended(sessionId));
         var key = new EngineKey(ProfileKey(profile), window, thinking, vm.Preset, skillState.Signature,
                                 Config.ComputerToolsEnabled, VisionOn(profile), shell.Executable, Vault.Revision,
-                                vm.Goal is not null, MemorySignature(vm), AgentsStampFor(vm), RoutingStamp(profile), IsUnattended(sessionId));
+                                vm.Goal is not null, MemorySignature(vm), AgentsStampFor(vm), RoutingStamp(profile, subagentPool), IsUnattended(sessionId));
         if (_engineKeys.TryGetValue(sessionId, out var previous))
         {
             // The chat was moved to another model (its model menu): say which one answers from here on.
@@ -1114,7 +1115,7 @@ public sealed partial class AgentHost : ObservableObject
         }
         if (!_engines.TryGetValue(sessionId, out var engine) || _engineKeys.GetValueOrDefault(sessionId) != key)
         {
-            engine = BuildEngine(vm, MakeChatClient(profile, sessionId), window, thinking, skillState);
+            engine = BuildEngine(vm, MakeChatClient(profile, sessionId), window, thinking, skillState, subagentPool);
             _engineKeys[sessionId] = key;
         }
         _retryRoute.Remove(sessionId);

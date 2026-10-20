@@ -1,0 +1,474 @@
+{
+ "about": "The agent, delegate and agent_status tools. {types} is the platform's agent-type list (catalog.describe()); the agent description is agentDescription, then \"\\n\\n\" + the case's catalogue when it has one. Parameters compare as parsed JSON; descriptions character by character. Descriptions never carry load: loads change only the load lines.",
+ "agentDescription": "Spawn a subagent to work a self-contained task (e.g. 'find every usage of X and report the call sites'). It works autonomously in a bounded loop and returns a final report. Prefer this over doing long exploration yourself when the task is well-scoped. Pick agent_type for a specialist — {types}. Omit it for the general worker. Several agent calls in one turn run at the same time. Set run_in_background to true to launch it in the background and keep working: check on it with agent_status (you're also told automatically when one finishes) and stop one with agent_stop. To fan out many independent tasks in one go, use `delegate`.",
+ "agentParameters": {
+  "type": "object",
+  "properties": {
+   "description": {
+    "type": "string",
+    "description": "What to name this subagent"
+   },
+   "prompt": {
+    "type": "string",
+    "description": "The complete task for the subagent. It cannot ask you questions and cannot see this conversation — everything it needs goes here."
+   },
+   "agent_type": {
+    "type": "string",
+    "description": "The kind of subagent (default: general)"
+   },
+   "server": {
+    "type": "string",
+    "description": "Where this task runs: an id from the subagent servers listed in the agent tool, or \"primary\" for this chat's own model. Leave it out to let Vision pick the least busy. A chosen server that is busy is waited for up to 2 minutes; after that, or if it can't take the task, another server runs it and the report says so."
+   },
+   "run_in_background": {
+    "type": "boolean",
+    "description": "Start it in the background and return at once (default false: wait for its report)"
+   },
+   "step": {
+    "type": "string",
+    "description": "Which step of your plan (todo_write) this subagent works: its number in the plan (1 = the first) or its text. Shown on that step."
+   },
+   "sensitive": {
+    "type": "boolean",
+    "description": "Set true when the task needs sensitive data (personal data, credentials, client details). It then runs only on a private server."
+   }
+  },
+  "required": [
+   "description",
+   "prompt"
+  ]
+ },
+ "delegateDescription": "Run several independent subtasks at the same time, each by its own subagent, and get all their reports back together. Use it to fan work out — investigate three modules, review four files, implement three unrelated changes — instead of doing them one after another. Subtasks cannot talk to each other or see this conversation, so each prompt must be complete; make sure they don't edit the same files. Give each an agent_type: {types}. Without a server, tasks spread across the subagent servers by load; give a task `server` (an id listed in the agent tool) to choose where it runs.",
+ "delegateParameters": {
+  "type": "object",
+  "properties": {
+   "tasks": {
+    "type": "array",
+    "minItems": 1,
+    "maxItems": 12,
+    "items": {
+     "type": "object",
+     "properties": {
+      "description": {
+       "type": "string",
+       "description": "A short name for the subtask"
+      },
+      "prompt": {
+       "type": "string",
+       "description": "The complete task"
+      },
+      "agent_type": {
+       "type": "string",
+       "description": "The kind of subagent (default: general)"
+      },
+      "server": {
+       "type": "string",
+       "description": "Where this task runs: an id from the subagent servers listed in the agent tool, or \"primary\" for this chat's own model. Leave it out to let Vision pick the least busy. A chosen server that is busy is waited for up to 2 minutes; after that, or if it can't take the task, another server runs it and the report says so. (This task only.)"
+      },
+      "step": {
+       "type": "string",
+       "description": "Which step of your plan (todo_write) this subagent works: its number in the plan (1 = the first) or its text. Shown on that step."
+      },
+      "sensitive": {
+       "type": "boolean",
+       "description": "Set true when the task needs sensitive data (personal data, credentials, client details). It then runs only on a private server. (This task only.)"
+      }
+     },
+     "required": [
+      "description",
+      "prompt"
+     ]
+    },
+    "description": "The subtasks to run in parallel"
+   },
+   "max_parallel": {
+    "type": "integer",
+    "description": "At most this many at once (default 6)"
+   },
+   "server": {
+    "type": "string",
+    "description": "Where this task runs: an id from the subagent servers listed in the agent tool, or \"primary\" for this chat's own model. Leave it out to let Vision pick the least busy. A chosen server that is busy is waited for up to 2 minutes; after that, or if it can't take the task, another server runs it and the report says so. (Every task without its own.)"
+   },
+   "sensitive": {
+    "type": "boolean",
+    "description": "Set true when the task needs sensitive data (personal data, credentials, client details). It then runs only on a private server. (Every task.)"
+   }
+  },
+  "required": [
+   "tasks"
+  ]
+ },
+ "agentStatusDescription": "Check on background subagents started with agent(run_in_background: true). Without an id, lists them all and how busy each subagent server is. With an id, returns that agent's full report when it has finished; pass wait_seconds to wait for it (up to 600) instead of polling.",
+ "cases": [
+  {
+   "name": "a mixed pool",
+   "pool": {
+    "overflow": true,
+    "entries": [
+     {
+      "id": "dgx-spark",
+      "routeID": "DGX Spark|qwen3-coder",
+      "label": "DGX Spark",
+      "provider": "OpenAI-compatible server",
+      "model": "qwen3-coder-30b",
+      "context": "256K",
+      "private": true,
+      "tier": "local",
+      "speed": "standard",
+      "images": true,
+      "ownAgent": false,
+      "parallel": 2,
+      "primary": false
+     },
+     {
+      "id": "bedrock",
+      "routeID": "Amazon Bedrock|claude-sonnet-5-5",
+      "label": "Amazon Bedrock",
+      "provider": "Amazon Bedrock",
+      "model": "claude-sonnet-5-5",
+      "context": "1M",
+      "private": true,
+      "tier": "api",
+      "speed": "standard",
+      "images": true,
+      "ownAgent": false,
+      "parallel": 4,
+      "primary": false
+     },
+     {
+      "id": "guardian-claude-haiku-5-5",
+      "routeID": "Guardian|claude-haiku-5-5",
+      "label": "Guardian",
+      "provider": "Guardian",
+      "model": "claude-haiku-5-5",
+      "context": "1M",
+      "private": true,
+      "tier": "org",
+      "speed": "fast",
+      "images": true,
+      "ownAgent": false,
+      "parallel": 2,
+      "primary": false
+     },
+     {
+      "id": "claude-code-sonnet",
+      "routeID": "Claude Code|sonnet",
+      "label": "Claude Code",
+      "provider": "Claude Code",
+      "model": "sonnet",
+      "context": "200K",
+      "private": false,
+      "tier": "subscription",
+      "speed": "standard",
+      "images": false,
+      "ownAgent": true,
+      "parallel": 2,
+      "primary": false
+     },
+     {
+      "id": "primary",
+      "routeID": "Spark A|qwen3.8",
+      "label": "Spark A",
+      "provider": "OpenAI-compatible server",
+      "model": "Qwen3.8",
+      "context": "256K",
+      "private": true,
+      "tier": "local",
+      "speed": "standard",
+      "images": true,
+      "ownAgent": false,
+      "parallel": 4,
+      "primary": true
+     }
+    ]
+   },
+   "catalogue": "Subagent servers — set `server` to one of these ids to choose where a task runs, or leave it out and Vision picks the least busy:\n- dgx-spark: OpenAI-compatible server · qwen3-coder-30b · 256K context · private · local · standard · images · 2 at a time\n- bedrock: Amazon Bedrock · claude-sonnet-5-5 · 1M context · private · api · standard · images · 4 at a time\n- guardian-claude-haiku-5-5: Guardian · claude-haiku-5-5 · 1M context · private · org · fast · images · 2 at a time\n- claude-code-sonnet: Claude Code · sonnet · 200K context · not private · subscription · standard · runs its own agent in this chat's folder · 2 at a time\n- primary: this chat's own model (Qwen3.8 on Spark A) · used when the others are busy\nServers that aren't private must not receive sensitive data. Describe their tasks in general terms — no names, credentials, personal or client details; the app also masks what it detects. A task that needs sensitive data gets sensitive: true, so it runs only on a private server. How busy each server is comes back with every agent and delegate result, and from agent_status.",
+   "loads": [
+    {
+     "loads": {
+      "dgx-spark": {
+       "inFlight": 1
+      },
+      "claude-code-sonnet": {
+       "inFlight": 0,
+       "healthy": false,
+       "retryIn": 45
+      },
+      "primary": {
+       "inFlight": 0
+      }
+     },
+     "expect": "Subagent servers now: dgx-spark 1/2 busy · bedrock 0/4 busy · guardian-claude-haiku-5-5 0/2 busy · claude-code-sonnet 0/2 busy, not answering (back in 45s) · primary 0/4 busy."
+    },
+    {
+     "loads": {
+      "dgx-spark": {
+       "inFlight": 2
+      },
+      "bedrock": {
+       "inFlight": 3
+      },
+      "primary": {
+       "inFlight": 1
+      }
+     },
+     "expect": "Subagent servers now: dgx-spark 2/2 busy · bedrock 3/4 busy · guardian-claude-haiku-5-5 0/2 busy · claude-code-sonnet 0/2 busy · primary 1/4 busy."
+    }
+   ]
+  },
+  {
+   "name": "every server private",
+   "pool": {
+    "overflow": true,
+    "entries": [
+     {
+      "id": "dgx-spark",
+      "routeID": "DGX Spark|qwen3-coder",
+      "label": "DGX Spark",
+      "provider": "OpenAI-compatible server",
+      "model": "qwen3-coder-30b",
+      "context": "256K",
+      "private": true,
+      "tier": "local",
+      "speed": "standard",
+      "images": true,
+      "ownAgent": false,
+      "parallel": 2,
+      "primary": false
+     },
+     {
+      "id": "bedrock",
+      "routeID": "Amazon Bedrock|claude-sonnet-5-5",
+      "label": "Amazon Bedrock",
+      "provider": "Amazon Bedrock",
+      "model": "claude-sonnet-5-5",
+      "context": "1M",
+      "private": true,
+      "tier": "api",
+      "speed": "standard",
+      "images": true,
+      "ownAgent": false,
+      "parallel": 4,
+      "primary": false
+     },
+     {
+      "id": "guardian-claude-haiku-5-5",
+      "routeID": "Guardian|claude-haiku-5-5",
+      "label": "Guardian",
+      "provider": "Guardian",
+      "model": "claude-haiku-5-5",
+      "context": "1M",
+      "private": true,
+      "tier": "org",
+      "speed": "fast",
+      "images": true,
+      "ownAgent": false,
+      "parallel": 2,
+      "primary": false
+     },
+     {
+      "id": "primary",
+      "routeID": "Spark A|qwen3.8",
+      "label": "Spark A",
+      "provider": "OpenAI-compatible server",
+      "model": "Qwen3.8",
+      "context": "256K",
+      "private": true,
+      "tier": "local",
+      "speed": "standard",
+      "images": true,
+      "ownAgent": false,
+      "parallel": 4,
+      "primary": true
+     }
+    ]
+   },
+   "catalogue": "Subagent servers — set `server` to one of these ids to choose where a task runs, or leave it out and Vision picks the least busy:\n- dgx-spark: OpenAI-compatible server · qwen3-coder-30b · 256K context · private · local · standard · images · 2 at a time\n- bedrock: Amazon Bedrock · claude-sonnet-5-5 · 1M context · private · api · standard · images · 4 at a time\n- guardian-claude-haiku-5-5: Guardian · claude-haiku-5-5 · 1M context · private · org · fast · images · 2 at a time\n- primary: this chat's own model (Qwen3.8 on Spark A) · used when the others are busy\nAll of them are private. How busy each server is comes back with every agent and delegate result, and from agent_status.",
+   "loads": [
+    {
+     "loads": {},
+     "expect": "Subagent servers now: dgx-spark 0/2 busy · bedrock 0/4 busy · guardian-claude-haiku-5-5 0/2 busy · primary 0/4 busy."
+    }
+   ]
+  },
+  {
+   "name": "overflow off",
+   "pool": {
+    "overflow": false,
+    "entries": [
+     {
+      "id": "dgx-spark",
+      "routeID": "DGX Spark|qwen3-coder",
+      "label": "DGX Spark",
+      "provider": "OpenAI-compatible server",
+      "model": "qwen3-coder-30b",
+      "context": "256K",
+      "private": true,
+      "tier": "local",
+      "speed": "standard",
+      "images": true,
+      "ownAgent": false,
+      "parallel": 2,
+      "primary": false
+     },
+     {
+      "id": "bedrock",
+      "routeID": "Amazon Bedrock|claude-sonnet-5-5",
+      "label": "Amazon Bedrock",
+      "provider": "Amazon Bedrock",
+      "model": "claude-sonnet-5-5",
+      "context": "1M",
+      "private": true,
+      "tier": "api",
+      "speed": "standard",
+      "images": true,
+      "ownAgent": false,
+      "parallel": 4,
+      "primary": false
+     },
+     {
+      "id": "guardian-claude-haiku-5-5",
+      "routeID": "Guardian|claude-haiku-5-5",
+      "label": "Guardian",
+      "provider": "Guardian",
+      "model": "claude-haiku-5-5",
+      "context": "1M",
+      "private": true,
+      "tier": "org",
+      "speed": "fast",
+      "images": true,
+      "ownAgent": false,
+      "parallel": 2,
+      "primary": false
+     },
+     {
+      "id": "claude-code-sonnet",
+      "routeID": "Claude Code|sonnet",
+      "label": "Claude Code",
+      "provider": "Claude Code",
+      "model": "sonnet",
+      "context": "200K",
+      "private": false,
+      "tier": "subscription",
+      "speed": "standard",
+      "images": false,
+      "ownAgent": true,
+      "parallel": 2,
+      "primary": false
+     },
+     {
+      "id": "primary",
+      "routeID": "Spark A|qwen3.8",
+      "label": "Spark A",
+      "provider": "OpenAI-compatible server",
+      "model": "Qwen3.8",
+      "context": "256K",
+      "private": true,
+      "tier": "local",
+      "speed": "standard",
+      "images": true,
+      "ownAgent": false,
+      "parallel": 4,
+      "primary": true
+     }
+    ]
+   },
+   "catalogue": "Subagent servers — set `server` to one of these ids to choose where a task runs, or leave it out and Vision picks the least busy:\n- dgx-spark: OpenAI-compatible server · qwen3-coder-30b · 256K context · private · local · standard · images · 2 at a time\n- bedrock: Amazon Bedrock · claude-sonnet-5-5 · 1M context · private · api · standard · images · 4 at a time\n- guardian-claude-haiku-5-5: Guardian · claude-haiku-5-5 · 1M context · private · org · fast · images · 2 at a time\n- claude-code-sonnet: Claude Code · sonnet · 200K context · not private · subscription · standard · runs its own agent in this chat's folder · 2 at a time\n- primary: this chat's own model (Qwen3.8 on Spark A) · used only when you choose it\nServers that aren't private must not receive sensitive data. Describe their tasks in general terms — no names, credentials, personal or client details; the app also masks what it detects. A task that needs sensitive data gets sensitive: true, so it runs only on a private server. How busy each server is comes back with every agent and delegate result, and from agent_status.",
+   "loads": [
+    {
+     "loads": {
+      "guardian-claude-haiku-5-5": {
+       "inFlight": 0,
+       "healthy": false,
+       "retryIn": 900
+      }
+     },
+     "expect": "Subagent servers now: dgx-spark 0/2 busy · bedrock 0/4 busy · guardian-claude-haiku-5-5 0/2 busy, not answering (back in 15m) · claude-code-sonnet 0/2 busy · primary 0/4 busy."
+    }
+   ]
+  },
+  {
+   "name": "a server with no known window and no pictures",
+   "pool": {
+    "overflow": true,
+    "entries": [
+     {
+      "id": "kimi-code",
+      "routeID": "Kimi Code|kimi-for-coding",
+      "label": "Kimi Code",
+      "provider": "Kimi",
+      "model": "kimi-for-coding",
+      "context": null,
+      "private": false,
+      "tier": "subscription",
+      "speed": "standard",
+      "images": false,
+      "ownAgent": false,
+      "parallel": 3,
+      "primary": false
+     },
+     {
+      "id": "primary",
+      "routeID": "Spark A|qwen3.8",
+      "label": "Spark A",
+      "provider": "OpenAI-compatible server",
+      "model": "Qwen3.8",
+      "context": "256K",
+      "private": true,
+      "tier": "local",
+      "speed": "standard",
+      "images": true,
+      "ownAgent": false,
+      "parallel": 4,
+      "primary": true
+     }
+    ]
+   },
+   "catalogue": "Subagent servers — set `server` to one of these ids to choose where a task runs, or leave it out and Vision picks the least busy:\n- kimi-code: Kimi · kimi-for-coding · not private · subscription · standard · 3 at a time\n- primary: this chat's own model (Qwen3.8 on Spark A) · used when the others are busy\nServers that aren't private must not receive sensitive data. Describe their tasks in general terms — no names, credentials, personal or client details; the app also masks what it detects. A task that needs sensitive data gets sensitive: true, so it runs only on a private server. How busy each server is comes back with every agent and delegate result, and from agent_status.",
+   "loads": [
+    {
+     "loads": {
+      "kimi-code": {
+       "inFlight": 3
+      }
+     },
+     "expect": "Subagent servers now: kimi-code 3/3 busy · primary 0/4 busy."
+    }
+   ]
+  },
+  {
+   "name": "only the chat's own model: no catalogue, no load line",
+   "pool": {
+    "overflow": true,
+    "entries": [
+     {
+      "id": "primary",
+      "routeID": "Spark A|qwen3.8",
+      "label": "Spark A",
+      "provider": "OpenAI-compatible server",
+      "model": "Qwen3.8",
+      "context": "256K",
+      "private": true,
+      "tier": "local",
+      "speed": "standard",
+      "images": true,
+      "ownAgent": false,
+      "parallel": 4,
+      "primary": true
+     }
+    ]
+   },
+   "catalogue": null,
+   "loads": [
+    {
+     "loads": {
+      "primary": {
+       "inFlight": 2
+      }
+     },
+     "expect": null
+    }
+   ]
+  }
+ ]
+}

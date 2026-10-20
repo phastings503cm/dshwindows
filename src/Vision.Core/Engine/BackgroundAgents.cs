@@ -219,7 +219,7 @@ public sealed class AgentStatusTool : IToolExecutor
     public const string ToolName = "agent_status";
     public string Name => ToolName;
     public ToolSpec Spec { get; } = new(ToolName,
-        "Check on background subagents started with agent(run_in_background: true). Without an id, lists them all. With an id, returns that agent's full report when it has finished; pass wait_seconds to wait for it (up to 600) instead of polling.",
+        "Check on background subagents started with agent(run_in_background: true). Without an id, lists them all and how busy each subagent server is. With an id, returns that agent's full report when it has finished; pass wait_seconds to wait for it (up to 600) instead of polling.",
         """{"type":"object","properties":{"id":{"type":"string","description":"A background agent id, e.g. bg-1"},"wait_seconds":{"type":"integer","description":"Wait up to this many seconds for it to finish (max 600)"}}}""");
 
     public async Task<ToolResult> ExecuteAsync(string arguments, ToolContext context, CancellationToken cancellationToken)
@@ -230,7 +230,7 @@ public sealed class AgentStatusTool : IToolExecutor
         if (id.Length == 0)
         {
             var jobs = pool.All;
-            if (jobs.Count == 0) return "No background agents have been started in this chat.";
+            if (jobs.Count == 0) return AgentTool.WithLoad("No background agents have been started in this chat.", context);
             var lines = jobs.Select(j =>
             {
                 var line = $"- {j.Id} “{j.Description}”: {j.StatusWord}, {j.Elapsed.FormattedDuration()}";
@@ -238,8 +238,8 @@ public sealed class AgentStatusTool : IToolExecutor
                     line += " — " + TextUtil.Prefix(r.Split('\n')[0], 120);
                 return line;
             });
-            return "Background agents:\n" + string.Join("\n", lines)
-                   + "\nPass an id for a full report (and wait_seconds to wait for a running one).";
+            return AgentTool.WithLoad("Background agents:\n" + string.Join("\n", lines)
+                                      + "\nPass an id for a full report (and wait_seconds to wait for a running one).", context);
         }
         var wait = Math.Clamp(JsonArgs.Int(args, "wait_seconds", 0), 0, 600);
         if (await pool.WaitAsync(id, TimeSpan.FromSeconds(wait), cancellationToken).ConfigureAwait(false) is not { } job)

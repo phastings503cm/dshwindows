@@ -142,6 +142,22 @@ public sealed partial class AppConfig : ObservableObject
     /// <summary>Per project folder ("" = chats without a project): the model and thinking level its chats last chose — what a
     /// new chat there starts with (see AgentHost.ChatRoutes.cs).</summary>
     public Dictionary<string, ChatChoice> ProjectChoices { get; } = new(StringComparer.OrdinalIgnoreCase);
+    /// <summary>Guardian's models enlisted for subagents while signed in (model id → subagents at a time, 0 = the default 2): they
+    /// are routes without being saved, so their "Subagent" tick lives here. A saved Guardian route keeps its own flag, which
+    /// wins. Older builds ignore it.</summary>
+    public Dictionary<string, int> GuardianSubagents { get; } = new(StringComparer.Ordinal);
+
+    /// <summary>Raised when <see cref="GuardianSubagents"/> changes (the fleet and the chats' pools follow it).</summary>
+    public event Action? GuardianSubagentsChanged;
+
+    /// <summary>Enlist Guardian's model <paramref name="modelId"/> for subagents, or stop.</summary>
+    public void SetGuardianSubagent(string modelId, bool on, int parallel = 0)
+    {
+        if (on) GuardianSubagents[modelId] = Math.Clamp(parallel, 0, 16);
+        else if (!GuardianSubagents.Remove(modelId)) return;
+        Persist();
+        GuardianSubagentsChanged?.Invoke();
+    }
 
     public sealed record WindowPlacement(double Left, double Top, double Width, double Height, bool Maximized);
 
@@ -546,6 +562,7 @@ public sealed partial class AppConfig : ObservableObject
         public Dictionary<string, SessionSkillSelection>? SessionSkills { get; set; }
         public Dictionary<string, CodeState>? CodeStates { get; set; }
         public Dictionary<string, ChatChoice>? ProjectChoices { get; set; }
+        public Dictionary<string, int>? GuardianSubagents { get; set; }
         public string? SparkUrl { get; set; }
         public string? SparkUser { get; set; }
         public string? SparkPin { get; set; }
@@ -609,6 +626,7 @@ public sealed partial class AppConfig : ObservableObject
             foreach (var (k, v) in stored?.SessionSkills ?? []) SessionSkills[k] = v;
             foreach (var (k, v) in stored?.CodeStates ?? []) CodeStates[k] = v;
             foreach (var (k, v) in stored?.ProjectChoices ?? []) if (v is not null) ProjectChoices[k] = v;
+            foreach (var (k, v) in stored?.GuardianSubagents ?? []) GuardianSubagents[k] = Math.Clamp(v, 0, 16);
             SparkUrl = stored?.SparkUrl ?? "";
             SparkUser = stored?.SparkUser ?? "";
             SparkPin = stored?.SparkPin;
@@ -772,6 +790,7 @@ public sealed partial class AppConfig : ObservableObject
             SessionSkills = new Dictionary<string, SessionSkillSelection>(SessionSkills),
             CodeStates = new Dictionary<string, CodeState>(CodeStates),
             ProjectChoices = ProjectChoices.Count == 0 ? null : new Dictionary<string, ChatChoice>(ProjectChoices),
+            GuardianSubagents = GuardianSubagents.Count == 0 ? null : new Dictionary<string, int>(GuardianSubagents),
             SparkUrl = SparkUrl,
             SparkUser = SparkUser,
             SparkPin = SparkPin,

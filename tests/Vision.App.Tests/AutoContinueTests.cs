@@ -445,9 +445,15 @@ public sealed class AutoContinueTests : IDisposable
         Assert.Equal(new[] { "stub.test", "spark2.test", "stub.test" }, _server.Seen.Select(r => r.Host));
         var toolResult = _server.Seen[2].Messages.Last(m => m.Role == "tool").Content ?? "";
         Assert.Contains("Subagent report: 7 files.", toolResult);
-        Assert.Contains("on Spark 2", toolResult);
+        // Named the way the main agent can pick it again (its handle), with how busy the servers are now.
+        Assert.Contains("on spark-2", toolResult);
+        Assert.Contains("Subagent servers now: spark-2 ", toolResult);
         Assert.Equal(1, host.Fleet.Snapshot().Single(s => !s.IsPrimary).Completed);
-        Assert.Equal(new[] { "Spark 2" }, host.WorkerRoutes.Select(r => r.Name));
+        Assert.Equal(new[] { "Spark 2" }, host.EnlistedRoutes.Select(r => r.Name));
+        // The agent tool lists the chat's pool (Core tests check its words); the system prompt no longer does.
+        Assert.DoesNotContain("--- Subagent servers ---", _server.Seen[0].System);
+        var pool = host.SubagentPoolFor(vm)!;
+        Assert.Equal(["spark-2", "primary"], pool.Entries.Select(e => e.Id));
     });
 
     [Fact]
@@ -472,6 +478,37 @@ public sealed class AutoContinueTests : IDisposable
         var worker = host.Fleet.Snapshot().Single(s => !s.IsPrimary);
         Assert.Equal(1, worker.Failed);
         Assert.False(worker.Healthy); // left alone for the next task
+    });
+
+    /// <summary>Item 21: each chat's own model leads its own pool. The app primary ticked "Subagent" serves chats on other models
+    /// and never its own; a chat on Spark 2 gets the primary as a subagent server.</summary>
+    [Fact]
+    public void EachChatsModelLeadsItsOwnPool() => Run(host =>
+    {
+        host.Config.Providers.First(p => p.RouteId == host.Config.ActiveRoute).SubagentWorker = true;
+        host.Config.Providers.Add(SecondSpark());
+        host.RefreshFleet();
+        var onPrimary = host.NewSession(Project("main"));
+        var onSpark2 = host.NewSession(Project("main"));
+        host.SetChatRoute(onSpark2, SecondSpark().RouteId);
+
+        var a = host.SubagentPoolFor(onPrimary)!;
+        Assert.Equal(["spark-2", "primary"], a.Entries.Select(e => e.Id));
+        Assert.Equal(("stub", SubagentPool.Reason.OwnMachine), (a.Dropped.Single().Id, a.Dropped.Single().Reason));
+        var b = host.SubagentPoolFor(onSpark2)!;
+        Assert.Equal(["stub", "primary"], b.Entries.Select(e => e.Id));
+        Assert.Equal("Spark 2", b.Primary!.Label);
+        // Both enlisted routes are fleet servers; which one a chat may use is its pool.
+        Assert.Equal(["stub|stub-model", "Spark 2|stub-model"], host.Fleet.Servers.Select(s => s.Id));
+        Assert.Equal(["stub", "spark-2"], host.Fleet.Servers.Select(s => s.Handle));
+
+        // /agents says it per chat.
+        host.Send("/agents", onSpark2.Id);
+        var said = Notes(onSpark2).Last();
+        Assert.Contains("**This chat's model (primary):** Spark 2", said);
+        Assert.Contains("- `stub` OpenAI-compatible server · stub-model · ", said);
+        Assert.Contains("Not for this chat: Spark 2 (this chat's own machine)", said);
+        return Task.CompletedTask;
     });
 
     // MARK: - Review fixes

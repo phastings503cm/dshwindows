@@ -1,0 +1,929 @@
+{
+ "about": "SubagentPlacement.choose: where one task runs (brief §2.3). Times are seconds since 1970; pinWait is 120.",
+ "pinWait": 120,
+ "cases": [
+  {
+   "name": "a free pin runs there",
+   "now": 1000,
+   "request": {
+    "pinned": "spark-2",
+    "pinDeadline": 1120
+   },
+   "candidates": [
+    {
+     "id": "spark-2",
+     "handle": "spark-2",
+     "label": "Spark 2"
+    },
+    {
+     "id": "bedrock",
+     "handle": "bedrock",
+     "label": "Amazon Bedrock",
+     "parallel": 4
+    },
+    {
+     "id": "kimi-code",
+     "handle": "kimi-code",
+     "label": "Kimi Code",
+     "private": false
+    },
+    {
+     "id": "primary",
+     "handle": "primary",
+     "label": "Main box",
+     "primary": true,
+     "parallel": 4
+    }
+   ],
+   "expect": {
+    "run": "spark-2",
+    "reason": "picked",
+    "note": null
+   }
+  },
+  {
+   "name": "a busy pin is waited for until its deadline",
+   "now": 1000,
+   "request": {
+    "pinned": "spark-2",
+    "pinDeadline": 1120
+   },
+   "candidates": [
+    {
+     "id": "spark-2",
+     "handle": "spark-2",
+     "label": "Spark 2",
+     "inFlight": 2
+    },
+    {
+     "id": "bedrock",
+     "handle": "bedrock",
+     "label": "Amazon Bedrock",
+     "parallel": 4
+    },
+    {
+     "id": "kimi-code",
+     "handle": "kimi-code",
+     "label": "Kimi Code",
+     "private": false
+    },
+    {
+     "id": "primary",
+     "handle": "primary",
+     "label": "Main box",
+     "primary": true,
+     "parallel": 4
+    }
+   ],
+   "expect": {
+    "wait": 1120
+   }
+  },
+  {
+   "name": "a pin still busy after its deadline falls back",
+   "now": 1130,
+   "request": {
+    "pinned": "spark-2",
+    "pinDeadline": 1120
+   },
+   "candidates": [
+    {
+     "id": "spark-2",
+     "handle": "spark-2",
+     "label": "Spark 2",
+     "inFlight": 2
+    },
+    {
+     "id": "bedrock",
+     "handle": "bedrock",
+     "label": "Amazon Bedrock",
+     "parallel": 4
+    },
+    {
+     "id": "kimi-code",
+     "handle": "kimi-code",
+     "label": "Kimi Code",
+     "private": false
+    },
+    {
+     "id": "primary",
+     "handle": "primary",
+     "label": "Main box",
+     "primary": true,
+     "parallel": 4
+    }
+   ],
+   "expect": {
+    "run": "bedrock",
+    "reason": "fallback",
+    "note": "spark-2 stayed busy for 2 minutes"
+   }
+  },
+  {
+   "name": "a pin that frees after its deadline still gets it",
+   "now": 1130,
+   "request": {
+    "pinned": "spark-2",
+    "pinDeadline": 1120
+   },
+   "candidates": [
+    {
+     "id": "spark-2",
+     "handle": "spark-2",
+     "label": "Spark 2"
+    },
+    {
+     "id": "bedrock",
+     "handle": "bedrock",
+     "label": "Amazon Bedrock",
+     "parallel": 4,
+     "inFlight": 4
+    },
+    {
+     "id": "kimi-code",
+     "handle": "kimi-code",
+     "label": "Kimi Code",
+     "private": false,
+     "inFlight": 2
+    },
+    {
+     "id": "primary",
+     "handle": "primary",
+     "label": "Main box",
+     "primary": true,
+     "parallel": 4
+    }
+   ],
+   "expect": {
+    "run": "spark-2",
+    "reason": "picked",
+    "note": null
+   }
+  },
+  {
+   "name": "a pin that isn't answering falls back",
+   "now": 1000,
+   "request": {
+    "pinned": "spark-2",
+    "pinDeadline": 1120
+   },
+   "candidates": [
+    {
+     "id": "spark-2",
+     "handle": "spark-2",
+     "label": "Spark 2",
+     "healthyAt": 1060,
+     "error": "no route to host"
+    },
+    {
+     "id": "bedrock",
+     "handle": "bedrock",
+     "label": "Amazon Bedrock",
+     "parallel": 4
+    },
+    {
+     "id": "kimi-code",
+     "handle": "kimi-code",
+     "label": "Kimi Code",
+     "private": false
+    },
+    {
+     "id": "primary",
+     "handle": "primary",
+     "label": "Main box",
+     "primary": true,
+     "parallel": 4
+    }
+   ],
+   "expect": {
+    "run": "bedrock",
+    "reason": "fallback",
+    "note": "spark-2 isn't answering (no route to host)"
+   }
+  },
+  {
+   "name": "a pin that couldn't be reached falls back",
+   "now": 1000,
+   "request": {
+    "pinned": "spark-2",
+    "pinDeadline": 1120,
+    "tried": [
+     "spark-2"
+    ]
+   },
+   "candidates": [
+    {
+     "id": "spark-2",
+     "handle": "spark-2",
+     "label": "Spark 2",
+     "error": "didn't answer"
+    },
+    {
+     "id": "bedrock",
+     "handle": "bedrock",
+     "label": "Amazon Bedrock",
+     "parallel": 4
+    },
+    {
+     "id": "kimi-code",
+     "handle": "kimi-code",
+     "label": "Kimi Code",
+     "private": false
+    },
+    {
+     "id": "primary",
+     "handle": "primary",
+     "label": "Main box",
+     "primary": true,
+     "parallel": 4
+    }
+   ],
+   "expect": {
+    "run": "bedrock",
+    "reason": "fallback",
+    "note": "spark-2 isn't answering (didn't answer)"
+   }
+  },
+  {
+   "name": "a sensitive task pinned to a server that isn't private goes to a private one",
+   "now": 1000,
+   "request": {
+    "pinned": "kimi-code",
+    "pinDeadline": 1120,
+    "sensitive": true
+   },
+   "candidates": [
+    {
+     "id": "spark-2",
+     "handle": "spark-2",
+     "label": "Spark 2"
+    },
+    {
+     "id": "bedrock",
+     "handle": "bedrock",
+     "label": "Amazon Bedrock",
+     "parallel": 4
+    },
+    {
+     "id": "kimi-code",
+     "handle": "kimi-code",
+     "label": "Kimi Code",
+     "private": false
+    },
+    {
+     "id": "primary",
+     "handle": "primary",
+     "label": "Main box",
+     "primary": true,
+     "parallel": 4
+    }
+   ],
+   "expect": {
+    "run": "spark-2",
+    "reason": "fallback",
+    "note": "kimi-code isn't private and this task is sensitive"
+   }
+  },
+  {
+   "name": "an unattended task pinned to an interactive-only plan goes elsewhere",
+   "now": 1000,
+   "request": {
+    "pinned": "qwen-coding-plan",
+    "pinDeadline": 1120,
+    "unattended": true
+   },
+   "candidates": [
+    {
+     "id": "qwen-coding-plan",
+     "handle": "qwen-coding-plan",
+     "label": "Qwen Coding Plan",
+     "private": false,
+     "interactiveOnly": true
+    },
+    {
+     "id": "kimi-code",
+     "handle": "kimi-code",
+     "label": "Kimi Code",
+     "private": false
+    },
+    {
+     "id": "primary",
+     "handle": "primary",
+     "label": "Main box",
+     "primary": true,
+     "parallel": 4
+    }
+   ],
+   "expect": {
+    "run": "kimi-code",
+    "reason": "fallback",
+    "note": "qwen-coding-plan is for interactive use only and this run is unattended"
+   }
+  },
+  {
+   "name": "primary pinned with overflow off runs on the primary",
+   "now": 1000,
+   "request": {
+    "pinned": "primary",
+    "pinDeadline": 1120,
+    "overflow": false
+   },
+   "candidates": [
+    {
+     "id": "spark-2",
+     "handle": "spark-2",
+     "label": "Spark 2"
+    },
+    {
+     "id": "bedrock",
+     "handle": "bedrock",
+     "label": "Amazon Bedrock",
+     "parallel": 4
+    },
+    {
+     "id": "kimi-code",
+     "handle": "kimi-code",
+     "label": "Kimi Code",
+     "private": false
+    },
+    {
+     "id": "primary",
+     "handle": "primary",
+     "label": "Main box",
+     "primary": true,
+     "parallel": 4
+    }
+   ],
+   "expect": {
+    "run": "primary",
+    "reason": "picked",
+    "note": null
+   }
+  },
+  {
+   "name": "a sensitive task pinned to a private primary runs there even with overflow off",
+   "now": 1000,
+   "request": {
+    "pinned": "primary",
+    "pinDeadline": 1120,
+    "overflow": false,
+    "sensitive": true
+   },
+   "candidates": [
+    {
+     "id": "kimi-code",
+     "handle": "kimi-code",
+     "label": "Kimi Code",
+     "private": false
+    },
+    {
+     "id": "primary",
+     "handle": "primary",
+     "label": "Main box",
+     "primary": true,
+     "parallel": 4
+    }
+   ],
+   "expect": {
+    "run": "primary",
+    "reason": "picked",
+    "note": null
+   }
+  },
+  {
+   "name": "the agent file's server is used when free",
+   "now": 1000,
+   "request": {
+    "agentFile": "bedrock"
+   },
+   "candidates": [
+    {
+     "id": "spark-2",
+     "handle": "spark-2",
+     "label": "Spark 2"
+    },
+    {
+     "id": "bedrock",
+     "handle": "bedrock",
+     "label": "Amazon Bedrock",
+     "parallel": 4
+    },
+    {
+     "id": "kimi-code",
+     "handle": "kimi-code",
+     "label": "Kimi Code",
+     "private": false
+    },
+    {
+     "id": "primary",
+     "handle": "primary",
+     "label": "Main box",
+     "primary": true,
+     "parallel": 4
+    }
+   ],
+   "expect": {
+    "run": "bedrock",
+    "reason": "agent-file",
+    "note": null
+   }
+  },
+  {
+   "name": "the agent file's server busy: another runs it",
+   "now": 1000,
+   "request": {
+    "agentFile": "Spark"
+   },
+   "candidates": [
+    {
+     "id": "spark-2",
+     "handle": "spark-2",
+     "label": "Spark 2",
+     "inFlight": 2
+    },
+    {
+     "id": "bedrock",
+     "handle": "bedrock",
+     "label": "Amazon Bedrock",
+     "parallel": 4
+    },
+    {
+     "id": "kimi-code",
+     "handle": "kimi-code",
+     "label": "Kimi Code",
+     "private": false
+    },
+    {
+     "id": "primary",
+     "handle": "primary",
+     "label": "Main box",
+     "primary": true,
+     "parallel": 4
+    }
+   ],
+   "expect": {
+    "run": "bedrock",
+    "reason": "fallback",
+    "note": "its agent file asks for “Spark”, which was busy or not answering"
+   }
+  },
+  {
+   "name": "the agent file names nothing set up",
+   "now": 1000,
+   "request": {
+    "agentFile": "nothing"
+   },
+   "candidates": [
+    {
+     "id": "spark-2",
+     "handle": "spark-2",
+     "label": "Spark 2"
+    },
+    {
+     "id": "bedrock",
+     "handle": "bedrock",
+     "label": "Amazon Bedrock",
+     "parallel": 4
+    },
+    {
+     "id": "kimi-code",
+     "handle": "kimi-code",
+     "label": "Kimi Code",
+     "private": false
+    },
+    {
+     "id": "primary",
+     "handle": "primary",
+     "label": "Main box",
+     "primary": true,
+     "parallel": 4
+    }
+   ],
+   "expect": {
+    "run": "spark-2",
+    "reason": "fallback",
+    "note": "its agent file asks for “nothing”, but no model server by that name is set up (Settings ▸ AI Models: turn on “Use for subagents” for that route)"
+   }
+  },
+  {
+   "name": "least busy, Settings order on a tie",
+   "now": 1000,
+   "request": {},
+   "candidates": [
+    {
+     "id": "spark-2",
+     "handle": "spark-2",
+     "label": "Spark 2",
+     "inFlight": 1
+    },
+    {
+     "id": "bedrock",
+     "handle": "bedrock",
+     "label": "Amazon Bedrock",
+     "parallel": 4,
+     "inFlight": 2
+    },
+    {
+     "id": "kimi-code",
+     "handle": "kimi-code",
+     "label": "Kimi Code",
+     "private": false,
+     "inFlight": 2
+    },
+    {
+     "id": "primary",
+     "handle": "primary",
+     "label": "Main box",
+     "primary": true,
+     "parallel": 4
+    }
+   ],
+   "expect": {
+    "run": "spark-2",
+    "reason": "least-busy",
+    "note": null
+   }
+  },
+  {
+   "name": "least busy prefers the emptier server",
+   "now": 1000,
+   "request": {},
+   "candidates": [
+    {
+     "id": "spark-2",
+     "handle": "spark-2",
+     "label": "Spark 2",
+     "inFlight": 1
+    },
+    {
+     "id": "bedrock",
+     "handle": "bedrock",
+     "label": "Amazon Bedrock",
+     "parallel": 4,
+     "inFlight": 2
+    },
+    {
+     "id": "kimi-code",
+     "handle": "kimi-code",
+     "label": "Kimi Code",
+     "private": false
+    },
+    {
+     "id": "primary",
+     "handle": "primary",
+     "label": "Main box",
+     "primary": true,
+     "parallel": 4
+    }
+   ],
+   "expect": {
+    "run": "kimi-code",
+    "reason": "least-busy",
+    "note": null
+   }
+  },
+  {
+   "name": "every worker busy, overflow on: the primary",
+   "now": 1000,
+   "request": {},
+   "candidates": [
+    {
+     "id": "spark-2",
+     "handle": "spark-2",
+     "label": "Spark 2",
+     "inFlight": 2
+    },
+    {
+     "id": "bedrock",
+     "handle": "bedrock",
+     "label": "Amazon Bedrock",
+     "parallel": 4,
+     "inFlight": 4
+    },
+    {
+     "id": "kimi-code",
+     "handle": "kimi-code",
+     "label": "Kimi Code",
+     "private": false,
+     "inFlight": 2
+    },
+    {
+     "id": "primary",
+     "handle": "primary",
+     "label": "Main box",
+     "primary": true,
+     "parallel": 4
+    }
+   ],
+   "expect": {
+    "run": "primary",
+    "reason": "least-busy",
+    "note": null
+   }
+  },
+  {
+   "name": "every worker busy, overflow off: wait",
+   "now": 1000,
+   "request": {
+    "overflow": false
+   },
+   "candidates": [
+    {
+     "id": "spark-2",
+     "handle": "spark-2",
+     "label": "Spark 2",
+     "inFlight": 2
+    },
+    {
+     "id": "bedrock",
+     "handle": "bedrock",
+     "label": "Amazon Bedrock",
+     "parallel": 4,
+     "inFlight": 4
+    },
+    {
+     "id": "kimi-code",
+     "handle": "kimi-code",
+     "label": "Kimi Code",
+     "private": false,
+     "inFlight": 2
+    },
+    {
+     "id": "primary",
+     "handle": "primary",
+     "label": "Main box",
+     "primary": true,
+     "parallel": 4
+    }
+   ],
+   "expect": {
+    "wait": null
+   }
+  },
+  {
+   "name": "waiting wakes when a failed server is trusted again",
+   "now": 1000,
+   "request": {
+    "overflow": false
+   },
+   "candidates": [
+    {
+     "id": "spark-2",
+     "handle": "spark-2",
+     "label": "Spark 2",
+     "inFlight": 2,
+     "healthyAt": 1030
+    },
+    {
+     "id": "bedrock",
+     "handle": "bedrock",
+     "label": "Amazon Bedrock",
+     "parallel": 4,
+     "inFlight": 4
+    },
+    {
+     "id": "kimi-code",
+     "handle": "kimi-code",
+     "label": "Kimi Code",
+     "private": false,
+     "inFlight": 2
+    },
+    {
+     "id": "primary",
+     "handle": "primary",
+     "label": "Main box",
+     "primary": true,
+     "parallel": 4
+    }
+   ],
+   "expect": {
+    "wait": 1030
+   }
+  },
+  {
+   "name": "a pin's wait ends at the deadline or a recovery, whichever is first",
+   "now": 1000,
+   "request": {
+    "pinned": "spark-2",
+    "pinDeadline": 1120
+   },
+   "candidates": [
+    {
+     "id": "spark-2",
+     "handle": "spark-2",
+     "label": "Spark 2",
+     "inFlight": 2
+    },
+    {
+     "id": "bedrock",
+     "handle": "bedrock",
+     "label": "Amazon Bedrock",
+     "parallel": 4,
+     "inFlight": 4
+    },
+    {
+     "id": "kimi-code",
+     "handle": "kimi-code",
+     "label": "Kimi Code",
+     "private": false,
+     "inFlight": 2,
+     "healthyAt": 1050
+    },
+    {
+     "id": "primary",
+     "handle": "primary",
+     "label": "Main box",
+     "primary": true,
+     "parallel": 4
+    }
+   ],
+   "expect": {
+    "wait": 1050
+   }
+  },
+  {
+   "name": "a sensitive task with no private server",
+   "now": 1000,
+   "request": {
+    "sensitive": true
+   },
+   "candidates": [
+    {
+     "id": "kimi-code",
+     "handle": "kimi-code",
+     "label": "Kimi Code",
+     "private": false
+    },
+    {
+     "id": "primary",
+     "handle": "primary",
+     "label": "Main box",
+     "primary": true,
+     "parallel": 4,
+     "private": false
+    }
+   ],
+   "expect": {
+    "unavailable": "No private server is free for a sensitive task. Do it yourself, or rewrite it without the sensitive details and try again."
+   }
+  },
+  {
+   "name": "a sensitive task, overflow off: a private primary doesn't take it while workers exist",
+   "now": 1000,
+   "request": {
+    "sensitive": true,
+    "overflow": false
+   },
+   "candidates": [
+    {
+     "id": "kimi-code",
+     "handle": "kimi-code",
+     "label": "Kimi Code",
+     "private": false
+    },
+    {
+     "id": "primary",
+     "handle": "primary",
+     "label": "Main box",
+     "primary": true,
+     "parallel": 4
+    }
+   ],
+   "expect": {
+    "unavailable": "No private server is free for a sensitive task. Do it yourself, or rewrite it without the sensitive details and try again."
+   }
+  },
+  {
+   "name": "unattended work with only interactive-only servers",
+   "now": 1000,
+   "request": {
+    "unattended": true
+   },
+   "candidates": [
+    {
+     "id": "qwen-coding-plan",
+     "handle": "qwen-coding-plan",
+     "label": "Qwen Coding Plan",
+     "private": false,
+     "interactiveOnly": true
+    },
+    {
+     "id": "primary",
+     "handle": "primary",
+     "label": "Main box",
+     "primary": true,
+     "parallel": 4,
+     "interactiveOnly": true
+    }
+   ],
+   "expect": {
+    "unavailable": "The model servers that could take this task are for interactive use only under their plans' terms, so unattended work can't run there. Do it yourself."
+   }
+  },
+  {
+   "name": "every server tried",
+   "now": 1000,
+   "request": {
+    "tried": [
+     "spark-2",
+     "bedrock",
+     "kimi-code",
+     "primary"
+    ],
+    "lastError": "connection refused"
+   },
+   "candidates": [
+    {
+     "id": "spark-2",
+     "handle": "spark-2",
+     "label": "Spark 2"
+    },
+    {
+     "id": "bedrock",
+     "handle": "bedrock",
+     "label": "Amazon Bedrock",
+     "parallel": 4
+    },
+    {
+     "id": "kimi-code",
+     "handle": "kimi-code",
+     "label": "Kimi Code",
+     "private": false
+    },
+    {
+     "id": "primary",
+     "handle": "primary",
+     "label": "Main box",
+     "primary": true,
+     "parallel": 4
+    }
+   ],
+   "expect": {
+    "unavailable": "No model server answered: connection refused"
+   }
+  },
+  {
+   "name": "servers that just failed are skipped while another is healthy",
+   "now": 1000,
+   "request": {},
+   "candidates": [
+    {
+     "id": "spark-2",
+     "handle": "spark-2",
+     "label": "Spark 2",
+     "healthyAt": 1060
+    },
+    {
+     "id": "bedrock",
+     "handle": "bedrock",
+     "label": "Amazon Bedrock",
+     "parallel": 4
+    },
+    {
+     "id": "kimi-code",
+     "handle": "kimi-code",
+     "label": "Kimi Code",
+     "private": false
+    },
+    {
+     "id": "primary",
+     "handle": "primary",
+     "label": "Main box",
+     "primary": true,
+     "parallel": 4
+    }
+   ],
+   "expect": {
+    "run": "bedrock",
+    "reason": "least-busy",
+    "note": null
+   }
+  },
+  {
+   "name": "all failed: still use one rather than none",
+   "now": 1000,
+   "request": {},
+   "candidates": [
+    {
+     "id": "spark-2",
+     "handle": "spark-2",
+     "label": "Spark 2",
+     "healthyAt": 1060
+    },
+    {
+     "id": "bedrock",
+     "handle": "bedrock",
+     "label": "Amazon Bedrock",
+     "parallel": 4,
+     "healthyAt": 1070,
+     "inFlight": 4
+    }
+   ],
+   "expect": {
+    "run": "spark-2",
+    "reason": "least-busy",
+    "note": null
+   }
+  }
+ ]
+}

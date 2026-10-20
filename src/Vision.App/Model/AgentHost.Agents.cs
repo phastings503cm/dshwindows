@@ -6,9 +6,9 @@ namespace Vision.App.Model;
 // MARK: - Subagents across servers, memory, caching
 //
 // Everything the host adds around a chat's engine beyond the model loop itself:
-//  * the fleet — with more than one model server (say two DGX Sparks), the active route is the primary
-//    (the main agent talks to it) and routes marked "Subagent" in Settings › AI Models are workers;
-//    subagents run on the workers, spreading side tasks across machines
+//  * the fleet — every chat's own model is the primary for its subagents, and the routes ticked "Subagent" in
+//    Settings › AI Models (any kind: a second Spark, Bedrock, a plan, Guardian's models, Claude Code) are the workers
+//    they may hand side tasks to — each chat its own pool of them (SubagentPool), never its own machine
 //  * a roster per chat, so the plan panel can show who is working on what, and where
 //  * long-term memory — notes searched for each message, never loaded wholesale
 //  * a result cache per chat, so repeated reads and searches don't cost time or context
@@ -19,9 +19,12 @@ public sealed partial class AgentHost
     /// <summary>Long-term memory: notes searched for each message (%APPDATA%\Vision\memory).</summary>
     public MemoryStore Memory { get; private set; } = null!;
 
-    /// <summary>The model servers subagents run on. The active route is the primary; routes flagged
-    /// "subagent server" are workers. Reconfigured whenever the routes change.</summary>
+    /// <summary>The model servers subagents run on: the routes enlisted for subagents (shared by every chat; each chat's own
+    /// model joins as its primary when it asks). Reconfigured whenever the routes change.</summary>
     public AgentFleet Fleet { get; } = new();
+
+    /// <summary>Guardian's models while signed in, in Guardian's order (set by the Guardian connection).</summary>
+    public Func<IReadOnlyList<string>>? GuardianModelIds { get; set; }
 
     private readonly Dictionary<string, AgentRoster> _rosters = new();
     private readonly Dictionary<string, ToolCache> _caches = new();
@@ -39,43 +42,39 @@ public sealed partial class AgentHost
             if (e.PropertyName is nameof(AppConfig.Privacy)) _engines.Clear();
         };
         Config.Providers.CollectionChanged += (_, _) => RefreshFleet();
+        Config.GuardianSubagentsChanged += RefreshFleet;
         RefreshFleet();
     }
 
     // MARK: Fleet
 
-    /// <summary>Rebuild the fleet from the configured routes. Call it after changing which routes are
-    /// subagent servers (the route list itself is watched).</summary>
+    /// <summary>Rebuild the fleet from the configured routes. Call it after changing which routes are subagent servers (the
+    /// route list itself, the Guardian map and the sign-in are watched).</summary>
     public void RefreshFleet()
     {
+        var walk = PoolRoutes();
+        var handles = SubagentPool.Handles(walk);
+        var handleOf = new Dictionary<string, string>(StringComparer.Ordinal);
+        for (var i = 0; i < walk.Count; i++) handleOf.TryAdd(walk[i].RouteId, handles[i]);
         var servers = new List<FleetServer>();
-        var active = Config.Providers.FirstOrDefault(p => p.RouteId == Config.ActiveRoute);
-        if (active is not null)
+        foreach (var route in EnlistedRoutes)
         {
+            var routeId = route.RouteId;
+            var label = RouteLabel(route);
+            var facts = walk.FirstOrDefault(f => f.RouteId == routeId) ?? SubagentRouteFacts.From(route, enlisted: true);
             servers.Add(new FleetServer
             {
-                Id = active.RouteId,
-                Label = RouteLabel(active),
-                IsPrimary = true,
-                IsPrivate = active.IsPrivateRoute,
-                InteractiveOnly = active.IsInteractiveOnly,
-                MaxParallel = Math.Clamp(active.SubagentParallel ?? 4, 1, 16),
-                // The main route is probed the way the chat probes it (and shares its cache).
-                Resolve = _ => _dispatcher.InvokeAsync(ResolvePrimaryTargetAsync).Task.Unwrap(),
-            });
-        }
-        foreach (var route in WorkerRoutes)
-        {
-            var captured = route;
-            servers.Add(new FleetServer
-            {
-                Id = captured.RouteId,
-                Label = RouteLabel(captured),
+                Id = routeId,
+                Label = label,
                 IsPrimary = false,
-                IsPrivate = captured.IsPrivateRoute,
-                InteractiveOnly = captured.IsInteractiveOnly,
-                MaxParallel = Math.Clamp(captured.SubagentParallel ?? 2, 1, 16),
-                Resolve = ct => ResolveWorkerTargetAsync(captured, ct),
+                // Private as a Sensitive chat counts it: own hardware, Guardian, Bedrock in your account — never Claude Code.
+                IsPrivate = SensitivityPolicy.IsPrivate(route),
+                InteractiveOnly = route.IsInteractiveOnly,
+                MaxParallel = Math.Clamp(route.SubagentParallel ?? 2, 1, 16),
+                Handle = handleOf.GetValueOrDefault(routeId),
+                Machine = SubagentPool.Machine(facts),
+                Kind = facts.Kind.Word(),
+                Resolve = ct => ResolveWorkerTargetAsync(routeId, label, ct),
             });
         }
         Fleet.UsePrimaryWhenWorkersBusy = Config.SubagentsUsePrimary;
@@ -85,47 +84,103 @@ public sealed partial class AgentHost
     /// <summary>How a route is named next to a subagent: the route's own name (e.g. "Spark 2").</summary>
     public static string RouteLabel(ProviderProfile route) => route.Name.Length > 0 ? route.Name : route.Model;
 
-    /// <summary>The routes subagents currently run on (workers), for the settings summary. One self-hosted machine is one
-    /// worker however many models it is listed with (a Spark serves one at a time, so a second route there would only queue
-    /// behind the first), and the main route's own machine is never its own worker. A hosted service (Bedrock, OpenAI...)
-    /// serves every model at once: those are told apart by route, so a cheaper model in the same Region can take the side
-    /// tasks while a stronger one is the main agent.</summary>
-    public IReadOnlyList<ProviderProfile> WorkerRoutes
+    /// <summary>The routes enlisted for subagents, in Settings order: every route that is on and ticked "Subagent" — any kind,
+    /// the primary and Claude Code included — then Guardian's models ticked for subagents, while signed in. Which of them a chat
+    /// may use is its pool (<see cref="SubagentPoolFor(SessionVM)"/>): never its own machine, one route per machine.</summary>
+    public IReadOnlyList<ProviderProfile> EnlistedRoutes
     {
         get
         {
-            var primary = Config.Providers.FirstOrDefault(p => p.RouteId == Config.ActiveRoute);
-            var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-            if (primary is not null) seen.Add(MachineOf(primary));
-            // Claude Code answers chats only: it is never a subagent server.
-            return Config.Providers.Where(p => p.IsEnabled && p.SubagentWorker && !ClaudeCodeRoutes.IsClaudeCode(p) && p.RouteId != Config.ActiveRoute
-                                               && seen.Add(MachineOf(p))).ToList();
+            var list = Config.Providers.Where(p => p.IsEnabled && p.SubagentWorker).ToList();
+            if (GuardianAccount?.Invoke() is null) return list;
+            foreach (var id in GuardianModelIds?.Invoke() ?? [])
+            {
+                var routeId = GuardianRoutes.LiveRouteId(id);
+                if (!Config.GuardianSubagents.ContainsKey(id) || Config.Providers.Any(p => p.RouteId == routeId)) continue;
+                if (Config.UsableRoute(routeId) is { } live) list.Add(live);
+            }
+            return list;
         }
     }
 
-    private static string MachineOf(ProviderProfile route) =>
-        route.Kind != ProviderKind.Bedrock && route.IsSelfHosted ? route.BaseUrl.Trim().TrimEnd('/') : "route:" + route.RouteId;
-
-    private async Task<FleetTarget> ResolvePrimaryTargetAsync()
+    /// <summary>Every route a chat's pool is chosen from, in order — Settings' routes, then Guardian's models that have no saved
+    /// route (signed in: the account's list; signed out: the ones ticked for subagents, so a chat can say they wait for the
+    /// sign-in) — as the facts the pool decides on. Handles are worked out over all of them.</summary>
+    private List<SubagentRouteFacts> PoolRoutes()
     {
-        var profile = await ResolveRouteAsync().ConfigureAwait(true) ?? throw LlmException.NoModel();
-        return new FleetTarget(MakeClient(profile), profile.Model, ContextLimit())
+        var list = Config.Providers.Select(p => FactsFor(p, enlisted: p.IsEnabled && p.SubagentWorker)).ToList();
+        var seen = new HashSet<string>(Config.Providers.Select(p => p.RouteId), StringComparer.Ordinal);
+        var signedIn = GuardianAccount?.Invoke() is not null;
+        IReadOnlyList<string> ids = signedIn
+            ? GuardianModelIds?.Invoke() ?? []
+            : Config.GuardianSubagents.Keys.Order(StringComparer.Ordinal).ToList();
+        foreach (var id in ids)
         {
-            Vision = VisionOn(profile), Temperature = profile.Temperature, MaxOutputTokens = profile.MaxOutputTokens,
-        };
+            var routeId = GuardianRoutes.LiveRouteId(id);
+            if (!seen.Add(routeId)) continue;
+            var enlisted = Config.GuardianSubagents.ContainsKey(id);
+            if (signedIn && Config.UsableRoute(routeId) is { } live) list.Add(FactsFor(live, enlisted));
+            else
+                list.Add(new SubagentRouteFacts
+                {
+                    RouteId = routeId, Name = GuardianRoutes.RouteName, Model = id, Kind = SubagentKind.Guardian, Enlisted = enlisted,
+                    Parallel = Config.GuardianSubagents.GetValueOrDefault(id) is > 0 and var parallel ? parallel : null,
+                });
+        }
+        return list;
     }
 
-    private async Task<FleetTarget> ResolveWorkerTargetAsync(ProviderProfile route, CancellationToken cancellationToken)
+    /// <summary>What the pool knows about a route now: the model its server last reported (sticky), the window it settled on,
+    /// whether it takes pictures.</summary>
+    private SubagentRouteFacts FactsFor(ProviderProfile route, bool enlisted)
     {
-        // The route, its key and the vision setting belong to the UI thread (Settings edits them; keys are cached there): take
-        // a copy there, and do the slow part — asking the server what it serves — here on the caller's thread.
-        var (profile, vision) = await _dispatcher.InvokeAsync(() =>
+        var claudeCode = ClaudeCodeRoutes.IsClaudeCode(route);
+        string? served = null;
+        int? probed = null;
+        if (!claudeCode)
         {
-            var copy = route.DeepCopy();
-            var key = Config.ApiKey(route);
-            copy.ApiKey = key.Length == 0 ? null : key;
-            return (copy, VisionOn(copy));
+            lock (_workerProbe)
+            {
+                if (_workerProbe.TryGetValue(route.RouteId, out var known))
+                {
+                    served = known.Info.Id;
+                    probed = known.Info.ContextWindow;
+                }
+            }
+            if (_routeInfo.TryGetValue(route.RouteId, out var info) && string.IsNullOrEmpty(served)) served = info.ServedModel;
+        }
+        if (_probedContext.TryGetValue(route.RouteId, out var learned)) probed ??= learned;
+        var model = string.IsNullOrEmpty(served) ? route.Model : served;
+        int? window = route.ContextWindow is > 0 and var set ? set
+            : claudeCode ? probed ?? ClaudeCodeRoutes.LearnedWindow(route.Model) ?? ClaudeCodeRoutes.DefaultContextWindow
+            : probed ?? FallbackContextWindow.Limit(model);
+        return SubagentRouteFacts.From(route, enlisted, model, window, VisionOn(route));
+    }
+
+    /// <summary>This chat's subagent pool now: what its model may hand side tasks to (see <see cref="SubagentPool.Build"/>).</summary>
+    public SubagentPool SubagentPoolFor(SessionVM vm, ProviderProfile chatRoute, bool unattended) =>
+        SubagentPool.Build(PoolRoutes(), FactsFor(chatRoute, enlisted: false), guardianSignedIn: GuardianAccount?.Invoke() is not null,
+            sensitive: vm.Sensitive, shieldOn: ShieldOn, unattended: unattended, overflow: Config.SubagentsUsePrimary);
+
+    /// <summary>This chat's subagent pool now (none while its model can't be resolved).</summary>
+    public SubagentPool? SubagentPoolFor(SessionVM vm) => ChatRoute(vm) is { } route ? SubagentPoolFor(vm, route, IsUnattended(vm.Id)) : null;
+
+    private async Task<FleetTarget> ResolveWorkerTargetAsync(string routeId, string label, CancellationToken cancellationToken)
+    {
+        // The route, its key (a Guardian model's: the sign-in's token now) and the vision setting belong to the UI thread (Settings
+        // edits them; keys are cached there): take a copy there, and do the slow part — asking the server what it serves — here
+        // on the caller's thread.
+        var (profile, vision, guardian) = await _dispatcher.InvokeAsync(() =>
+        {
+            var route = Config.UsableRoute(routeId);
+            var isGuardian = Config.Providers.FirstOrDefault(p => p.RouteId == routeId) is { } stored ? GuardianRoutes.IsGuardian(stored) : GuardianRoutes.IsLiveRouteId(routeId);
+            return (route, route is not null && VisionOn(route), isGuardian);
         }).Task.ConfigureAwait(false);
+        if (profile is null)
+            throw guardian
+                ? LlmException.Rejected(401, GuardianRoutes.SignInNeeded, "signed out of Guardian", permanent: true)
+                : LlmException.Connection($"{label} is switched off or no longer set up");
+        if (ClaudeCodeRoutes.IsClaudeCode(profile)) return await ResolveClaudeCodeWorkerAsync(profile).ConfigureAwait(false);
         var client = MakeClient(profile);
         var model = profile.Model;
         var window = profile.ContextWindow;
@@ -136,20 +191,20 @@ public sealed partial class AgentHost
             ModelInfo? info = null;
             lock (_workerProbe)
             {
-                if (_workerProbe.TryGetValue(route.RouteId, out var known) && DateTimeOffset.Now - known.At < TimeSpan.FromSeconds(60)) info = known.Info;
+                if (_workerProbe.TryGetValue(routeId, out var known) && DateTimeOffset.Now - known.At < TimeSpan.FromSeconds(60)) info = known.Info;
             }
             if (info is null)
             {
                 var fresh = await client.ModelInfoAsync(null, cancellationToken).ConfigureAwait(false);
                 if (fresh.Served.Count > 0)
                 {
-                    lock (_workerProbe) _workerProbe[route.RouteId] = (fresh, DateTimeOffset.Now);
+                    lock (_workerProbe) _workerProbe[routeId] = (fresh, DateTimeOffset.Now);
                     info = fresh;
                 }
-                // A hosted API (Kimi, Z.ai, OpenRouter…) may not list models for this key or plan: its configured model is the
-                // answer, and the first request says whether it works (a refusal moves the task on). Only a server you run
+                // A hosted API (Kimi, Z.ai, OpenRouter, Guardian…) may not list models for this key or plan: its configured model is
+                // the answer, and the first request says whether it works (a refusal moves the task on). Only a server you run
                 // yourself — a Spark that is down or swapping lists nothing — counts as not answering.
-                else if (AgentFleet.WorkerNeedsModelList(profile)) throw LlmException.Connection($"{route.BaseUrl} didn't answer");
+                else if (AgentFleet.WorkerNeedsModelList(profile)) throw LlmException.Connection($"{profile.BaseUrl} didn't answer");
             }
             if (!string.IsNullOrEmpty(info?.Id)) model = info.Id;
             window ??= info?.ContextWindow;
@@ -159,6 +214,34 @@ public sealed partial class AgentHost
         {
             Vision = vision, Temperature = profile.Temperature, MaxOutputTokens = profile.MaxOutputTokens,
             OwnSettings = true, Thinking = profile.Thinking,
+        };
+    }
+
+    /// <summary>A Claude Code route as a subagent server: each task one `claude -p` job in the chat's folder, with the CLI this
+    /// route runs (found once; none installed is a server fault, so the next server is tried).</summary>
+    private async Task<FleetTarget> ResolveClaudeCodeWorkerAsync(ProviderProfile profile)
+    {
+        var (launch, unsupported, projects) = await _dispatcher.InvokeAsync(async () =>
+        {
+            var found = await ClaudeCodeLaunchFor(profile);
+            var known = _claudeUnsupported.TryGetValue(found.Display, out var flags)
+                ? new HashSet<string>(flags, StringComparer.Ordinal)
+                : new HashSet<string>(StringComparer.Ordinal);
+            return (found, known, ClaudeCodeProjects(profile));
+        }).Task.Unwrap().ConfigureAwait(false);
+        var wsl = ClaudeCodeRoutes.UsesWsl(profile);
+        return new FleetTarget(MakeClient(profile), profile.Model, ClaudeCodeRoutes.LearnedWindow(profile.Model) ?? ClaudeCodeRoutes.DefaultContextWindow)
+        {
+            Vision = false,
+            OwnSettings = true,
+            Thinking = profile.Thinking,
+            External = new ClaudeCodeSubagent(launch, profile.Model, profile.Thinking)
+            {
+                Starter = ClaudeCodeStarterForTesting,
+                IsTrusted = folder => ClaudeCodeTrust.IsTrusted(folder, projects),
+                MapPath = wsl ? ClaudeCodeCli.FromWslPath : null,
+                Unsupported = unsupported,
+            },
         };
     }
 
@@ -352,27 +435,44 @@ public sealed partial class AgentHost
         foreach (var type in CatalogFor(vm).All)
             lines.Add($"- `{type.Name}` — {TextUtil.Prefix(type.Description, 110)}" + (type.Origin == "built-in" ? "" : $" *({type.Origin})*"));
         lines.Add("");
-        var fleet = Fleet.Snapshot();
-        if (fleet.Count == 0)
-        {
-            lines.Add("**Model servers:** none configured.");
-        }
-        else
-        {
-            lines.Add(fleet.Count == 1
-                ? "**Model server:** subagents share the one server. Tick “Subagent” on more routes in Settings › AI Models to spread them across machines."
-                : "**Model servers** (the main agent uses the primary; subagents go to workers first):");
-            foreach (var server in fleet)
-            {
-                var health = server.Healthy ? "" : " — not answering, skipped for a minute";
-                lines.Add($"- {(server.IsPrimary ? "🖥 primary" : "⚙ worker")} **{server.Label}** — {server.InFlight}/{server.MaxParallel} busy, {server.Completed} done{(server.Failed > 0 ? $", {server.Failed} failed" : "")}{health}");
-            }
-        }
+        lines.AddRange(ServerLines(vm));
         var running = vm.Agents.Where(a => a.IsRunning).ToList();
         lines.Add("");
         lines.Add(running.Count == 0
             ? "No subagents running in this chat."
             : "**Running now:**\n" + string.Join("\n", running.Select(a => $"- {a.Description} ({a.AgentType}{(a.Server is null ? "" : " · " + a.Server)}) — {a.Activity}")));
         vm.Note(string.Join("\n", lines));
+    }
+
+    /// <summary>/agents: this chat's model, the subagent servers it may hand tasks to (with how busy each is), and the enlisted
+    /// ones it can't use, with why.</summary>
+    private List<string> ServerLines(SessionVM vm)
+    {
+        if (ChatRoute(vm) is not { } route) return ["**This chat's model:** none set up yet."];
+        if (ClaudeCodeRoutes.IsClaudeCode(route))
+            return ["This chat runs on Claude Code, which uses its own subagents. Vision's subagent servers serve chats on other models."];
+        var pool = SubagentPoolFor(vm, route, IsUnattended(vm.Id));
+        var lines = new List<string> { $"**This chat's model (primary):** {RouteLabel(route)} — {Effective(route).Model}" };
+        var snapshot = Fleet.Snapshot();
+        if (!pool.HasWorkers)
+        {
+            lines.Add("**Its subagent servers:** none — subagents run on this chat's own model. Tick “Subagent” on other models in Settings › AI Models " +
+                      "(a second DGX Spark, Amazon Bedrock, Guardian, Claude Code) and this chat's model can hand side tasks to them.");
+        }
+        else
+        {
+            lines.Add("**Its subagent servers:**");
+            foreach (var entry in pool.Workers)
+            {
+                var status = snapshot.FirstOrDefault(s => s.Id == entry.RouteId);
+                var load = status is null ? $"0/{entry.Parallel} busy, 0 done"
+                    : $"{status.InFlight}/{status.MaxParallel} busy, {status.Completed} done{(status.Failed > 0 ? $", {status.Failed} failed" : "")}"
+                      + (status.Healthy ? "" : " — not answering, skipped for a minute");
+                lines.Add($"- `{entry.Id}` {entry.Provider} · {entry.Model} · {(entry.IsPrivate ? "private" : "not private")} · {entry.Tier.Word()} — {load}");
+            }
+        }
+        if (pool.Dropped.Count > 0)
+            lines.Add("Not for this chat: " + string.Join(", ", pool.Dropped.Select(d => $"{d.Label} ({d.Reason})")));
+        return lines;
     }
 }

@@ -1,0 +1,261 @@
+{
+ "about": "Matching the agent and delegate tools' `server` argument (brief §2.3.2): a handle in any case, an exact route id, \"primary\", then a part of one handle or name that fits only one server. Delegate prefixes a task's error with \"Error: task <n>: \" instead of \"Error: \".",
+ "pools": {
+  "main": {
+   "overflow": true,
+   "entries": [
+    {
+     "id": "dgx-spark",
+     "routeID": "DGX Spark|qwen3-coder",
+     "label": "DGX Spark",
+     "provider": "OpenAI-compatible server",
+     "model": "qwen3-coder-30b",
+     "context": "256K",
+     "private": true,
+     "tier": "local",
+     "speed": "standard",
+     "images": true,
+     "ownAgent": false,
+     "parallel": 2,
+     "primary": false
+    },
+    {
+     "id": "bedrock",
+     "routeID": "Amazon Bedrock|claude-sonnet-5-5",
+     "label": "Amazon Bedrock",
+     "provider": "Amazon Bedrock",
+     "model": "claude-sonnet-5-5",
+     "context": "1M",
+     "private": true,
+     "tier": "api",
+     "speed": "standard",
+     "images": true,
+     "ownAgent": false,
+     "parallel": 4,
+     "primary": false
+    },
+    {
+     "id": "guardian-claude-haiku-5-5",
+     "routeID": "Guardian|claude-haiku-5-5",
+     "label": "Guardian",
+     "provider": "Guardian",
+     "model": "claude-haiku-5-5",
+     "context": "1M",
+     "private": true,
+     "tier": "org",
+     "speed": "fast",
+     "images": true,
+     "ownAgent": false,
+     "parallel": 2,
+     "primary": false
+    },
+    {
+     "id": "claude-code-sonnet",
+     "routeID": "Claude Code|sonnet",
+     "label": "Claude Code",
+     "provider": "Claude Code",
+     "model": "sonnet",
+     "context": "200K",
+     "private": false,
+     "tier": "subscription",
+     "speed": "standard",
+     "images": false,
+     "ownAgent": true,
+     "parallel": 2,
+     "primary": false
+    },
+    {
+     "id": "primary",
+     "routeID": "Spark A|qwen3.8",
+     "label": "Spark A",
+     "provider": "OpenAI-compatible server",
+     "model": "Qwen3.8",
+     "context": "256K",
+     "private": true,
+     "tier": "local",
+     "speed": "standard",
+     "images": true,
+     "ownAgent": false,
+     "parallel": 4,
+     "primary": true
+    }
+   ],
+   "dropped": [
+    {
+     "id": "kimi-code",
+     "routeID": "Kimi Code|kimi-for-coding",
+     "label": "Kimi Code",
+     "reason": "not available in a Sensitive chat"
+    },
+    {
+     "id": "dgx-spark-big",
+     "routeID": "DGX Spark (big)|big",
+     "label": "DGX Spark (big)",
+     "reason": "the same machine as dgx-spark"
+    }
+   ]
+  },
+  "unattended-interactive": {
+   "overflow": true,
+   "entries": [
+    {
+     "id": "dgx-spark",
+     "routeID": "DGX Spark|qwen3-coder",
+     "label": "DGX Spark",
+     "provider": "OpenAI-compatible server",
+     "model": "qwen3-coder-30b",
+     "context": "256K",
+     "private": true,
+     "tier": "local",
+     "speed": "standard",
+     "images": true,
+     "ownAgent": false,
+     "parallel": 2,
+     "primary": false
+    },
+    {
+     "id": "bedrock",
+     "routeID": "Amazon Bedrock|claude-sonnet-5-5",
+     "label": "Amazon Bedrock",
+     "provider": "Amazon Bedrock",
+     "model": "claude-sonnet-5-5",
+     "context": "1M",
+     "private": true,
+     "tier": "api",
+     "speed": "standard",
+     "images": true,
+     "ownAgent": false,
+     "parallel": 4,
+     "primary": false
+    }
+   ],
+   "dropped": []
+  },
+  "none": {
+   "overflow": true,
+   "entries": [],
+   "dropped": []
+  }
+ },
+ "cases": [
+  {
+   "pool": "main",
+   "value": "dgx-spark",
+   "expect": {
+    "id": "dgx-spark"
+   }
+  },
+  {
+   "pool": "main",
+   "value": "DGX-Spark",
+   "expect": {
+    "id": "dgx-spark"
+   }
+  },
+  {
+   "pool": "main",
+   "value": " bedrock ",
+   "expect": {
+    "id": "bedrock"
+   }
+  },
+  {
+   "pool": "main",
+   "value": "Amazon Bedrock|claude-sonnet-5-5",
+   "expect": {
+    "id": "bedrock"
+   }
+  },
+  {
+   "pool": "main",
+   "value": "primary",
+   "expect": {
+    "id": "primary"
+   }
+  },
+  {
+   "pool": "main",
+   "value": "PRIMARY",
+   "expect": {
+    "id": "primary"
+   }
+  },
+  {
+   "pool": "main",
+   "value": "Spark A|qwen3.8",
+   "expect": {
+    "id": "primary"
+   }
+  },
+  {
+   "pool": "main",
+   "value": "haiku",
+   "expect": {
+    "id": "guardian-claude-haiku-5-5"
+   }
+  },
+  {
+   "pool": "main",
+   "value": "spark",
+   "expect": {
+    "id": "dgx-spark"
+   }
+  },
+  {
+   "pool": "main",
+   "value": "Claude Code",
+   "expect": {
+    "id": "claude-code-sonnet"
+   }
+  },
+  {
+   "pool": "main",
+   "value": "claude",
+   "expect": {
+    "error": "Error: “claude” isn't one of this chat's subagent servers. Use one of: dgx-spark, bedrock, guardian-claude-haiku-5-5, claude-code-sonnet, primary — or leave server out."
+   }
+  },
+  {
+   "pool": "main",
+   "value": "kimi-code",
+   "expect": {
+    "error": "Error: “kimi-code” isn't one of this chat's subagent servers. Use one of: dgx-spark, bedrock, guardian-claude-haiku-5-5, claude-code-sonnet, primary — or leave server out. (kimi-code is not available in a Sensitive chat.)"
+   }
+  },
+  {
+   "pool": "main",
+   "value": "Kimi Code|kimi-for-coding",
+   "expect": {
+    "error": "Error: “Kimi Code|kimi-for-coding” isn't one of this chat's subagent servers. Use one of: dgx-spark, bedrock, guardian-claude-haiku-5-5, claude-code-sonnet, primary — or leave server out. (Kimi Code|kimi-for-coding is not available in a Sensitive chat.)"
+   }
+  },
+  {
+   "pool": "main",
+   "value": "dgx-spark-big",
+   "expect": {
+    "error": "Error: “dgx-spark-big” isn't one of this chat's subagent servers. Use one of: dgx-spark, bedrock, guardian-claude-haiku-5-5, claude-code-sonnet, primary — or leave server out. (dgx-spark-big is the same machine as dgx-spark.)"
+   }
+  },
+  {
+   "pool": "main",
+   "value": "nope",
+   "expect": {
+    "error": "Error: “nope” isn't one of this chat's subagent servers. Use one of: dgx-spark, bedrock, guardian-claude-haiku-5-5, claude-code-sonnet, primary — or leave server out."
+   }
+  },
+  {
+   "pool": "unattended-interactive",
+   "value": "primary",
+   "expect": {
+    "error": "Error: “primary” isn't one of this chat's subagent servers. Use one of: dgx-spark, bedrock — or leave server out."
+   }
+  },
+  {
+   "pool": "none",
+   "value": "dgx-spark",
+   "expect": {
+    "error": "Error: “dgx-spark” isn't one of this chat's subagent servers. This chat has none to choose from — leave server out."
+   }
+  }
+ ]
+}

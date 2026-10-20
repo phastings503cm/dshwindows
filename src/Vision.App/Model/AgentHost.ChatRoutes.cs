@@ -8,8 +8,9 @@ namespace Vision.App.Model;
 // route and thinking level (stored with the conversation); a new chat starts with what its project's chats last chose (else
 // the primary), and every path that works for a chat — its turns, retries, /goal, its task list, its subagents' fallback
 // server, compaction, carrying on after background agents — uses that chat's route. The primary in Settings › AI Models is
-// the default for new projects and the fleet's main server; choosing a model in a chat changes only that chat (and what its
-// project's next chats start with). Vision for macOS does the same (ChatRoutes.swift).
+// the default for new chats and projects (it leads nothing: each chat's own model leads that chat's subagents); choosing a
+// model in a chat changes only that chat (and what its project's next chats start with). Vision for macOS does the same
+// (ChatRoutes.swift).
 
 public sealed partial class AgentHost
 {
@@ -208,19 +209,26 @@ public sealed partial class AgentHost
         ContextInfoChanged?.Invoke();
     }
 
-    /// <summary>The chat's own route as the fleet's "primary" for its subagents: when no worker is free (or there are none) a
-    /// subagent falls back to the model its own chat uses, never another chat's.</summary>
+    /// <summary>The chat's own route as the fleet's "primary" for its subagents ("primary" in its agent tool): when no worker is
+    /// free (or there are none) a subagent falls back to the model its own chat uses, never another chat's — and the chat's model
+    /// may pick it by name.</summary>
     private FleetServer FleetHome(SessionVM vm, ProviderProfile profile)
     {
         var sessionId = vm.Id;
+        var facts = FactsFor(profile, enlisted: false);
         return new FleetServer
         {
             Id = profile.RouteId,
             Label = RouteLabel(profile),
             IsPrimary = true,
-            IsPrivate = profile.IsPrivateRoute,
+            IsHome = true,
+            Handle = SubagentPool.PrimaryId,
+            // Private as a Sensitive chat counts it (own hardware, Guardian, Bedrock in your account).
+            IsPrivate = SensitivityPolicy.IsPrivate(profile),
             InteractiveOnly = profile.IsInteractiveOnly,
             MaxParallel = Math.Clamp(profile.SubagentParallel ?? 4, 1, 16),
+            Machine = SubagentPool.Machine(facts),
+            Kind = facts.Kind.Word(),
             Resolve = _ => _dispatcher.InvokeAsync(() => ResolveHomeTargetAsync(sessionId)).Task.Unwrap(),
         };
     }

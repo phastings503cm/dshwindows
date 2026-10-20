@@ -1,0 +1,1489 @@
+{
+ "about": "SubagentPool.build: a chat's subagent pool from facts about each route (brief §2.1).",
+ "cases": [
+  {
+   "name": "a chat on DGX Spark gets the app primary (Spark A) as a subagent server when it is flagged",
+   "chat": {
+    "routeID": "DGX Spark|qwen3-coder",
+    "name": "DGX Spark",
+    "model": "qwen3-coder-30b",
+    "kind": "openai-compatible",
+    "baseURL": "http://192.168.1.43:8002/v1",
+    "private": true,
+    "privateAddress": true,
+    "selfHosted": true,
+    "context": 262144
+   },
+   "routes": [
+    {
+     "name": "Spark A",
+     "model": "qwen3.8",
+     "kind": "openai-compatible",
+     "baseURL": "http://192.168.1.40:8002/v1",
+     "private": true,
+     "privateAddress": true,
+     "selfHosted": true,
+     "context": 262144,
+     "enlisted": true
+    },
+    {
+     "routeID": "DGX Spark|qwen3-coder",
+     "name": "DGX Spark",
+     "model": "qwen3-coder-30b",
+     "kind": "openai-compatible",
+     "baseURL": "http://192.168.1.43:8002/v1",
+     "private": true,
+     "privateAddress": true,
+     "selfHosted": true,
+     "context": 262144
+    },
+    {
+     "name": "Amazon Bedrock",
+     "model": "claude-sonnet-5-5",
+     "kind": "bedrock",
+     "baseURL": "https://bedrock-runtime.us-east-1.amazonaws.com",
+     "context": 1000000,
+     "parallel": 4
+    }
+   ],
+   "guardianSignedIn": true,
+   "sensitive": false,
+   "shieldOn": true,
+   "unattended": false,
+   "overflow": true,
+   "expect": {
+    "entries": [
+     {
+      "id": "spark-a",
+      "routeID": "Spark A|qwen3.8",
+      "label": "Spark A",
+      "provider": "OpenAI-compatible server",
+      "model": "qwen3.8",
+      "context": "256K",
+      "private": true,
+      "tier": "local",
+      "speed": "standard",
+      "images": true,
+      "ownAgent": false,
+      "parallel": 2,
+      "machine": "http://192.168.1.40:8002/v1",
+      "primary": false
+     },
+     {
+      "id": "amazon-bedrock",
+      "routeID": "Amazon Bedrock|claude-sonnet-5-5",
+      "label": "Amazon Bedrock",
+      "provider": "Amazon Bedrock",
+      "model": "claude-sonnet-5-5",
+      "context": "1M",
+      "private": true,
+      "tier": "api",
+      "speed": "standard",
+      "images": true,
+      "ownAgent": false,
+      "parallel": 4,
+      "machine": "route:Amazon Bedrock|claude-sonnet-5-5",
+      "primary": false
+     },
+     {
+      "id": "primary",
+      "routeID": "DGX Spark|qwen3-coder",
+      "label": "DGX Spark",
+      "provider": "OpenAI-compatible server",
+      "model": "qwen3-coder-30b",
+      "context": "256K",
+      "private": true,
+      "tier": "local",
+      "speed": "standard",
+      "images": true,
+      "ownAgent": false,
+      "parallel": 4,
+      "machine": "http://192.168.1.43:8002/v1",
+      "primary": true
+     }
+    ],
+    "dropped": [
+     {
+      "id": "dgx-spark",
+      "reason": "this chat's own machine"
+     }
+    ],
+    "chatOwnAgent": false
+   }
+  },
+  {
+   "name": "the chat's own machine is left out under a different route id",
+   "chat": {
+    "routeID": "DGX Spark|qwen3-coder",
+    "name": "DGX Spark",
+    "model": "qwen3-coder-30b",
+    "kind": "openai-compatible",
+    "baseURL": "http://192.168.1.43:8002/v1",
+    "private": true,
+    "privateAddress": true,
+    "selfHosted": true,
+    "context": 262144
+   },
+   "routes": [
+    {
+     "routeID": "DGX Spark|qwen3-coder",
+     "name": "DGX Spark",
+     "model": "qwen3-coder-30b",
+     "kind": "openai-compatible",
+     "baseURL": "http://192.168.1.43:8002/v1",
+     "private": true,
+     "privateAddress": true,
+     "selfHosted": true,
+     "context": 262144
+    },
+    {
+     "name": "DGX Spark (big)",
+     "model": "big",
+     "kind": "openai-compatible",
+     "baseURL": "HTTP://192.168.1.43:8002/V1/",
+     "private": true,
+     "privateAddress": true,
+     "selfHosted": true
+    },
+    {
+     "name": "Amazon Bedrock",
+     "model": "claude-sonnet-5-5",
+     "kind": "bedrock",
+     "baseURL": "https://bedrock-runtime.us-east-1.amazonaws.com",
+     "context": 1000000,
+     "parallel": 4
+    }
+   ],
+   "guardianSignedIn": true,
+   "sensitive": false,
+   "shieldOn": true,
+   "unattended": false,
+   "overflow": true,
+   "expect": {
+    "entries": [
+     {
+      "id": "amazon-bedrock",
+      "routeID": "Amazon Bedrock|claude-sonnet-5-5",
+      "label": "Amazon Bedrock",
+      "provider": "Amazon Bedrock",
+      "model": "claude-sonnet-5-5",
+      "context": "1M",
+      "private": true,
+      "tier": "api",
+      "speed": "standard",
+      "images": true,
+      "ownAgent": false,
+      "parallel": 4,
+      "machine": "route:Amazon Bedrock|claude-sonnet-5-5",
+      "primary": false
+     },
+     {
+      "id": "primary",
+      "routeID": "DGX Spark|qwen3-coder",
+      "label": "DGX Spark",
+      "provider": "OpenAI-compatible server",
+      "model": "qwen3-coder-30b",
+      "context": "256K",
+      "private": true,
+      "tier": "local",
+      "speed": "standard",
+      "images": true,
+      "ownAgent": false,
+      "parallel": 4,
+      "machine": "http://192.168.1.43:8002/v1",
+      "primary": true
+     }
+    ],
+    "dropped": [
+     {
+      "id": "dgx-spark",
+      "reason": "this chat's own machine"
+     },
+     {
+      "id": "dgx-spark-big",
+      "reason": "this chat's own machine"
+     }
+    ],
+    "chatOwnAgent": false
+   }
+  },
+  {
+   "name": "two routes on one machine: only the first serves",
+   "chat": {
+    "name": "Spark A",
+    "model": "qwen3.8",
+    "kind": "openai-compatible",
+    "baseURL": "http://192.168.1.40:8002/v1",
+    "private": true,
+    "privateAddress": true,
+    "selfHosted": true,
+    "context": 262144,
+    "enlisted": false
+   },
+   "routes": [
+    {
+     "routeID": "DGX Spark|qwen3-coder",
+     "name": "DGX Spark",
+     "model": "qwen3-coder-30b",
+     "kind": "openai-compatible",
+     "baseURL": "http://192.168.1.43:8002/v1",
+     "private": true,
+     "privateAddress": true,
+     "selfHosted": true,
+     "context": 262144
+    },
+    {
+     "name": "DGX Spark (big)",
+     "model": "big",
+     "kind": "openai-compatible",
+     "baseURL": "HTTP://192.168.1.43:8002/V1/",
+     "private": true,
+     "privateAddress": true,
+     "selfHosted": true
+    },
+    {
+     "name": "Amazon Bedrock",
+     "model": "claude-sonnet-5-5",
+     "kind": "bedrock",
+     "baseURL": "https://bedrock-runtime.us-east-1.amazonaws.com",
+     "context": 1000000,
+     "parallel": 4
+    }
+   ],
+   "guardianSignedIn": true,
+   "sensitive": false,
+   "shieldOn": true,
+   "unattended": false,
+   "overflow": true,
+   "expect": {
+    "entries": [
+     {
+      "id": "dgx-spark",
+      "routeID": "DGX Spark|qwen3-coder",
+      "label": "DGX Spark",
+      "provider": "OpenAI-compatible server",
+      "model": "qwen3-coder-30b",
+      "context": "256K",
+      "private": true,
+      "tier": "local",
+      "speed": "standard",
+      "images": true,
+      "ownAgent": false,
+      "parallel": 2,
+      "machine": "http://192.168.1.43:8002/v1",
+      "primary": false
+     },
+     {
+      "id": "amazon-bedrock",
+      "routeID": "Amazon Bedrock|claude-sonnet-5-5",
+      "label": "Amazon Bedrock",
+      "provider": "Amazon Bedrock",
+      "model": "claude-sonnet-5-5",
+      "context": "1M",
+      "private": true,
+      "tier": "api",
+      "speed": "standard",
+      "images": true,
+      "ownAgent": false,
+      "parallel": 4,
+      "machine": "route:Amazon Bedrock|claude-sonnet-5-5",
+      "primary": false
+     },
+     {
+      "id": "primary",
+      "routeID": "Spark A|qwen3.8",
+      "label": "Spark A",
+      "provider": "OpenAI-compatible server",
+      "model": "qwen3.8",
+      "context": "256K",
+      "private": true,
+      "tier": "local",
+      "speed": "standard",
+      "images": true,
+      "ownAgent": false,
+      "parallel": 4,
+      "machine": "http://192.168.1.40:8002/v1",
+      "primary": true
+     }
+    ],
+    "dropped": [
+     {
+      "id": "dgx-spark-big",
+      "reason": "the same machine as dgx-spark"
+     }
+    ],
+    "chatOwnAgent": false
+   }
+  },
+  {
+   "name": "Guardian signed out leaves its models out",
+   "chat": {
+    "name": "Spark A",
+    "model": "qwen3.8",
+    "kind": "openai-compatible",
+    "baseURL": "http://192.168.1.40:8002/v1",
+    "private": true,
+    "privateAddress": true,
+    "selfHosted": true,
+    "context": 262144,
+    "enlisted": false
+   },
+   "routes": [
+    {
+     "routeID": "DGX Spark|qwen3-coder",
+     "name": "DGX Spark",
+     "model": "qwen3-coder-30b",
+     "kind": "openai-compatible",
+     "baseURL": "http://192.168.1.43:8002/v1",
+     "private": true,
+     "privateAddress": true,
+     "selfHosted": true,
+     "context": 262144
+    },
+    {
+     "name": "Guardian",
+     "model": "claude-haiku-5-5",
+     "kind": "guardian",
+     "baseURL": "https://guardian.503cm.com/v1",
+     "context": 1000000,
+     "enlisted": true
+    },
+    {
+     "name": "Guardian",
+     "model": "claude-sonnet-5-5",
+     "kind": "guardian",
+     "baseURL": "https://guardian.503cm.com/v1",
+     "context": 1000000,
+     "enlisted": true
+    }
+   ],
+   "guardianSignedIn": false,
+   "sensitive": false,
+   "shieldOn": true,
+   "unattended": false,
+   "overflow": true,
+   "expect": {
+    "entries": [
+     {
+      "id": "dgx-spark",
+      "routeID": "DGX Spark|qwen3-coder",
+      "label": "DGX Spark",
+      "provider": "OpenAI-compatible server",
+      "model": "qwen3-coder-30b",
+      "context": "256K",
+      "private": true,
+      "tier": "local",
+      "speed": "standard",
+      "images": true,
+      "ownAgent": false,
+      "parallel": 2,
+      "machine": "http://192.168.1.43:8002/v1",
+      "primary": false
+     },
+     {
+      "id": "primary",
+      "routeID": "Spark A|qwen3.8",
+      "label": "Spark A",
+      "provider": "OpenAI-compatible server",
+      "model": "qwen3.8",
+      "context": "256K",
+      "private": true,
+      "tier": "local",
+      "speed": "standard",
+      "images": true,
+      "ownAgent": false,
+      "parallel": 4,
+      "machine": "http://192.168.1.40:8002/v1",
+      "primary": true
+     }
+    ],
+    "dropped": [
+     {
+      "id": "guardian-claude-haiku-5-5",
+      "reason": "on Guardian, which is signed out"
+     },
+     {
+      "id": "guardian-claude-sonnet-5-5",
+      "reason": "on Guardian, which is signed out"
+     }
+    ],
+    "chatOwnAgent": false
+   }
+  },
+  {
+   "name": "a Sensitive chat with the shield on drops Claude Code and keeps masked online routes",
+   "chat": {
+    "name": "Spark A",
+    "model": "qwen3.8",
+    "kind": "openai-compatible",
+    "baseURL": "http://192.168.1.40:8002/v1",
+    "private": true,
+    "privateAddress": true,
+    "selfHosted": true,
+    "context": 262144,
+    "enlisted": false
+   },
+   "routes": [
+    {
+     "routeID": "DGX Spark|qwen3-coder",
+     "name": "DGX Spark",
+     "model": "qwen3-coder-30b",
+     "kind": "openai-compatible",
+     "baseURL": "http://192.168.1.43:8002/v1",
+     "private": true,
+     "privateAddress": true,
+     "selfHosted": true,
+     "context": 262144
+    },
+    {
+     "name": "Amazon Bedrock",
+     "model": "claude-sonnet-5-5",
+     "kind": "bedrock",
+     "baseURL": "https://bedrock-runtime.us-east-1.amazonaws.com",
+     "context": 1000000,
+     "parallel": 4
+    },
+    {
+     "name": "Kimi Code",
+     "model": "kimi-for-coding",
+     "kind": "openai-compatible",
+     "baseURL": "https://api.kimi.ai/coding/v1",
+     "planProvider": "Kimi",
+     "planSubscription": true,
+     "context": 1000000
+    },
+    {
+     "name": "Claude Code",
+     "model": "sonnet",
+     "kind": "claude-code",
+     "baseURL": "claude-code://local",
+     "privateAddress": true,
+     "selfHosted": true,
+     "context": 200000,
+     "enlisted": true
+    },
+    {
+     "name": "Guardian",
+     "model": "claude-haiku-5-5",
+     "kind": "guardian",
+     "baseURL": "https://guardian.503cm.com/v1",
+     "context": 1000000,
+     "enlisted": true
+    }
+   ],
+   "guardianSignedIn": true,
+   "sensitive": true,
+   "shieldOn": true,
+   "unattended": false,
+   "overflow": true,
+   "expect": {
+    "entries": [
+     {
+      "id": "dgx-spark",
+      "routeID": "DGX Spark|qwen3-coder",
+      "label": "DGX Spark",
+      "provider": "OpenAI-compatible server",
+      "model": "qwen3-coder-30b",
+      "context": "256K",
+      "private": true,
+      "tier": "local",
+      "speed": "standard",
+      "images": true,
+      "ownAgent": false,
+      "parallel": 2,
+      "machine": "http://192.168.1.43:8002/v1",
+      "primary": false
+     },
+     {
+      "id": "amazon-bedrock",
+      "routeID": "Amazon Bedrock|claude-sonnet-5-5",
+      "label": "Amazon Bedrock",
+      "provider": "Amazon Bedrock",
+      "model": "claude-sonnet-5-5",
+      "context": "1M",
+      "private": true,
+      "tier": "api",
+      "speed": "standard",
+      "images": true,
+      "ownAgent": false,
+      "parallel": 4,
+      "machine": "route:Amazon Bedrock|claude-sonnet-5-5",
+      "primary": false
+     },
+     {
+      "id": "kimi-code",
+      "routeID": "Kimi Code|kimi-for-coding",
+      "label": "Kimi Code",
+      "provider": "Kimi",
+      "model": "kimi-for-coding",
+      "context": "1M",
+      "private": false,
+      "tier": "subscription",
+      "speed": "standard",
+      "images": true,
+      "ownAgent": false,
+      "parallel": 2,
+      "machine": "route:Kimi Code|kimi-for-coding",
+      "primary": false
+     },
+     {
+      "id": "guardian",
+      "routeID": "Guardian|claude-haiku-5-5",
+      "label": "Guardian",
+      "provider": "Guardian",
+      "model": "claude-haiku-5-5",
+      "context": "1M",
+      "private": true,
+      "tier": "org",
+      "speed": "fast",
+      "images": true,
+      "ownAgent": false,
+      "parallel": 2,
+      "machine": "route:Guardian|claude-haiku-5-5",
+      "primary": false
+     },
+     {
+      "id": "primary",
+      "routeID": "Spark A|qwen3.8",
+      "label": "Spark A",
+      "provider": "OpenAI-compatible server",
+      "model": "qwen3.8",
+      "context": "256K",
+      "private": true,
+      "tier": "local",
+      "speed": "standard",
+      "images": true,
+      "ownAgent": false,
+      "parallel": 4,
+      "machine": "http://192.168.1.40:8002/v1",
+      "primary": true
+     }
+    ],
+    "dropped": [
+     {
+      "id": "claude-code",
+      "reason": "not available in a Sensitive chat"
+     }
+    ],
+    "chatOwnAgent": false
+   }
+  },
+  {
+   "name": "a Sensitive chat with the shield off drops every online route",
+   "chat": {
+    "name": "Spark A",
+    "model": "qwen3.8",
+    "kind": "openai-compatible",
+    "baseURL": "http://192.168.1.40:8002/v1",
+    "private": true,
+    "privateAddress": true,
+    "selfHosted": true,
+    "context": 262144,
+    "enlisted": false
+   },
+   "routes": [
+    {
+     "routeID": "DGX Spark|qwen3-coder",
+     "name": "DGX Spark",
+     "model": "qwen3-coder-30b",
+     "kind": "openai-compatible",
+     "baseURL": "http://192.168.1.43:8002/v1",
+     "private": true,
+     "privateAddress": true,
+     "selfHosted": true,
+     "context": 262144
+    },
+    {
+     "name": "Amazon Bedrock",
+     "model": "claude-sonnet-5-5",
+     "kind": "bedrock",
+     "baseURL": "https://bedrock-runtime.us-east-1.amazonaws.com",
+     "context": 1000000,
+     "parallel": 4
+    },
+    {
+     "name": "Kimi Code",
+     "model": "kimi-for-coding",
+     "kind": "openai-compatible",
+     "baseURL": "https://api.kimi.ai/coding/v1",
+     "planProvider": "Kimi",
+     "planSubscription": true,
+     "context": 1000000
+    },
+    {
+     "name": "Claude Code",
+     "model": "sonnet",
+     "kind": "claude-code",
+     "baseURL": "claude-code://local",
+     "privateAddress": true,
+     "selfHosted": true,
+     "context": 200000,
+     "enlisted": true
+    },
+    {
+     "name": "Guardian",
+     "model": "claude-haiku-5-5",
+     "kind": "guardian",
+     "baseURL": "https://guardian.503cm.com/v1",
+     "context": 1000000,
+     "enlisted": true
+    }
+   ],
+   "guardianSignedIn": true,
+   "sensitive": true,
+   "shieldOn": false,
+   "unattended": false,
+   "overflow": true,
+   "expect": {
+    "entries": [
+     {
+      "id": "dgx-spark",
+      "routeID": "DGX Spark|qwen3-coder",
+      "label": "DGX Spark",
+      "provider": "OpenAI-compatible server",
+      "model": "qwen3-coder-30b",
+      "context": "256K",
+      "private": true,
+      "tier": "local",
+      "speed": "standard",
+      "images": true,
+      "ownAgent": false,
+      "parallel": 2,
+      "machine": "http://192.168.1.43:8002/v1",
+      "primary": false
+     },
+     {
+      "id": "amazon-bedrock",
+      "routeID": "Amazon Bedrock|claude-sonnet-5-5",
+      "label": "Amazon Bedrock",
+      "provider": "Amazon Bedrock",
+      "model": "claude-sonnet-5-5",
+      "context": "1M",
+      "private": true,
+      "tier": "api",
+      "speed": "standard",
+      "images": true,
+      "ownAgent": false,
+      "parallel": 4,
+      "machine": "route:Amazon Bedrock|claude-sonnet-5-5",
+      "primary": false
+     },
+     {
+      "id": "guardian",
+      "routeID": "Guardian|claude-haiku-5-5",
+      "label": "Guardian",
+      "provider": "Guardian",
+      "model": "claude-haiku-5-5",
+      "context": "1M",
+      "private": true,
+      "tier": "org",
+      "speed": "fast",
+      "images": true,
+      "ownAgent": false,
+      "parallel": 2,
+      "machine": "route:Guardian|claude-haiku-5-5",
+      "primary": false
+     },
+     {
+      "id": "primary",
+      "routeID": "Spark A|qwen3.8",
+      "label": "Spark A",
+      "provider": "OpenAI-compatible server",
+      "model": "qwen3.8",
+      "context": "256K",
+      "private": true,
+      "tier": "local",
+      "speed": "standard",
+      "images": true,
+      "ownAgent": false,
+      "parallel": 4,
+      "machine": "http://192.168.1.40:8002/v1",
+      "primary": true
+     }
+    ],
+    "dropped": [
+     {
+      "id": "kimi-code",
+      "reason": "not available in a Sensitive chat"
+     },
+     {
+      "id": "claude-code",
+      "reason": "not available in a Sensitive chat"
+     }
+    ],
+    "chatOwnAgent": false
+   }
+  },
+  {
+   "name": "an unattended run leaves out interactive-only plans",
+   "chat": {
+    "name": "Spark A",
+    "model": "qwen3.8",
+    "kind": "openai-compatible",
+    "baseURL": "http://192.168.1.40:8002/v1",
+    "private": true,
+    "privateAddress": true,
+    "selfHosted": true,
+    "context": 262144,
+    "enlisted": false
+   },
+   "routes": [
+    {
+     "routeID": "DGX Spark|qwen3-coder",
+     "name": "DGX Spark",
+     "model": "qwen3-coder-30b",
+     "kind": "openai-compatible",
+     "baseURL": "http://192.168.1.43:8002/v1",
+     "private": true,
+     "privateAddress": true,
+     "selfHosted": true,
+     "context": 262144
+    },
+    {
+     "name": "Qwen Coding Plan",
+     "model": "qwen3.8-plus",
+     "kind": "openai-compatible",
+     "baseURL": "https://coding-intl.dashscope.aliyuncs.com/v1",
+     "planProvider": "Alibaba Cloud",
+     "planSubscription": true,
+     "interactiveOnly": true,
+     "context": 1000000,
+     "images": false
+    },
+    {
+     "name": "Kimi Code",
+     "model": "kimi-for-coding",
+     "kind": "openai-compatible",
+     "baseURL": "https://api.kimi.ai/coding/v1",
+     "planProvider": "Kimi",
+     "planSubscription": true,
+     "context": 1000000
+    }
+   ],
+   "guardianSignedIn": true,
+   "sensitive": false,
+   "shieldOn": true,
+   "unattended": true,
+   "overflow": true,
+   "expect": {
+    "entries": [
+     {
+      "id": "dgx-spark",
+      "routeID": "DGX Spark|qwen3-coder",
+      "label": "DGX Spark",
+      "provider": "OpenAI-compatible server",
+      "model": "qwen3-coder-30b",
+      "context": "256K",
+      "private": true,
+      "tier": "local",
+      "speed": "standard",
+      "images": true,
+      "ownAgent": false,
+      "parallel": 2,
+      "machine": "http://192.168.1.43:8002/v1",
+      "primary": false
+     },
+     {
+      "id": "kimi-code",
+      "routeID": "Kimi Code|kimi-for-coding",
+      "label": "Kimi Code",
+      "provider": "Kimi",
+      "model": "kimi-for-coding",
+      "context": "1M",
+      "private": false,
+      "tier": "subscription",
+      "speed": "standard",
+      "images": true,
+      "ownAgent": false,
+      "parallel": 2,
+      "machine": "route:Kimi Code|kimi-for-coding",
+      "primary": false
+     },
+     {
+      "id": "primary",
+      "routeID": "Spark A|qwen3.8",
+      "label": "Spark A",
+      "provider": "OpenAI-compatible server",
+      "model": "qwen3.8",
+      "context": "256K",
+      "private": true,
+      "tier": "local",
+      "speed": "standard",
+      "images": true,
+      "ownAgent": false,
+      "parallel": 4,
+      "machine": "http://192.168.1.40:8002/v1",
+      "primary": true
+     }
+    ],
+    "dropped": [
+     {
+      "id": "qwen-coding-plan",
+      "reason": "for interactive use only, and this run is unattended"
+     }
+    ],
+    "chatOwnAgent": false
+   }
+  },
+  {
+   "name": "a chat on Claude Code has no pool",
+   "chat": {
+    "name": "Claude Code",
+    "model": "sonnet",
+    "kind": "claude-code",
+    "baseURL": "claude-code://local",
+    "privateAddress": true,
+    "selfHosted": true,
+    "context": 200000,
+    "enlisted": true
+   },
+   "routes": [
+    {
+     "routeID": "DGX Spark|qwen3-coder",
+     "name": "DGX Spark",
+     "model": "qwen3-coder-30b",
+     "kind": "openai-compatible",
+     "baseURL": "http://192.168.1.43:8002/v1",
+     "private": true,
+     "privateAddress": true,
+     "selfHosted": true,
+     "context": 262144
+    },
+    {
+     "name": "Amazon Bedrock",
+     "model": "claude-sonnet-5-5",
+     "kind": "bedrock",
+     "baseURL": "https://bedrock-runtime.us-east-1.amazonaws.com",
+     "context": 1000000,
+     "parallel": 4
+    }
+   ],
+   "guardianSignedIn": true,
+   "sensitive": false,
+   "shieldOn": true,
+   "unattended": false,
+   "overflow": true,
+   "expect": {
+    "entries": [],
+    "dropped": [],
+    "chatOwnAgent": true
+   }
+  },
+  {
+   "name": "Bedrock and Guardian count as private; Claude Code never does",
+   "chat": {
+    "name": "Spark A",
+    "model": "qwen3.8",
+    "kind": "openai-compatible",
+    "baseURL": "http://192.168.1.40:8002/v1",
+    "private": true,
+    "privateAddress": true,
+    "selfHosted": true,
+    "context": 262144,
+    "enlisted": false
+   },
+   "routes": [
+    {
+     "name": "Amazon Bedrock",
+     "model": "claude-sonnet-5-5",
+     "kind": "bedrock",
+     "baseURL": "https://bedrock-runtime.us-east-1.amazonaws.com",
+     "context": 1000000,
+     "parallel": 4
+    },
+    {
+     "name": "Guardian",
+     "model": "claude-sonnet-5-5",
+     "kind": "guardian",
+     "baseURL": "https://guardian.503cm.com/v1",
+     "context": 1000000,
+     "enlisted": true
+    },
+    {
+     "name": "Claude Code",
+     "model": "sonnet",
+     "kind": "claude-code",
+     "baseURL": "claude-code://local",
+     "privateAddress": true,
+     "selfHosted": true,
+     "context": 200000,
+     "enlisted": true
+    }
+   ],
+   "guardianSignedIn": true,
+   "sensitive": false,
+   "shieldOn": true,
+   "unattended": false,
+   "overflow": true,
+   "expect": {
+    "entries": [
+     {
+      "id": "amazon-bedrock",
+      "routeID": "Amazon Bedrock|claude-sonnet-5-5",
+      "label": "Amazon Bedrock",
+      "provider": "Amazon Bedrock",
+      "model": "claude-sonnet-5-5",
+      "context": "1M",
+      "private": true,
+      "tier": "api",
+      "speed": "standard",
+      "images": true,
+      "ownAgent": false,
+      "parallel": 4,
+      "machine": "route:Amazon Bedrock|claude-sonnet-5-5",
+      "primary": false
+     },
+     {
+      "id": "guardian",
+      "routeID": "Guardian|claude-sonnet-5-5",
+      "label": "Guardian",
+      "provider": "Guardian",
+      "model": "claude-sonnet-5-5",
+      "context": "1M",
+      "private": true,
+      "tier": "org",
+      "speed": "standard",
+      "images": true,
+      "ownAgent": false,
+      "parallel": 2,
+      "machine": "route:Guardian|claude-sonnet-5-5",
+      "primary": false
+     },
+     {
+      "id": "claude-code",
+      "routeID": "Claude Code|sonnet",
+      "label": "Claude Code",
+      "provider": "Claude Code",
+      "model": "sonnet",
+      "context": "200K",
+      "private": false,
+      "tier": "subscription",
+      "speed": "standard",
+      "images": false,
+      "ownAgent": true,
+      "parallel": 2,
+      "machine": "route:Claude Code|sonnet",
+      "primary": false
+     },
+     {
+      "id": "primary",
+      "routeID": "Spark A|qwen3.8",
+      "label": "Spark A",
+      "provider": "OpenAI-compatible server",
+      "model": "qwen3.8",
+      "context": "256K",
+      "private": true,
+      "tier": "local",
+      "speed": "standard",
+      "images": true,
+      "ownAgent": false,
+      "parallel": 4,
+      "machine": "http://192.168.1.40:8002/v1",
+      "primary": true
+     }
+    ],
+    "dropped": [],
+    "chatOwnAgent": false
+   }
+  },
+  {
+   "name": "a flagged primary serves chats on other models, never its own chat",
+   "chat": {
+    "name": "Spark A",
+    "model": "qwen3.8",
+    "kind": "openai-compatible",
+    "baseURL": "http://192.168.1.40:8002/v1",
+    "private": true,
+    "privateAddress": true,
+    "selfHosted": true,
+    "context": 262144,
+    "enlisted": false
+   },
+   "routes": [
+    {
+     "name": "Spark A",
+     "model": "qwen3.8",
+     "kind": "openai-compatible",
+     "baseURL": "http://192.168.1.40:8002/v1",
+     "private": true,
+     "privateAddress": true,
+     "selfHosted": true,
+     "context": 262144,
+     "enlisted": true
+    },
+    {
+     "name": "Kimi Code",
+     "model": "kimi-for-coding",
+     "kind": "openai-compatible",
+     "baseURL": "https://api.kimi.ai/coding/v1",
+     "planProvider": "Kimi",
+     "planSubscription": true,
+     "context": 1000000
+    }
+   ],
+   "guardianSignedIn": true,
+   "sensitive": false,
+   "shieldOn": true,
+   "unattended": false,
+   "overflow": true,
+   "expect": {
+    "entries": [
+     {
+      "id": "kimi-code",
+      "routeID": "Kimi Code|kimi-for-coding",
+      "label": "Kimi Code",
+      "provider": "Kimi",
+      "model": "kimi-for-coding",
+      "context": "1M",
+      "private": false,
+      "tier": "subscription",
+      "speed": "standard",
+      "images": true,
+      "ownAgent": false,
+      "parallel": 2,
+      "machine": "route:Kimi Code|kimi-for-coding",
+      "primary": false
+     },
+     {
+      "id": "primary",
+      "routeID": "Spark A|qwen3.8",
+      "label": "Spark A",
+      "provider": "OpenAI-compatible server",
+      "model": "qwen3.8",
+      "context": "256K",
+      "private": true,
+      "tier": "local",
+      "speed": "standard",
+      "images": true,
+      "ownAgent": false,
+      "parallel": 4,
+      "machine": "http://192.168.1.40:8002/v1",
+      "primary": true
+     }
+    ],
+    "dropped": [
+     {
+      "id": "spark-a",
+      "reason": "this chat's own machine"
+     }
+    ],
+    "chatOwnAgent": false
+   }
+  },
+  {
+   "name": "an unattended chat on an interactive-only route has no primary entry",
+   "chat": {
+    "name": "Qwen Coding Plan",
+    "model": "qwen3.8-plus",
+    "kind": "openai-compatible",
+    "baseURL": "https://coding-intl.dashscope.aliyuncs.com/v1",
+    "planProvider": "Alibaba Cloud",
+    "planSubscription": true,
+    "interactiveOnly": true,
+    "context": 1000000,
+    "images": false
+   },
+   "routes": [
+    {
+     "routeID": "DGX Spark|qwen3-coder",
+     "name": "DGX Spark",
+     "model": "qwen3-coder-30b",
+     "kind": "openai-compatible",
+     "baseURL": "http://192.168.1.43:8002/v1",
+     "private": true,
+     "privateAddress": true,
+     "selfHosted": true,
+     "context": 262144
+    }
+   ],
+   "guardianSignedIn": true,
+   "sensitive": false,
+   "shieldOn": true,
+   "unattended": true,
+   "overflow": true,
+   "expect": {
+    "entries": [
+     {
+      "id": "dgx-spark",
+      "routeID": "DGX Spark|qwen3-coder",
+      "label": "DGX Spark",
+      "provider": "OpenAI-compatible server",
+      "model": "qwen3-coder-30b",
+      "context": "256K",
+      "private": true,
+      "tier": "local",
+      "speed": "standard",
+      "images": true,
+      "ownAgent": false,
+      "parallel": 2,
+      "machine": "http://192.168.1.43:8002/v1",
+      "primary": false
+     }
+    ],
+    "dropped": [],
+    "chatOwnAgent": false
+   }
+  },
+  {
+   "name": "everything at once, in Settings order then Guardian's",
+   "chat": {
+    "name": "Spark A",
+    "model": "qwen3.8",
+    "kind": "openai-compatible",
+    "baseURL": "http://192.168.1.40:8002/v1",
+    "private": true,
+    "privateAddress": true,
+    "selfHosted": true,
+    "context": 262144,
+    "enlisted": false
+   },
+   "routes": [
+    {
+     "name": "Spark A",
+     "model": "qwen3.8",
+     "kind": "openai-compatible",
+     "baseURL": "http://192.168.1.40:8002/v1",
+     "private": true,
+     "privateAddress": true,
+     "selfHosted": true,
+     "context": 262144,
+     "enlisted": false
+    },
+    {
+     "routeID": "DGX Spark|qwen3-coder",
+     "name": "DGX Spark",
+     "model": "qwen3-coder-30b",
+     "kind": "openai-compatible",
+     "baseURL": "http://192.168.1.43:8002/v1",
+     "private": true,
+     "privateAddress": true,
+     "selfHosted": true,
+     "context": 262144
+    },
+    {
+     "name": "DGX Spark (big)",
+     "model": "big",
+     "kind": "openai-compatible",
+     "baseURL": "HTTP://192.168.1.43:8002/V1/",
+     "private": true,
+     "privateAddress": true,
+     "selfHosted": true
+    },
+    {
+     "name": "Amazon Bedrock",
+     "model": "claude-sonnet-5-5",
+     "kind": "bedrock",
+     "baseURL": "https://bedrock-runtime.us-east-1.amazonaws.com",
+     "context": 1000000,
+     "parallel": 4
+    },
+    {
+     "name": "Kimi Code",
+     "model": "kimi-for-coding",
+     "kind": "openai-compatible",
+     "baseURL": "https://api.kimi.ai/coding/v1",
+     "planProvider": "Kimi",
+     "planSubscription": true,
+     "context": 1000000
+    },
+    {
+     "name": "Qwen Coding Plan",
+     "model": "qwen3.8-plus",
+     "kind": "openai-compatible",
+     "baseURL": "https://coding-intl.dashscope.aliyuncs.com/v1",
+     "planProvider": "Alibaba Cloud",
+     "planSubscription": true,
+     "interactiveOnly": true,
+     "context": 1000000,
+     "images": false
+    },
+    {
+     "name": "OpenAI",
+     "model": "gpt-5-mini",
+     "kind": "openai",
+     "baseURL": "https://api.openai.com/v1",
+     "planProvider": "OpenAI",
+     "planSubscription": false,
+     "enlisted": false
+    },
+    {
+     "name": "Ollama (local)",
+     "model": "qwen3:8b",
+     "kind": "ollama",
+     "baseURL": "http://127.0.0.1:11434/v1",
+     "private": true,
+     "privateAddress": true,
+     "selfHosted": true,
+     "enlisted": false
+    },
+    {
+     "name": "Claude Code",
+     "model": "sonnet",
+     "kind": "claude-code",
+     "baseURL": "claude-code://local",
+     "privateAddress": true,
+     "selfHosted": true,
+     "context": 200000,
+     "enlisted": true
+    },
+    {
+     "name": "Claude Code",
+     "model": "opus",
+     "kind": "claude-code",
+     "baseURL": "claude-code://local",
+     "privateAddress": true,
+     "selfHosted": true,
+     "context": 200000,
+     "enlisted": false
+    },
+    {
+     "name": "Guardian",
+     "model": "claude-haiku-5-5",
+     "kind": "guardian",
+     "baseURL": "https://guardian.503cm.com/v1",
+     "context": 1000000,
+     "enlisted": true
+    },
+    {
+     "name": "Guardian",
+     "model": "claude-sonnet-5-5",
+     "kind": "guardian",
+     "baseURL": "https://guardian.503cm.com/v1",
+     "context": 1000000,
+     "enlisted": true
+    },
+    {
+     "name": "Guardian",
+     "model": "claude-opus-5-5",
+     "kind": "guardian",
+     "baseURL": "https://guardian.503cm.com/v1",
+     "context": 1000000,
+     "enlisted": false
+    }
+   ],
+   "guardianSignedIn": true,
+   "sensitive": false,
+   "shieldOn": true,
+   "unattended": false,
+   "overflow": true,
+   "expect": {
+    "entries": [
+     {
+      "id": "dgx-spark",
+      "routeID": "DGX Spark|qwen3-coder",
+      "label": "DGX Spark",
+      "provider": "OpenAI-compatible server",
+      "model": "qwen3-coder-30b",
+      "context": "256K",
+      "private": true,
+      "tier": "local",
+      "speed": "standard",
+      "images": true,
+      "ownAgent": false,
+      "parallel": 2,
+      "machine": "http://192.168.1.43:8002/v1",
+      "primary": false
+     },
+     {
+      "id": "amazon-bedrock",
+      "routeID": "Amazon Bedrock|claude-sonnet-5-5",
+      "label": "Amazon Bedrock",
+      "provider": "Amazon Bedrock",
+      "model": "claude-sonnet-5-5",
+      "context": "1M",
+      "private": true,
+      "tier": "api",
+      "speed": "standard",
+      "images": true,
+      "ownAgent": false,
+      "parallel": 4,
+      "machine": "route:Amazon Bedrock|claude-sonnet-5-5",
+      "primary": false
+     },
+     {
+      "id": "kimi-code",
+      "routeID": "Kimi Code|kimi-for-coding",
+      "label": "Kimi Code",
+      "provider": "Kimi",
+      "model": "kimi-for-coding",
+      "context": "1M",
+      "private": false,
+      "tier": "subscription",
+      "speed": "standard",
+      "images": true,
+      "ownAgent": false,
+      "parallel": 2,
+      "machine": "route:Kimi Code|kimi-for-coding",
+      "primary": false
+     },
+     {
+      "id": "qwen-coding-plan",
+      "routeID": "Qwen Coding Plan|qwen3.8-plus",
+      "label": "Qwen Coding Plan",
+      "provider": "Alibaba Cloud",
+      "model": "qwen3.8-plus",
+      "context": "1M",
+      "private": false,
+      "tier": "subscription",
+      "speed": "standard",
+      "images": false,
+      "ownAgent": false,
+      "parallel": 2,
+      "machine": "route:Qwen Coding Plan|qwen3.8-plus",
+      "primary": false
+     },
+     {
+      "id": "claude-code-sonnet",
+      "routeID": "Claude Code|sonnet",
+      "label": "Claude Code",
+      "provider": "Claude Code",
+      "model": "sonnet",
+      "context": "200K",
+      "private": false,
+      "tier": "subscription",
+      "speed": "standard",
+      "images": false,
+      "ownAgent": true,
+      "parallel": 2,
+      "machine": "route:Claude Code|sonnet",
+      "primary": false
+     },
+     {
+      "id": "guardian-claude-haiku-5-5",
+      "routeID": "Guardian|claude-haiku-5-5",
+      "label": "Guardian",
+      "provider": "Guardian",
+      "model": "claude-haiku-5-5",
+      "context": "1M",
+      "private": true,
+      "tier": "org",
+      "speed": "fast",
+      "images": true,
+      "ownAgent": false,
+      "parallel": 2,
+      "machine": "route:Guardian|claude-haiku-5-5",
+      "primary": false
+     },
+     {
+      "id": "guardian-claude-sonnet-5-5",
+      "routeID": "Guardian|claude-sonnet-5-5",
+      "label": "Guardian",
+      "provider": "Guardian",
+      "model": "claude-sonnet-5-5",
+      "context": "1M",
+      "private": true,
+      "tier": "org",
+      "speed": "standard",
+      "images": true,
+      "ownAgent": false,
+      "parallel": 2,
+      "machine": "route:Guardian|claude-sonnet-5-5",
+      "primary": false
+     },
+     {
+      "id": "primary",
+      "routeID": "Spark A|qwen3.8",
+      "label": "Spark A",
+      "provider": "OpenAI-compatible server",
+      "model": "qwen3.8",
+      "context": "256K",
+      "private": true,
+      "tier": "local",
+      "speed": "standard",
+      "images": true,
+      "ownAgent": false,
+      "parallel": 4,
+      "machine": "http://192.168.1.40:8002/v1",
+      "primary": true
+     }
+    ],
+    "dropped": [
+     {
+      "id": "dgx-spark-big",
+      "reason": "the same machine as dgx-spark"
+     }
+    ],
+    "chatOwnAgent": false
+   }
+  },
+  {
+   "name": "handles are worked out over every route, flagged or not",
+   "chat": {
+    "name": "Spark A",
+    "model": "qwen3.8",
+    "kind": "openai-compatible",
+    "baseURL": "http://192.168.1.40:8002/v1",
+    "private": true,
+    "privateAddress": true,
+    "selfHosted": true,
+    "context": 262144,
+    "enlisted": false
+   },
+   "routes": [
+    {
+     "name": "Claude Code",
+     "model": "sonnet",
+     "kind": "claude-code",
+     "baseURL": "claude-code://local",
+     "privateAddress": true,
+     "selfHosted": true,
+     "context": 200000,
+     "enlisted": true
+    },
+    {
+     "name": "Claude Code",
+     "model": "opus",
+     "kind": "claude-code",
+     "baseURL": "claude-code://local",
+     "privateAddress": true,
+     "selfHosted": true,
+     "context": 200000,
+     "enlisted": false
+    }
+   ],
+   "guardianSignedIn": true,
+   "sensitive": false,
+   "shieldOn": true,
+   "unattended": false,
+   "overflow": true,
+   "expect": {
+    "entries": [
+     {
+      "id": "claude-code-sonnet",
+      "routeID": "Claude Code|sonnet",
+      "label": "Claude Code",
+      "provider": "Claude Code",
+      "model": "sonnet",
+      "context": "200K",
+      "private": false,
+      "tier": "subscription",
+      "speed": "standard",
+      "images": false,
+      "ownAgent": true,
+      "parallel": 2,
+      "machine": "route:Claude Code|sonnet",
+      "primary": false
+     },
+     {
+      "id": "primary",
+      "routeID": "Spark A|qwen3.8",
+      "label": "Spark A",
+      "provider": "OpenAI-compatible server",
+      "model": "qwen3.8",
+      "context": "256K",
+      "private": true,
+      "tier": "local",
+      "speed": "standard",
+      "images": true,
+      "ownAgent": false,
+      "parallel": 4,
+      "machine": "http://192.168.1.40:8002/v1",
+      "primary": true
+     }
+    ],
+    "dropped": [],
+    "chatOwnAgent": false
+   }
+  }
+ ]
+}

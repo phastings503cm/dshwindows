@@ -245,7 +245,8 @@ public static class RunActivity
                 {
                     Assignment = run.Assignment is null ? null : "Plan step: " + run.Assignment,
                     Placement = run.PlacementLabel ?? "waiting for a model server",
-                    Status = run.Placement is { } note ? "Running · " + note : "Running",
+                    // How its server was chosen — picked by the primary, least busy, set by its agent type, or a fallback and why.
+                    Status = SubagentPlacement.StatusLine(run.PlacementReason, run.Placement),
                     Activity = run.Activity,
                     StartedAt = run.StartedAt,
                     Tokens = run.TotalTokens,

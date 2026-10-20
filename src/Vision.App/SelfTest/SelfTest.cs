@@ -220,6 +220,8 @@ public sealed partial class SelfTest
 
             await CaptureModels(window, model);
 
+            await CapturePool(window, model);
+
             await CaptureMachineGlow(window, model, chat);
 
             // What the composer says it will send for a PDF, a Markdown file, a Word file, a scan and a large paste.
@@ -622,7 +624,7 @@ public sealed partial class SelfTest
             chat.UpsertAgent(new AgentRunInfo("r1", "Write tests for the report", "worker", false, now.AddSeconds(-50))
             {
                 Route = "Spark 2", Model = "qwen3-coder-30b-a3b", Assignment = "Write tests for the low-stock report", Activity = "edit: tests/StockTests.cs", Steps = 4,
-                PromptTokens = 9_200, CompletionTokens = 1_100,
+                PromptTokens = 9_200, CompletionTokens = 1_100, PlacementReason = "picked",
             });
             chat.UpsertAgent(new AgentRunInfo("r2", "Review the report change", "review", true, now.AddSeconds(-20))
             {
@@ -740,12 +742,12 @@ public sealed partial class SelfTest
             chat.UpsertAgent(new AgentRunInfo("r3", "Write tests for the report", "worker", false, DateTimeOffset.Now.AddSeconds(-50))
             {
                 Route = "Spark 2", Model = "qwen3-coder-30b-a3b", Assignment = "Write tests for the low-stock report", Activity = "edit: tests/StockTests.cs", Steps = 4,
-                PromptTokens = 9_200, CompletionTokens = 1_100,
+                PromptTokens = 9_200, CompletionTokens = 1_100, PlacementReason = "picked",
             });
             chat.UpsertAgent(new AgentRunInfo("r4", "Review the report change", "review", true, DateTimeOffset.Now.AddSeconds(-20))
             {
                 Route = "Kimi Code", Model = "kimi-for-coding", Activity = "read_file: src/StockReport.cs", Steps = 2,
-                Placement = "tried first: Spark 3: didn't answer",
+                PlacementReason = "fallback", Placement = "spark-3 isn't answering (connection refused)",
             });
             var menu = window.SelfTestActivityMenu();
             if (menu.Parent is System.Windows.Controls.Primitives.Popup popup) popup.Child = null;

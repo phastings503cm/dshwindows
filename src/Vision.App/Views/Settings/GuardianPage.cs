@@ -310,6 +310,13 @@ public sealed class GuardianPage : UserControl
             panel.Children.Add(Ui.Text("In use: " + string.Join(", ", routes.Select(r => r.Model + (r.RouteId == active ? " (primary)" : r.SubagentWorker ? " (subagents)" : r.IsBackup ? " (backup)" : ""))), 13.5));
             panel.Children.Add(Ui.Secondary("Each is a route in Settings › AI Models with your Guardian token as its key."));
         }
+        var subagents = Guardian.Models.Where(m => routes.All(r => r.RouteId != GuardianRoutes.LiveRouteId(m.Id)) && Guardian.IsSubagent(m.Id)).ToList();
+        if (subagents.Count > 0)
+        {
+            var line = Ui.Text("Subagent servers: " + string.Join(", ", subagents.Select(m => m.Id)), 13.5);
+            line.ToolTip = "Chats on other models can hand side tasks to these — billed to your organisation's Guardian account.";
+            panel.Children.Add(line);
+        }
         if (Guardian.Models.Count == 0)
         {
             panel.Children.Add(Ui.Secondary(Guardian.Busy ? "Asking Guardian which models you may use…" : "Guardian lists no models for you in this organization."));
@@ -331,16 +338,39 @@ public sealed class GuardianPage : UserControl
                 Content = Ui.Stack(Ui.Text(model.Title, 13), detail.Count == 0 ? null : Ui.Secondary(string.Join(" · ", detail))),
             };
             var value = model;
-            radio.Checked += (_, _) => _chosenModel = value;
+            radio.Checked += (_, _) =>
+            {
+                _chosenModel = value;
+                if (_subagentButton is { } button) button.Content = SubagentButtonText(value);
+            };
             list.Children.Add(radio);
         }
         panel.Children.Add(new ScrollViewer { Content = list, MaxHeight = 220, VerticalScrollBarVisibility = ScrollBarVisibility.Auto });
+        // A Guardian model takes subagents' side tasks without a route of its own: a tick in the Guardian map.
+        _subagentButton = Ui.Button(SubagentButtonText(_chosenModel), ToggleSubagent);
+        _subagentButton.ToolTip = "Chats on other models can hand side tasks to this model — billed to your organisation's Guardian account; needs you signed in.";
         var buttons = Ui.Buttons(
             Ui.Button("Use as my primary model", () => Use(RouteUse.Primary), accent: true),
-            Ui.Button("Use for subagents", () => Use(RouteUse.Subagent)));
+            _subagentButton);
         buttons.Margin = new Thickness(0, 10, 0, 0);
         panel.Children.Add(buttons);
         return Ui.Card(panel);
+    }
+
+    private Button? _subagentButton;
+
+    private string SubagentButtonText(GuardianModel? model) =>
+        model is not null && Guardian.IsSubagent(model.Id) ? "Stop using for subagents" : "Use for subagents";
+
+    private void ToggleSubagent()
+    {
+        if (_chosenModel is not { } model) return;
+        var on = !Guardian.IsSubagent(model.Id);
+        Guardian.SetSubagent(model.Id, on);
+        Guardian.Status = on
+            ? $"{model.Id} through Guardian takes subagents' side tasks for chats on other models — billed to your organisation's Guardian account."
+            : $"{model.Id} through Guardian no longer takes subagents' side tasks.";
+        Refresh();
     }
 
     private void Use(RouteUse use)

@@ -33,6 +33,11 @@ public sealed record ClaudeCodeTurnOptions
     /// <summary>The folder's own Claude Code settings load too — the person trusted it in Claude Code (<see cref="ClaudeCodeTrust"/>);
     /// false = only the person's own (--setting-sources user), so a cloned repository's hooks and MCP servers don't run.</summary>
     public bool ProjectSettings { get; init; }
+    /// <summary>At most this many agentic turns (--max-turns): a subagent job's step budget. Null = Claude Code's own limit.</summary>
+    public int? MaxTurns { get; init; }
+    /// <summary>Keep no session file (--no-session-persistence): a subagent job is one-off, and its session must not appear among
+    /// the person's Claude Code sessions (which the chat import reads).</summary>
+    public bool NoSessionPersistence { get; init; }
 }
 
 public static class ClaudeCodeCommand
@@ -40,7 +45,7 @@ public static class ClaudeCodeCommand
     /// <summary>The flags Vision can drop when an older CLI says it doesn't know them (the turn still works without).</summary>
     public static readonly IReadOnlySet<string> OptionalFlags = new HashSet<string>(StringComparer.Ordinal)
     {
-        "--effort", "--include-partial-messages", "--append-system-prompt", "--add-dir",
+        "--effort", "--include-partial-messages", "--append-system-prompt", "--add-dir", "--max-turns", "--no-session-persistence",
     };
 
     /// <summary>What a one-off can also do without: it runs with no tools in the temp folder, so neither the folder's settings
@@ -118,6 +123,8 @@ public static class ClaudeCodeCommand
         }
         if (o.AppendSystemPrompt is { Length: > 0 } extra) Optional("--append-system-prompt", extra);
         foreach (var dir in o.AddDirs.Where(d => d.Length > 0)) Optional("--add-dir", dir);
+        if (o.MaxTurns is > 0 and var turns) Optional("--max-turns", turns.ToString(System.Globalization.CultureInfo.InvariantCulture));
+        if (o.NoSessionPersistence) Optional("--no-session-persistence");
         return args;
     }
 

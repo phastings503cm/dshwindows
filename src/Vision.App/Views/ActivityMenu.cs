@@ -179,10 +179,13 @@ public sealed class ActivityMenu : UserControl
         var fleet = Host.Fleet.Snapshot();
         if (fleet.Count == 0) return;
         _servers.Children.Add(Ui.Text("Model servers", 11.5, FontWeights.SemiBold, "TextFillColorSecondaryBrush", wrap: false));
-        foreach (var server in fleet)
+        // The enlisted servers, then each chat's own model with subagents on it now.
+        foreach (var server in fleet.Where(s => !s.IsHome).Concat(fleet.Where(s => s.IsHome)))
         {
-            var text = $"{(server.Healthy ? "●" : "○")} {server.Label} — {(server.IsPrimary ? "main" : "subagent server")} · {server.InFlight}/{server.MaxParallel} busy · {server.Completed} done"
-                       + (server.Failed > 0 ? $" · {server.Failed} failed" : "") + (server.Healthy ? "" : " · not answering, skipped for a minute");
+            var text = server.IsHome
+                ? $"{(server.Healthy ? "●" : "○")} {server.Label} — a chat's own model · {server.InFlight}/{server.MaxParallel} busy"
+                : $"{(server.Healthy ? "●" : "○")} {server.Label} — subagents · {server.InFlight}/{server.MaxParallel} busy · {server.Completed} done"
+                  + (server.Failed > 0 ? $" · {server.Failed} failed" : "") + (server.Healthy ? "" : " · not answering, skipped for a minute");
             var line = Ui.Text(text, 11, brushKey: server.Healthy ? "TextFillColorSecondaryBrush" : "SystemFillColorCautionBrush", wrap: false);
             line.TextTrimming = TextTrimming.CharacterEllipsis;
             line.ToolTip = text;
